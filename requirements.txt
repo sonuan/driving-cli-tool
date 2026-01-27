@@ -1,0 +1,14 @@
+# 生产依赖
+click>=8.0.0
+GitPython>=3.1.0
+rich>=10.0.0
+python-dotenv>=0.19.0
+
+# 可选依赖（推荐安装以获得更好的 YAML 解析兼容性）
+# PyYAML>=6.0.0  # skills-sync 命令会自动降级到简化解析器
+
+# 开发依赖
+pytest>=7.0.0
+pytest-cov>=3.0.0
+pytest-mock>=3.6.0
+hypothesis>=6.0.0
