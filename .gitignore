@@ -32,6 +32,9 @@ MANIFEST
 *.manifest
 *.spec
 
+# Internal build scripts (contains internal server config)
+scripts/build-internal.sh
+
 # Unit test / coverage reports
 htmlcov/
 .tox/
