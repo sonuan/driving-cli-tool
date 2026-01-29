@@ -158,6 +158,12 @@ def install(url: str = None):
                     repo.git.submodule("update", "--init", submodule_relative_path)
                     log_success("成功拉取 .driving submodule 内容！")
 
+                    # 如果使用了自定义 URL，保存到 .env 文件
+                    if url:
+                        log_info(f"保存自定义仓库地址到 {git_root}/.env")
+                        update_env_file(git_root, "DRIVING_REPO_URL", url)
+                        log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env 文件")
+
                     # 创建软链接
                     create_symlinks(current_dir, submodule_path)
 
@@ -175,6 +181,13 @@ def install(url: str = None):
                 # 目录包含必要文件，说明已经正确安装
                 # 但仍需检查并创建软链接（处理之前已创建好 .driving 的情况）
                 log_info("检测到 .driving 目录已存在")
+                
+                # 如果使用了自定义 URL，保存到 .env 文件
+                if url:
+                    log_info(f"保存自定义仓库地址到 {git_root}/.env")
+                    update_env_file(git_root, "DRIVING_REPO_URL", url)
+                    log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env 文件")
+                
                 create_symlinks(current_dir, submodule_path)
                 log_success(".driving 已就绪！")
                 return

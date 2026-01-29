@@ -1,10 +1,11 @@
 {
-  "version": "1.0.0",
-  "build_date": "2026-01-27T11:40:47+08:00",
+  "version": "1.0.1",
+  "build_date": "2026-01-29T16:02:59+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
-      "v1.0.0 项目初始化"
+      "添加gitignore部分",
+      "init project"
   ]
 }
