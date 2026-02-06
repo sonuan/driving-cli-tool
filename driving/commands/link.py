@@ -160,8 +160,8 @@ def install(url: str = None):
 
                     # 如果使用了自定义 URL，保存到 .env 文件
                     if url:
-                        log_info(f"保存自定义仓库地址到 {git_root}/.env")
-                        update_env_file(git_root, "DRIVING_REPO_URL", url)
+                        log_info(f"保存自定义仓库地址到 {current_dir}/.env")
+                        update_env_file(current_dir, "DRIVING_REPO_URL", url)
                         log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env 文件")
 
                     # 创建软链接
@@ -184,8 +184,8 @@ def install(url: str = None):
                 
                 # 如果使用了自定义 URL，保存到 .env 文件
                 if url:
-                    log_info(f"保存自定义仓库地址到 {git_root}/.env")
-                    update_env_file(git_root, "DRIVING_REPO_URL", url)
+                    log_info(f"保存自定义仓库地址到 {current_dir}/.env")
+                    update_env_file(current_dir, "DRIVING_REPO_URL", url)
                     log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env 文件")
                 
                 create_symlinks(current_dir, submodule_path)
@@ -217,8 +217,8 @@ def install(url: str = None):
 
         # 如果使用了自定义 URL，保存到 .env 文件
         if url:
-            log_info(f"保存自定义仓库地址到 {git_root}/.env")
-            update_env_file(git_root, "DRIVING_REPO_URL", url)
+            log_info(f"保存自定义仓库地址到 {current_dir}/.env")
+            update_env_file(current_dir, "DRIVING_REPO_URL", url)
             log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env 文件")
 
         # 创建 .driving/.gitignore 文件，忽略 submodules 目录
