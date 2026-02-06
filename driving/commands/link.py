@@ -154,9 +154,43 @@ def install(url: str = None):
                 log_warning("检测到 .driving 目录缺少必要文件，但 .gitmodules 中已配置")
                 log_info("尝试拉取 submodule 内容...")
                 try:
-                    # 使用 git submodule update --init 拉取内容
-                    repo.git.submodule("update", "--init", submodule_relative_path)
-                    log_success("成功拉取 .driving submodule 内容！")
+                    # 先检查 submodule 是否在 Git 索引中
+                    try:
+                        # 尝试获取 submodule 状态
+                        repo.git.ls_files("--stage", submodule_relative_path)
+                        # 如果成功，说明在索引中，可以直接 update
+                        repo.git.submodule("update", "--init", submodule_relative_path)
+                        log_success("成功拉取 .driving submodule 内容！")
+                    except git.exc.GitCommandError:
+                        # 不在索引中，需要先添加
+                        log_info("Submodule 不在 Git 索引中，尝试重新添加...")
+                        
+                        # 从 .gitmodules 读取 URL
+                        gitmodules_content = gitmodules_path.read_text(encoding="utf-8")
+                        import re
+                        # 查找对应 submodule 的 URL
+                        pattern = rf'\[submodule "{re.escape(submodule_relative_path)}"\].*?url\s*=\s*(.+?)(?:\n\[|$)'
+                        match = re.search(pattern, gitmodules_content, re.DOTALL)
+                        
+                        if match:
+                            submodule_url = match.group(1).strip()
+                            log_info(f"从 .gitmodules 读取到 URL: {submodule_url}")
+                            
+                            # 删除空目录
+                            import shutil
+                            shutil.rmtree(submodule_path)
+                            
+                            # 重新添加 submodule
+                            repo.create_submodule(
+                                submodule_relative_path, 
+                                submodule_relative_path, 
+                                url=submodule_url
+                            )
+                            log_success("成功重新添加并拉取 .driving submodule 内容！")
+                        else:
+                            log_error("无法从 .gitmodules 中读取 submodule URL")
+                            log_info("请手动检查 .gitmodules 文件配置")
+                            raise click.Abort()
 
                     # 如果使用了自定义 URL，保存到 .env 文件
                     if url:
@@ -171,6 +205,7 @@ def install(url: str = None):
                 except git.exc.GitCommandError as e:
                     log_error(f"拉取 submodule 内容失败: {e}")
                     log_info("提示：请检查 .gitmodules 文件中的 URL 配置是否正确")
+                    log_info("或者尝试手动删除 .driving 目录后重新执行 install 命令")
                     raise click.Abort()
             elif len(essential_contents) == 0 and not submodule_exists_in_config:
                 # 目录缺少必要文件但 .gitmodules 中未配置，可能是手动创建的目录
