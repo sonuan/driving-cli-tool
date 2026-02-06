@@ -185,23 +185,11 @@ def update(force: bool, yes: bool, url: str = None):
 
     # 如果使用了自定义 URL，保存到 .env 文件
     if url:
-        # 尝试找到项目根目录（当前目录或包含 .git 的目录）
+        # 使用当前运行目录
         current_dir = Path.cwd()
-        project_root = current_dir
 
-        # 尝试找到 Git 根目录
-        try:
-            import git
-
-            from driving.utils.git_helper import find_git_root
-
-            project_root = find_git_root()
-        except:
-            # 如果不在 Git 仓库中，使用当前目录
-            pass
-
-        log_info(f"保存自定义版本文件 URL 到 {project_root}/.env")
-        update_env_file(project_root, "DRIVING_UPDATE_VERSION_URL", url)
+        log_info(f"保存自定义版本文件 URL 到 {current_dir}/.env")
+        update_env_file(current_dir, "DRIVING_UPDATE_VERSION_URL", url)
         log_success(f"已将 DRIVING_UPDATE_VERSION_URL={url} 保存到 .env 文件")
 
     # 获取最新版本信息
