@@ -229,10 +229,64 @@ def install(url: str = None):
 
         # .driving 目录不存在，检查是否在 .gitmodules 中已配置
         if submodule_exists_in_config:
-            log_error(f".gitmodules 中已存在 {submodule_relative_path} 的配置")
-            log_info("请先执行以下命令初始化 submodule：")
-            log_info(f"  git submodule update --init {submodule_relative_path}")
-            raise click.Abort()
+            log_warning(f".gitmodules 中已存在 {submodule_relative_path} 的配置")
+            log_info("正在初始化 submodule...")
+            
+            try:
+                # 如果提供了自定义 URL，先更新 .gitmodules 中的 URL
+                if url:
+                    log_info(f"更新 .gitmodules 中的 URL 为: {url}")
+                    # 读取 .gitmodules
+                    gitmodules_content = gitmodules_path.read_text(encoding="utf-8")
+                    
+                    # 使用正则表达式替换对应 submodule 的 URL
+                    import re
+                    pattern = rf'(\[submodule "{re.escape(submodule_relative_path)}"\].*?url\s*=\s*)(.+?)(\n)'
+                    replacement = rf'\g<1>{url}\g<3>'
+                    new_content = re.sub(pattern, replacement, gitmodules_content, flags=re.DOTALL)
+                    
+                    # 写回 .gitmodules
+                    gitmodules_path.write_text(new_content, encoding="utf-8")
+                    log_info("已更新 .gitmodules 中的 URL")
+                
+                # 执行 git submodule update --init
+                repo.git.submodule("update", "--init", submodule_relative_path)
+                log_success("成功初始化 .driving submodule！")
+                
+                # 如果使用了自定义 URL，保存到 .env 文件
+                if url:
+                    log_info(f"保存自定义仓库地址到 {current_dir}/.env")
+                    update_env_file(current_dir, "DRIVING_REPO_URL", url)
+                    log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env 文件")
+                
+                # 创建 .driving/.gitignore 文件，忽略 submodules 目录
+                gitignore_path = submodule_path / ".gitignore"
+                if not gitignore_path.exists():
+                    gitignore_content = """# 框架仓库目录（本地开发使用，不提交到仓库）
+submodules/
+"""
+                    gitignore_path.write_text(gitignore_content, encoding="utf-8")
+                
+                # 创建软链接
+                create_symlinks(current_dir, submodule_path)
+                
+                log_success(".driving 已就绪！")
+                log_info("")
+                log_info("📝 下一步：")
+                log_info("  1. driving git-list  # 查看可用框架")
+                log_info("  2. driving git-install <framework-name>  # 安装框架")
+                
+                return
+                
+            except git.exc.GitCommandError as e:
+                log_error(f"初始化 submodule 失败: {e}")
+                log_info("提示：请检查 .gitmodules 文件中的 URL 配置是否正确")
+                log_info("或者尝试手动执行：")
+                log_info(f"  git submodule update --init {submodule_relative_path}")
+                raise click.Abort()
+            except Exception as e:
+                log_error(f"初始化 submodule 失败: {e}")
+                raise click.Abort()
 
         log_info(f"正在添加 driving 作为 Git submodule...")
         log_info(f"仓库地址: {repo_url}")
