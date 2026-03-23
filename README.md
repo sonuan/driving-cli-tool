@@ -111,7 +111,7 @@ driving git-install ximage
 ### Driving 配置管理
 
 ```bash
-driving install --url <url>  # 使用自定义框架文档管理仓库地址安装，并自动保存到 .env 文件
+driving install --url <url>  # 使用自定义框架文档管理仓库地址安装，并自动保存到 .env.driving 文件
 driving uninstall            # 从当前目录移除 driving Git submodule
 driving pull                 # 更新配置（标准模式：.driving，本地模式：当前目录）
 driving commit               # 提交修改（标准模式：.driving，本地模式：当前目录）
@@ -119,14 +119,14 @@ driving push                 # 推送修改（标准模式：.driving，本地�
 ```
 
 **参数说明：**
-- `--url`: 自定义 Driving 仓库地址，会自动保存到项目根目录的 `.env` 文件，下次无需再指定
+- `--url`: 自定义 Driving 仓库地址，会自动保存到项目根目录的 `.env.driving` 文件，下次无需再指定
 
 **示例：**
 ```bash
-# 使用自定义框架文档管理仓库地址（会自动保存到 .env）
+# 使用自定义框架文档管理仓库地址（会自动保存到 .env.driving）
 driving install --url https://github.com/your-org/driving
 
-# 下次直接使用，会自动读取 .env 中的配置
+# 下次直接使用，会自动读取 .env.driving 中的配置
 driving pull
 driving commit "update config"
 ```
@@ -183,10 +183,10 @@ driving ide-sync cursor
 - 保留用户自定义的配置文件
 - **自动提取敏感信息**：
   - 自动检测 mcp.json 中的敏感字段（API Key、Token、Secret 等）
-  - 将敏感值提取到项目根目录的 `.env.local` 文件
+  - 将敏感值提取到项目根目录的 `.env` 文件
   - 在 mcp.json 中用环境变量引用替换（如 `${API_KEY}`）
-  - 自动将 `.env.local` 添加到 `.gitignore`，防止敏感信息泄露
-  - `.env` 文件用于非敏感的项目配置，可以提交到仓库
+  - 自动将 `.env` 添加到 `.gitignore`，防止敏感信息泄露
+  - `.env.driving` 文件用于非敏感的项目配置，可以提交到仓库
 
 ### Skills 管理
 
@@ -259,11 +259,11 @@ driving version              # 显示当前版本
 driving version --check      # 检查是否有新版本（使用默认 URL）
 driving version --check --url <url>  # 使用自定义 version.json URL 检查更新
 driving update               # 从服务器更新到最新版本（使用默认 URL：https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/version.json）
-driving update --url <url>   # 使用自定义 version.json URL 更新，并自动保存到 .env 文件
+driving update --url <url>   # 使用自定义 version.json URL 更新，并自动保存到 .env.driving 文件
 ```
 
 **参数说明：**
-- `--url`: 自定义 version.json 文件的完整 URL，会自动保存到项目根目录的 `.env` 文件，下次无需再指定
+- `--url`: 自定义 version.json 文件的完整 URL，会自动保存到项目根目录的 `.env.driving` 文件，下次无需再指定
 
 **示例**：
 ```bash
@@ -276,17 +276,17 @@ driving version --check --url https://raw.githubusercontent.com/sonuan/driving-c
 # 更新到最新版本（使用默认 URL）
 driving update -y
 
-# 使用 driving-cli-tool 的 version.json URL 更新（会自动保存到 .env）
+# 使用 driving-cli-tool 的 version.json URL 更新（会自动保存到 .env.driving）
 driving update --url https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/version.json -y
 
-# 下次直接使用，会自动读取 .env 中的配置
+# 下次直接使用，会自动读取 .env.driving 中的配置
 driving update
 ```
 
 **说明**：
 - `version --check` - 从服务器检查是否有新版本可用
 - `update` - 自动下载并安装最新版本
-- 使用 `--url` 参数时，会自动将配置保存到项目根目录的 `.env` 文件
+- 使用 `--url` 参数时，会自动将配置保存到项目根目录的 `.env.driving` 文件
 - URL 应该是 version.json 文件的完整路径
 - 默认 URL：无（需要用户配置）
 - 支持从服务器分发和更新，方便团队使用
@@ -413,15 +413,15 @@ export DRIVING_REPO_URL="https://github.com/your-org/driving"
 export DRIVING_UPDATE_VERSION_URL="http://your-server.com/path/version.json"
 export DRIVING_DEFAULT_COMMIT_MESSAGE="chore: update driving config"
 
-# 方式 2: 使用 .env 文件
-cp .env.example .env
-# 编辑 .env 文件
-source .env
+# 方式 2: 使用 .env.driving 文件
+cp .env.example .env.driving
+# 编辑 .env.driving 文件
+source .env.driving
 
 # 方式 3: 在命令前直接设置
 DRIVING_REPO_URL=https://github.com/your-org/driving driving install
 
-# 方式 4: 使用命令参数（推荐，会自动保存到 .env）
+# 方式 4: 使用命令参数（推荐，会自动保存到 .env.driving）
 driving install --url https://github.com/your-org/driving
 driving update --url http://your-server.com/path/version.json
 ```
@@ -532,12 +532,12 @@ git init
 
 # 2. 在当前目录添加 driving submodule
 
-# 使用自定义框架文档管理仓库地址（会自动保存到 .env）
+# 使用自定义框架文档管理仓库地址（会自动保存到 .env.driving）
 driving install --url https://github.com/your-org/driving
-# 此命令会自动创建 .env 文件并保存 DRIVING_REPO_URL=https://github.com/your-org/driving
+# 此命令会自动创建 .env.driving 文件并保存 DRIVING_REPO_URL=https://github.com/your-org/driving
 
-# 3. 提交（包括 .env 文件）
-git add .gitmodules .driving .env
+# 3. 提交（包括 .env.driving 文件）
+git add .gitmodules .driving .env.driving
 git commit -m "Initial commit with driving"
 
 # 4. 安装框架
@@ -551,9 +551,9 @@ driving git-list xstatic
 **说明**：
 - `driving install` 会在当前目录创建 `.driving` 目录
 - 如果在子目录执行，`.driving` 会创建在该子目录中
-- 使用 `--url` 参数时，会自动将配置保存到项目根目录的 `.env` 文件
-- `.env` 文件包含项目配置（非敏感信息），建议提交到 Git 仓库
-- 团队成员克隆项目后，会自动使用 `.env` 中的配置
+- 使用 `--url` 参数时，会自动将配置保存到项目根目录的 `.env.driving` 文件
+- `.env.driving` 文件包含项目配置（非敏感信息），建议提交到 Git 仓库
+- 团队成员克隆项目后，会自动使用 `.env.driving` 中的配置
 
 ### 场景 2: 在 driving 仓库本身使用（本地模式）
 
@@ -574,7 +574,7 @@ driving push
 ### 场景 3: 团队成员克隆项目（标准模式）
 
 ```bash
-# 使用自定义框架文档管理仓库地址（如果 .env 已配置 DRIVING_REPO_URL=https://github.com/your-org/driving，可省略url）
+# 使用自定义框架文档管理仓库地址（如果 .env.driving 已配置 DRIVING_REPO_URL=https://github.com/your-org/driving，可省略url）
 driving install --url https://github.com/your-org/driving
 
 # 安装需要的框架
@@ -604,8 +604,8 @@ driving ide-list
 driving ide-sync kiro
 
 # 配置会被复制到项目根目录的 .kiro/ 目录
-# 如果 mcp.json 中包含敏感信息，会自动提取到 .env.local
-# 提交配置到项目（.env.local 会被自动忽略）
+# 如果 mcp.json 中包含敏感信息，会自动提取到 .env
+# 提交配置到项目（.env 会被自动忽略）
 git add .kiro .gitignore
 git commit -m "Add Kiro IDE configuration"
 git push
@@ -629,11 +629,10 @@ git push
 
 执行 `driving ide-sync kiro` 后：
 
-1. 项目根目录生成 `.env.local` 文件（敏感信息）：
+1. 项目根目录生成 `.env` 文件（敏感信息）：
 ```bash
 # IDE 配置环境变量（敏感信息）
 # 此文件包含敏感信息，请勿提交到 Git 仓库
-# 优先级：.env.local > .env
 
 API_KEY=sk-1234567890abcdef
 AUTH_TOKEN=token_xyz
@@ -653,9 +652,9 @@ AUTH_TOKEN=token_xyz
 }
 ```
 
-3. `.env.local` 自动添加到 `.gitignore`，防止泄露
+3. `.env` 自动添加到 `.gitignore`，防止泄露
 
-4. `.env` 文件用于非敏感的项目配置（如 DRIVING_REPO_URL），可以提交到仓库
+4. `.env.driving` 文件用于非敏感的项目配置（如 DRIVING_REPO_URL），可以提交到仓库
 
 ## 故障排除
 
@@ -663,7 +662,7 @@ AUTH_TOKEN=token_xyz
 
 ```bash
 # 解决
-# 如果 .env 已配置 DRIVING_REPO_URL=https://github.com/your-org/driving，可省略url
+# 如果 .env.driving 已配置 DRIVING_REPO_URL=https://github.com/your-org/driving，可省略url
 driving install --url https://github.com/your-org/driving
 ```
 

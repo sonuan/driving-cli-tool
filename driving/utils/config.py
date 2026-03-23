@@ -11,7 +11,7 @@ load_dotenv(".env.driving")
 
 
 def update_env_file(project_root: Path, key: str, value: str):
-    """更新项目根目录的 .env 文件
+    """更新项目根目录的 .env.driving 文件
 
     Args:
         project_root: 项目根目录

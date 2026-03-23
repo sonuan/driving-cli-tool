@@ -104,12 +104,12 @@ def _process_mcp_json(file_path: Path, target_dir: Path) -> Set[str]:
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(processed_data, f, indent=2, ensure_ascii=False)
 
-        # 更新 .env.local 文件（敏感信息）
-        env_local_file = target_dir / ".env.local"
+        # 更新 .env 文件（敏感信息）
+        env_local_file = target_dir / ".env"
         existing_env = {}
 
         if env_local_file.exists():
-            # 读取现有的 .env.local 文件
+            # 读取现有的 .env 文件
             with open(env_local_file, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
@@ -120,11 +120,10 @@ def _process_mcp_json(file_path: Path, target_dir: Path) -> Set[str]:
         # 合并新的环境变量
         existing_env.update(env_vars)
 
-        # 写入 .env.local 文件
+        # 写入 .env 文件
         with open(env_local_file, "w", encoding="utf-8") as f:
             f.write("# IDE 配置环境变量（敏感信息）\n")
-            f.write("# 此文件包含敏感信息，请勿提交到 Git 仓库\n")
-            f.write("# 优先级：.env.local > .env\n\n")
+            f.write("# 此文件包含敏感信息，请勿提交到 Git 仓库\n\n")
             for key, value in sorted(existing_env.items()):
                 f.write(f"{key}={value}\n")
 
@@ -135,14 +134,14 @@ def _process_mcp_json(file_path: Path, target_dir: Path) -> Set[str]:
         if gitignore_file.exists():
             gitignore_content = gitignore_file.read_text(encoding="utf-8")
 
-        # 确保 .env.local 在 .gitignore 中
-        if ".env.local" not in gitignore_content:
-            # 添加 .env.local 到 .gitignore
+        # 确保 .env 在 .gitignore 中
+        if ".env" not in gitignore_content:
+            # 添加 .env 到 .gitignore
             if gitignore_content and not gitignore_content.endswith("\n"):
                 gitignore_content += "\n"
-            gitignore_content += "\n# IDE 配置环境变量文件（敏感信息）\n.env.local\n"
+            gitignore_content += "\n# IDE 配置环境变量文件（敏感信息）\n.env\n"
             gitignore_file.write_text(gitignore_content, encoding="utf-8")
-            log_info("已将 .env.local 添加到 .gitignore")
+            log_info("已将 .env 添加到 .gitignore")
 
         return set(env_vars.keys())
 
@@ -251,7 +250,7 @@ def ide_sync(ide_name: str):
 
     将 install 目录下对应的 IDE 配置增量同步到当前工作目录。
     只会覆盖同名文件，不会删除目标目录中的其他文件。
-    自动提取 mcp.json 中的敏感信息（API Key、Token 等）到 .env.local 文件。
+    自动提取 mcp.json 中的敏感信息（API Key、Token 等）到 .env 文件。
 
     Args:
         ide_name: IDE 名称（如 kiro、claude、cursor）
@@ -300,9 +299,9 @@ def ide_sync(ide_name: str):
         log_info(f"新增文件: {added_count}, 更新文件: {updated_count}, 跳过文件: {skipped_count}")
 
         if env_vars:
-            log_success(f"已提取 {len(env_vars)} 个敏感环境变量到 {Path.cwd()}/.env.local")
-            log_warning("请检查 .env.local 文件并填写正确的值")
-            log_info("提示：.env.local 包含敏感信息，已自动添加到 .gitignore")
+            log_success(f"已提取 {len(env_vars)} 个敏感环境变量到 {Path.cwd()}/.env")
+            log_warning("请检查 .env 文件并填写正确的值")
+            log_info("提示：.env 包含敏感信息，已自动添加到 .gitignore")
 
         if target_dir.exists():
             # 统计目标目录中的其他文件
