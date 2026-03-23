@@ -88,7 +88,7 @@ def version(check: bool, url: str = None):
     """显示当前版本或检查更新
 
     参数：
-        --url: 自定义 version.json 文件的完整 URL（优先级：参数 > 环境变量 > .env 文件 > 默认值）
+        --url: 自定义 version.json 文件的完整 URL（优先级：参数 > 环境变量 > .env.driving 文件 > 默认值）
 
     示例：
         driving version              # 显示当前版本
@@ -102,7 +102,7 @@ def version(check: bool, url: str = None):
         log_info(f"Driving CLI Tool 版本: {current_version}")
         return
 
-    # 确定使用的 version.json URL（优先级：命令行参数 > 环境变量 > .env 文件 > 默认值）
+    # 确定使用的 version.json URL（优先级：命令行参数 > 环境变量 > .env.driving 文件 > 默认值）
     version_url = url if url else DRIVING_UPDATE_VERSION_URL
 
     # 检查更新
@@ -142,26 +142,26 @@ def version(check: bool, url: str = None):
 @click.option("--force", is_flag=True, help="强制重新安装当前版本")
 @click.option("--yes", "-y", is_flag=True, help="跳过确认提示")
 @click.option(
-    "--url", default=None, help="自定义 version.json 文件的完整 URL（自动保存到 .env 文件）"
+    "--url", default=None, help="自定义 version.json 文件的完整 URL（自动保存到 .env.driving 文件）"
 )
 def update(force: bool, yes: bool, url: str = None):
     """从服务器更新 driving CLI 工具
 
     参数：
-        --url: 自定义 version.json 文件的完整 URL，会自动保存到项目根目录的 .env 文件
-               （优先级：参数 > 环境变量 > .env 文件 > 默认值）
+        --url: 自定义 version.json 文件的完整 URL，会自动保存到项目根目录的 .env.driving 文件
+               （优先级：参数 > 环境变量 > .env.driving 文件 > 默认值）
 
     配置方式：
         1. 使用 --url 参数（推荐，会自动保存）：
            driving update --url http://your-server.com/path/version.json
         2. 设置环境变量 DRIVING_UPDATE_VERSION_URL：
            export DRIVING_UPDATE_VERSION_URL=http://your-server.com/path/version.json
-        3. 在项目根目录创建 .env 文件并添加：
+        3. 在项目根目录创建 .env.driving 文件并添加：
            DRIVING_UPDATE_VERSION_URL=http://your-server.com/path/version.json
         4. 默认值：https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/version.json
 
     注意：
-    - 使用 --url 参数时，会自动将地址保存到 .env 文件，下次无需再指定
+    - 使用 --url 参数时，会自动将地址保存到 .env.driving 文件，下次无需再指定
     - URL 应该是 version.json 文件的完整路径
 
     示例：
@@ -176,21 +176,21 @@ def update(force: bool, yes: bool, url: str = None):
     import sys
     import tempfile
 
-    # 确定使用的 version.json URL（优先级：命令行参数 > 环境变量 > .env 文件 > 默认值）
+    # 确定使用的 version.json URL（优先级：命令行参数 > 环境变量 > .env.driving 文件 > 默认值）
     version_url = url if url else DRIVING_UPDATE_VERSION_URL
 
     current_version = get_current_version()
     log_info(f"当前版本: {current_version}")
     log_info(f"版本文件: {version_url}")
 
-    # 如果使用了自定义 URL，保存到 .env 文件
+    # 如果使用了自定义 URL，保存到 .env.driving 文件
     if url:
         # 使用当前运行目录
         current_dir = Path.cwd()
 
-        log_info(f"保存自定义版本文件 URL 到 {current_dir}/.env")
+        log_info(f"保存自定义版本文件 URL 到 {current_dir}/.env.driving")
         update_env_file(current_dir, "DRIVING_UPDATE_VERSION_URL", url)
-        log_success(f"已将 DRIVING_UPDATE_VERSION_URL={url} 保存到 .env 文件")
+        log_success(f"已将 DRIVING_UPDATE_VERSION_URL={url} 保存到 .env.driving 文件")
 
     # 获取最新版本信息
     version_info = fetch_version_info(version_url)

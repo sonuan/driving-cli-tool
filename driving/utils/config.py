@@ -6,8 +6,8 @@ from pathlib import Path
 import git
 from dotenv import load_dotenv
 
-# 加载 .env 文件（从当前目录或父目录查找）
-load_dotenv()
+# 加载 .env.driving 文件（从当前目录或父目录查找）
+load_dotenv(".env.driving")
 
 
 def update_env_file(project_root: Path, key: str, value: str):
@@ -20,10 +20,10 @@ def update_env_file(project_root: Path, key: str, value: str):
     """
     from driving.utils.logger import log_info, log_warning
 
-    env_file = project_root / ".env"
+    env_file = project_root / ".env.driving"
     existing_env = {}
 
-    # 读取现有的 .env 文件
+    # 读取现有的 .env.driving 文件
     if env_file.exists():
         with open(env_file, "r", encoding="utf-8") as f:
             for line in f:
@@ -35,22 +35,22 @@ def update_env_file(project_root: Path, key: str, value: str):
     # 更新或添加新的环境变量
     existing_env[key] = value
 
-    # 写入 .env 文件
+    # 写入 .env.driving 文件
     with open(env_file, "w", encoding="utf-8") as f:
         f.write("# Driving CLI 配置\n")
         f.write("# 此文件包含项目配置，可以提交到 Git 仓库\n\n")
         for k, v in sorted(existing_env.items()):
             f.write(f"{k}={v}\n")
 
-    # 确保 .env 不在 .gitignore 中（因为这是项目配置，不是敏感信息）
+    # 确保 .env.driving 不在 .gitignore 中（因为这是项目配置，不是敏感信息）
     gitignore_file = project_root / ".gitignore"
     if gitignore_file.exists():
         gitignore_content = gitignore_file.read_text(encoding="utf-8")
-        # 如果 .gitignore 中有 .env，给出提示
-        if ".env" in gitignore_content.split("\n"):
-            log_warning("检测到 .gitignore 中包含 .env")
-            log_info("提示：Driving 配置是项目配置（非敏感信息），建议将 .env 提交到仓库")
-            log_info("如需提交，请从 .gitignore 中移除 .env")
+        # 如果 .gitignore 中有 .env.driving，给出提示
+        if ".env.driving" in gitignore_content.split("\n"):
+            log_warning("检测到 .gitignore 中包含 .env.driving")
+            log_info("提示：Driving 配置是项目配置（非敏感信息），建议将 .env.driving 提交到仓库")
+            log_info("如需提交，请从 .gitignore 中移除 .env.driving")
 
 
 # ==================== 可配置项 ====================
@@ -61,9 +61,9 @@ def update_env_file(project_root: Path, key: str, value: str):
 DRIVING_REPO_URL = os.getenv("DRIVING_REPO_URL")
 
 # 更新服务器配置 - version.json 文件的完整 URL
-# 优先级：环境变量 > .env 文件 > 默认值
+# 优先级：环境变量 > .env.driving 文件 > 默认值
 # 示例：export DRIVING_UPDATE_VERSION_URL="https://your-server.com/path/version.json"
-# 或在 .env 文件中添加：DRIVING_UPDATE_VERSION_URL=https://your-server.com/path/version.json
+# 或在 .env.driving 文件中添加：DRIVING_UPDATE_VERSION_URL=https://your-server.com/path/version.json
 DRIVING_UPDATE_VERSION_URL = os.getenv(
     "DRIVING_UPDATE_VERSION_URL",
     "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/version.json"

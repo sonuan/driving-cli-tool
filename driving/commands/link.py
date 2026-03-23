@@ -61,7 +61,7 @@ def create_symlinks(current_dir: Path, submodule_path: Path):
 
 
 @click.command()
-@click.option("--url", default=None, help="自定义 Driving 仓库地址（自动保存到 .env 文件）")
+@click.option("--url", default=None, help="自定义 Driving 仓库地址（自动保存到 .env.driving 文件）")
 def install(url: str = None):
     """在当前目录添加 driving 作为 Git submodule
 
@@ -71,12 +71,12 @@ def install(url: str = None):
     框架仓库将安装到 .driving/submodules/ 目录中。
 
     参数：
-        --url: 自定义 Driving 仓库地址，会自动保存到项目根目录的 .env 文件
+        --url: 自定义 Driving 仓库地址，会自动保存到项目根目录的 .env.driving 文件
 
     注意：
     - 当前目录必须在 Git 仓库中
     - 如果当前目录存在 gitlist.json 文件，则为本地模式，不需要执行此命令
-    - 使用 --url 参数时，会自动将 DRIVING_REPO_URL 保存到 .env 文件，下次无需再指定
+    - 使用 --url 参数时，会自动将 DRIVING_REPO_URL 保存到 .env.driving 文件，下次无需再指定
 
     示例：
         driving install
@@ -94,7 +94,7 @@ def install(url: str = None):
             log_info("     driving install --url https://github.com/your-org/driving")
             log_info("  2. 设置环境变量 DRIVING_REPO_URL：")
             log_info("     export DRIVING_REPO_URL=https://github.com/your-org/driving")
-            log_info("  3. 在项目根目录创建 .env 文件并添加：")
+            log_info("  3. 在项目根目录创建 .env.driving 文件并添加：")
             log_info("     DRIVING_REPO_URL=https://github.com/your-org/driving")
             raise click.Abort()
 
@@ -192,11 +192,11 @@ def install(url: str = None):
                             log_info("请手动检查 .gitmodules 文件配置")
                             raise click.Abort()
 
-                    # 如果使用了自定义 URL，保存到 .env 文件
+                    # 如果使用了自定义 URL，保存到 .env.driving 文件
                     if url:
-                        log_info(f"保存自定义仓库地址到 {current_dir}/.env")
+                        log_info(f"保存自定义仓库地址到 {current_dir}/.env.driving")
                         update_env_file(current_dir, "DRIVING_REPO_URL", url)
-                        log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env 文件")
+                        log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env.driving 文件")
 
                     # 创建软链接
                     create_symlinks(current_dir, submodule_path)
@@ -217,11 +217,11 @@ def install(url: str = None):
                 # 但仍需检查并创建软链接（处理之前已创建好 .driving 的情况）
                 log_info("检测到 .driving 目录已存在")
                 
-                # 如果使用了自定义 URL，保存到 .env 文件
+                # 如果使用了自定义 URL，保存到 .env.driving 文件
                 if url:
-                    log_info(f"保存自定义仓库地址到 {current_dir}/.env")
+                    log_info(f"保存自定义仓库地址到 {current_dir}/.env.driving")
                     update_env_file(current_dir, "DRIVING_REPO_URL", url)
-                    log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env 文件")
+                    log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env.driving 文件")
                 
                 create_symlinks(current_dir, submodule_path)
                 log_success(".driving 已就绪！")
@@ -253,11 +253,11 @@ def install(url: str = None):
                 repo.git.submodule("update", "--init", submodule_relative_path)
                 log_success("成功初始化 .driving submodule！")
                 
-                # 如果使用了自定义 URL，保存到 .env 文件
+                # 如果使用了自定义 URL，保存到 .env.driving 文件
                 if url:
-                    log_info(f"保存自定义仓库地址到 {current_dir}/.env")
+                    log_info(f"保存自定义仓库地址到 {current_dir}/.env.driving")
                     update_env_file(current_dir, "DRIVING_REPO_URL", url)
-                    log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env 文件")
+                    log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env.driving 文件")
                 
                 # 创建 .driving/.gitignore 文件，忽略 submodules 目录
                 gitignore_path = submodule_path / ".gitignore"
@@ -304,11 +304,11 @@ submodules/
         # 添加 submodule
         repo.create_submodule(submodule_relative_path, submodule_relative_path, url=repo_url)
 
-        # 如果使用了自定义 URL，保存到 .env 文件
+        # 如果使用了自定义 URL，保存到 .env.driving 文件
         if url:
-            log_info(f"保存自定义仓库地址到 {current_dir}/.env")
+            log_info(f"保存自定义仓库地址到 {current_dir}/.env.driving")
             update_env_file(current_dir, "DRIVING_REPO_URL", url)
-            log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env 文件")
+            log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env.driving 文件")
 
         # 创建 .driving/.gitignore 文件，忽略 submodules 目录
         gitignore_path = submodule_path / ".gitignore"
