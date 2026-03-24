@@ -1,63 +1,13 @@
 """Git Submodule 管理命令"""
 
-import os
 from pathlib import Path
 
 import click
 import git
 
-from driving.utils.config import DRIVING_REPO_URL, is_local_mode, update_env_file
+from driving.utils.config import DRIVING_REPO_URL, update_env_file
 from driving.utils.git_helper import find_git_root
 from driving.utils.logger import log_error, log_info, log_success, log_warning
-
-
-def create_symlinks(current_dir: Path, submodule_path: Path):
-    """创建软链接
-
-    Args:
-        current_dir: 当前工作目录
-        submodule_path: ai-driving 目录路径
-    """
-    # 定义需要创建的软链接
-    symlinks = [
-        ("ai-docs", submodule_path / "ai-docs"),  # 文件夹
-    ]
-
-    log_info("正在创建软链接...")
-
-    for link_name, target_path in symlinks:
-        link_path = current_dir / link_name
-
-        # 检查目标是否存在
-        if not target_path.exists():
-            log_warning(f"目标不存在，跳过: {target_path}")
-            continue
-
-        # 如果软链接已存在
-        if link_path.exists() or link_path.is_symlink():
-            # 检查是否已经是正确的软链接
-            if link_path.is_symlink() and link_path.resolve() == target_path.resolve():
-                log_info(f"软链接已存在: {link_name} -> {target_path.relative_to(current_dir)}")
-                continue
-            else:
-                # 如果是文件/目录或错误的软链接，先删除
-                log_warning(f"检测到已存在的 {link_name}，将被替换为软链接")
-                if link_path.is_symlink():
-                    link_path.unlink()
-                elif link_path.is_dir():
-                    import shutil
-
-                    shutil.rmtree(link_path)
-                else:
-                    link_path.unlink()
-
-        # 创建软链接（使用相对路径）
-        try:
-            relative_target = os.path.relpath(target_path, current_dir)
-            os.symlink(relative_target, link_path)
-            log_success(f"创建软链接: {link_name} -> {relative_target}")
-        except Exception as e:
-            log_error(f"创建软链接失败 {link_name}: {e}")
 
 
 @click.command()
@@ -198,9 +148,6 @@ def install(url: str = None):
                         update_env_file(current_dir, "DRIVING_REPO_URL", url)
                         log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env.driving 文件")
 
-                    # 创建软链接
-                    create_symlinks(current_dir, submodule_path)
-
                     return
                 except git.exc.GitCommandError as e:
                     log_error(f"拉取 submodule 内容失败: {e}")
@@ -223,7 +170,6 @@ def install(url: str = None):
                     update_env_file(current_dir, "DRIVING_REPO_URL", url)
                     log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env.driving 文件")
                 
-                create_symlinks(current_dir, submodule_path)
                 log_success("ai-driving 已就绪！")
                 return
 
@@ -266,9 +212,6 @@ def install(url: str = None):
 submodules/
 """
                     gitignore_path.write_text(gitignore_content, encoding="utf-8")
-                
-                # 创建软链接
-                create_symlinks(current_dir, submodule_path)
                 
                 log_success("ai-driving 已就绪！")
                 log_info("")
@@ -319,14 +262,10 @@ submodules/
 
         log_success("Git submodule 添加成功！")
 
-        # 创建软链接
-        create_symlinks(current_dir, submodule_path)
-
         log_info("")
         log_info("📁 目录结构：")
         log_info(f"  {submodule_relative_path}/              # Driving 配置（Git submodule）")
         log_info(f"  {submodule_relative_path}/submodules/   # 框架仓库（本地，不提交）")
-        log_info(f"  ai-docs -> {submodule_relative_path}/ai-docs  # 软链接")
         log_info("")
         log_info("📝 下一步：")
         log_info(f"  1. git add .gitmodules {submodule_relative_path}")
