@@ -18,7 +18,7 @@ from driving.utils.logger import log_error, log_info, log_success, log_warning
 def pull():
     """更新 Driving 配置
 
-    标准模式：从远程仓库拉取 .driving 目录的最新更新
+    标准模式：从远程仓库拉取 ai-driving 目录的最新更新
     本地模式：从远程仓库拉取当前目录的最新更新
     """
     try:
@@ -41,7 +41,7 @@ def pull():
         if local_mode:
             log_info("正在更新当前仓库...")
         else:
-            log_info("正在更新 .driving 仓库...")
+            log_info("正在更新 ai-driving 仓库...")
 
         repo = git.Repo(driving_dir)
 
@@ -63,7 +63,7 @@ def pull():
             log_info("")
             log_info("请先处理这些修改：")
             log_info("  1. 提交修改: driving commit '提交信息'")
-            log_info("  2. 或者放弃修改: cd .driving && git reset --hard && git clean -fd")
+            log_info("  2. 或者放弃修改: cd ai-driving && git reset --hard && git clean -fd")
             raise click.Abort()
 
         # 检查是否有远程仓库
@@ -108,10 +108,10 @@ def pull():
 
         # 提供更详细的错误提示
         if "fatal: couldn't find remote ref" in error_msg:
-            log_info("提示：远程分支不存在，请检查 .driving 目录的 git 配置")
+            log_info("提示：远程分支不存在，请检查 ai-driving 目录的 git 配置")
         elif "fatal: refusing to merge unrelated histories" in error_msg:
             log_info("提示：尝试使用 --allow-unrelated-histories 选项")
-            log_info("  cd .driving && git pull --allow-unrelated-histories")
+            log_info("  cd ai-driving && git pull --allow-unrelated-histories")
         elif "error: Your local changes" in error_msg:
             log_info("提示：存在本地修改，请先提交或放弃修改")
         elif "You are not currently on a branch" in error_msg:
@@ -135,7 +135,7 @@ def pull():
 def commit(message: str):
     """提交 Driving 配置的修改
 
-    标准模式：将 .driving 目录中的修改提交到本地仓库
+    标准模式：将 ai-driving 目录中的修改提交到本地仓库
     本地模式：将当前目录中的修改提交到本地仓库
 
     Args:
@@ -161,7 +161,7 @@ def commit(message: str):
         if local_mode:
             log_info("正在提交当前目录的修改...")
         else:
-            log_info("正在提交 .driving 的修改...")
+            log_info("正在提交 ai-driving 的修改...")
 
         repo = git.Repo(driving_dir)
         repo.git.add(A=True)
@@ -180,7 +180,7 @@ def commit(message: str):
 def push():
     """推送 Driving 配置到远程仓库
 
-    标准模式：将 .driving 目录的本地提交推送到远程仓库
+    标准模式：将 ai-driving 目录的本地提交推送到远程仓库
     本地模式：将当前目录的本地提交推送到远程仓库
     如果遇到冲突，需要先执行 'driving pull' 并解决冲突
     """

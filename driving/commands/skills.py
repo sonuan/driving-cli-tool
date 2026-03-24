@@ -113,8 +113,8 @@ def find_skills_dir() -> Optional[Path]:
             return skills_dir
         return None
 
-    # 标准模式：在 .driving 目录查找
-    driving_dir = current_dir / ".driving"
+    # 标准模式：在 ai-driving 目录查找
+    driving_dir = current_dir / "ai-driving"
     if driving_dir.exists():
         skills_dir = driving_dir / "ai-docs" / "skills"
         if skills_dir.exists():
@@ -362,7 +362,7 @@ def skills_sync():
     然后更新 AGENTS.md 文件中的 <skills_system> 部分，保留其他内容不变。
 
     支持两种工作模式：
-    - 标准模式：从 .driving/ai-docs/skills 读取技能，更新根目录的 AGENTS.md
+    - 标准模式：从 ai-driving/ai-docs/skills 读取技能，更新根目录的 AGENTS.md
     - 本地模式：从 ai-docs/skills 读取技能，更新根目录的 AGENTS.md
     """
     try:

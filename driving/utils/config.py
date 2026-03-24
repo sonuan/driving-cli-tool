@@ -105,7 +105,7 @@ else:
 def _find_project_root() -> Path:
     """查找项目根目录
 
-    从当前目录向上查找，直到找到包含 .driving 目录或 gitlist.json 文件的目录。
+    从当前目录向上查找，直到找到包含 ai-driving 目录或 gitlist.json 文件的目录。
     如果都找不到，返回当前目录。
 
     Returns:
@@ -113,14 +113,14 @@ def _find_project_root() -> Path:
     """
     current = Path.cwd()
 
-    # 向上查找，直到找到 .driving 或 gitlist.json
+    # 向上查找，直到找到 ai-driving 或 gitlist.json
     while current != current.parent:
-        if (current / ".driving").exists() or (current / "gitlist.json").exists():
+        if (current / "ai-driving").exists() or (current / "gitlist.json").exists():
             return current
         current = current.parent
 
     # 检查根目录
-    if (current / ".driving").exists() or (current / "gitlist.json").exists():
+    if (current / "ai-driving").exists() or (current / "gitlist.json").exists():
         return current
 
     # 都找不到，返回当前工作目录
@@ -131,7 +131,7 @@ def is_local_mode() -> bool:
     """判断是否为本地模式（项目根目录存在 gitlist.json）
 
     Returns:
-        bool: True 表示本地模式，False 表示标准模式（使用 .driving 目录）
+        bool: True 表示本地模式，False 表示标准模式（使用 ai-driving 目录）
     """
     project_root = _find_project_root()
     return (project_root / "gitlist.json").exists()
@@ -141,12 +141,12 @@ def get_driving_dir() -> Path:
     """获取 driving 目录路径
 
     Returns:
-        Path: 本地模式返回项目根目录，标准模式返回 .driving 目录
+        Path: 本地模式返回项目根目录，标准模式返回 ai-driving 目录
     """
     project_root = _find_project_root()
     if is_local_mode():
         return project_root
-    return project_root / ".driving"
+    return project_root / "ai-driving"
 
 
 def get_gitlist_file() -> Path:
@@ -194,25 +194,25 @@ def get_framework_base_dir() -> Path:
     """获取框架仓库存储目录
 
     Returns:
-        Path: 本地模式返回 submodules 目录，标准模式返回 .driving/submodules 目录
+        Path: 本地模式返回 submodules 目录，标准模式返回 ai-driving/submodules 目录
     """
     project_root = _find_project_root()
     if is_local_mode():
         return project_root / "submodules"
-    return project_root / ".driving" / "submodules"
+    return project_root / "ai-driving" / "submodules"
 
 
 def check_environment() -> tuple[bool, str]:
     """检查运行环境是否正确配置
 
-    检查项目根目录是否存在 .driving 目录或 gitlist.json 文件。
+    检查项目根目录是否存在 ai-driving 目录或 gitlist.json 文件。
     如果都不存在，说明环境未配置。
 
     Returns:
         tuple[bool, str]: (是否配置正确, 错误信息)
     """
     project_root = _find_project_root()
-    has_driving = (project_root / ".driving").exists()
+    has_driving = (project_root / "ai-driving").exists()
     has_gitlist = (project_root / "gitlist.json").exists()
 
     if not has_driving and not has_gitlist:
@@ -220,8 +220,8 @@ def check_environment() -> tuple[bool, str]:
             "项目根目录未配置 driving 环境。\n"
             f"项目根目录: {project_root}\n"
             "请执行以下操作之一：\n"
-            "  1. 执行 'driving install' 安装 .driving submodule\n"
-            "  2. 切换到项目根目录（包含 .driving 或 gitlist.json 的目录）"
+            "  1. 执行 'driving install' 安装 ai-driving submodule\n"
+            "  2. 切换到项目根目录（包含 ai-driving 或 gitlist.json 的目录）"
         )
         return False, error_msg
 

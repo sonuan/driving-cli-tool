@@ -16,7 +16,7 @@ def create_symlinks(current_dir: Path, submodule_path: Path):
 
     Args:
         current_dir: 当前工作目录
-        submodule_path: .driving 目录路径
+        submodule_path: ai-driving 目录路径
     """
     # 定义需要创建的软链接
     symlinks = [
@@ -65,10 +65,10 @@ def create_symlinks(current_dir: Path, submodule_path: Path):
 def install(url: str = None):
     """在当前目录添加 driving 作为 Git submodule
 
-    将 driving 仓库作为 Git submodule 添加到当前目录的 .driving 目录。
+    将 driving 仓库作为 Git submodule 添加到当前目录的 ai-driving 目录。
     这样可以在项目中访问配置和文档，并且可以被 Git 追踪。
 
-    框架仓库将安装到 .driving/submodules/ 目录中。
+    框架仓库将安装到 ai-driving/submodules/ 目录中。
 
     参数：
         --url: 自定义 Driving 仓库地址，会自动保存到项目根目录的 .env.driving 文件
@@ -116,29 +116,29 @@ def install(url: str = None):
             raise click.Abort()
 
         repo = git.Repo(git_root)
-        submodule_path = current_dir / ".driving"
+        submodule_path = current_dir / "ai-driving"
 
         # 计算相对于 Git 仓库根目录的相对路径
         try:
             relative_path = current_dir.relative_to(git_root)
             submodule_relative_path = (
-                str(relative_path / ".driving") if str(relative_path) != "." else ".driving"
+                str(relative_path / "ai-driving") if str(relative_path) != "." else "ai-driving"
             )
         except ValueError:
             # 如果当前目录不在 Git 根目录下（理论上不会发生）
-            submodule_relative_path = ".driving"
+            submodule_relative_path = "ai-driving"
 
-        # 检查 .gitmodules 中是否已配置 .driving submodule
+        # 检查 .gitmodules 中是否已配置 ai-driving submodule
         gitmodules_path = git_root / ".gitmodules"
         submodule_exists_in_config = False
 
         if gitmodules_path.exists():
             gitmodules_content = gitmodules_path.read_text(encoding="utf-8")
-            # 检查是否包含当前路径的 .driving 配置
+            # 检查是否包含当前路径的 ai-driving 配置
             if f'[submodule "{submodule_relative_path}"]' in gitmodules_content:
                 submodule_exists_in_config = True
 
-        # 检查 .driving 是否已存在
+        # 检查 ai-driving 是否已存在
         if submodule_path.exists():
             # 检查是否包含必要的文件（gitlist.json 或 ai-docs 等）
             contents = list(submodule_path.iterdir())
@@ -151,7 +151,7 @@ def install(url: str = None):
 
             if len(essential_contents) == 0 and submodule_exists_in_config:
                 # 目录缺少必要文件且 .gitmodules 中已配置，尝试通过 git submodule update 拉取内容
-                log_warning("检测到 .driving 目录缺少必要文件，但 .gitmodules 中已配置")
+                log_warning("检测到 ai-driving 目录缺少必要文件，但 .gitmodules 中已配置")
                 log_info("尝试拉取 submodule 内容...")
                 try:
                     # 先检查 submodule 是否在 Git 索引中
@@ -160,7 +160,7 @@ def install(url: str = None):
                         repo.git.ls_files("--stage", submodule_relative_path)
                         # 如果成功，说明在索引中，可以直接 update
                         repo.git.submodule("update", "--init", submodule_relative_path)
-                        log_success("成功拉取 .driving submodule 内容！")
+                        log_success("成功拉取 ai-driving submodule 内容！")
                     except git.exc.GitCommandError:
                         # 不在索引中，需要先添加
                         log_info("Submodule 不在 Git 索引中，尝试重新添加...")
@@ -186,7 +186,7 @@ def install(url: str = None):
                                 submodule_relative_path, 
                                 url=submodule_url
                             )
-                            log_success("成功重新添加并拉取 .driving submodule 内容！")
+                            log_success("成功重新添加并拉取 ai-driving submodule 内容！")
                         else:
                             log_error("无法从 .gitmodules 中读取 submodule URL")
                             log_info("请手动检查 .gitmodules 文件配置")
@@ -205,17 +205,17 @@ def install(url: str = None):
                 except git.exc.GitCommandError as e:
                     log_error(f"拉取 submodule 内容失败: {e}")
                     log_info("提示：请检查 .gitmodules 文件中的 URL 配置是否正确")
-                    log_info("或者尝试手动删除 .driving 目录后重新执行 install 命令")
+                    log_info("或者尝试手动删除 ai-driving 目录后重新执行 install 命令")
                     raise click.Abort()
             elif len(essential_contents) == 0 and not submodule_exists_in_config:
                 # 目录缺少必要文件但 .gitmodules 中未配置，可能是手动创建的目录
-                log_error("当前目录存在 .driving 目录，但缺少必要文件且 .gitmodules 中未配置")
-                log_info("请先删除该目录后重试：rm -rf .driving")
+                log_error("当前目录存在 ai-driving 目录，但缺少必要文件且 .gitmodules 中未配置")
+                log_info("请先删除该目录后重试：rm -rf ai-driving")
                 raise click.Abort()
             else:
                 # 目录包含必要文件，说明已经正确安装
-                # 但仍需检查并创建软链接（处理之前已创建好 .driving 的情况）
-                log_info("检测到 .driving 目录已存在")
+                # 但仍需检查并创建软链接（处理之前已创建好 ai-driving 的情况）
+                log_info("检测到 ai-driving 目录已存在")
                 
                 # 如果使用了自定义 URL，保存到 .env.driving 文件
                 if url:
@@ -224,10 +224,10 @@ def install(url: str = None):
                     log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env.driving 文件")
                 
                 create_symlinks(current_dir, submodule_path)
-                log_success(".driving 已就绪！")
+                log_success("ai-driving 已就绪！")
                 return
 
-        # .driving 目录不存在，检查是否在 .gitmodules 中已配置
+        # ai-driving 目录不存在，检查是否在 .gitmodules 中已配置
         if submodule_exists_in_config:
             log_warning(f".gitmodules 中已存在 {submodule_relative_path} 的配置")
             log_info("正在初始化 submodule...")
@@ -251,7 +251,7 @@ def install(url: str = None):
                 
                 # 执行 git submodule update --init
                 repo.git.submodule("update", "--init", submodule_relative_path)
-                log_success("成功初始化 .driving submodule！")
+                log_success("成功初始化 ai-driving submodule！")
                 
                 # 如果使用了自定义 URL，保存到 .env.driving 文件
                 if url:
@@ -259,7 +259,7 @@ def install(url: str = None):
                     update_env_file(current_dir, "DRIVING_REPO_URL", url)
                     log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env.driving 文件")
                 
-                # 创建 .driving/.gitignore 文件，忽略 submodules 目录
+                # 创建 ai-driving/.gitignore 文件，忽略 submodules 目录
                 gitignore_path = submodule_path / ".gitignore"
                 if not gitignore_path.exists():
                     gitignore_content = """# 框架仓库目录（本地开发使用，不提交到仓库）
@@ -270,7 +270,7 @@ submodules/
                 # 创建软链接
                 create_symlinks(current_dir, submodule_path)
                 
-                log_success(".driving 已就绪！")
+                log_success("ai-driving 已就绪！")
                 log_info("")
                 log_info("📝 下一步：")
                 log_info("  1. driving git-list  # 查看可用框架")
@@ -295,11 +295,11 @@ submodules/
         try:
             relative_path = current_dir.relative_to(git_root)
             submodule_relative_path = (
-                str(relative_path / ".driving") if str(relative_path) != "." else ".driving"
+                str(relative_path / "ai-driving") if str(relative_path) != "." else "ai-driving"
             )
         except ValueError:
             # 如果当前目录不在 Git 根目录下（理论上不会发生）
-            submodule_relative_path = ".driving"
+            submodule_relative_path = "ai-driving"
 
         # 添加 submodule
         repo.create_submodule(submodule_relative_path, submodule_relative_path, url=repo_url)
@@ -310,7 +310,7 @@ submodules/
             update_env_file(current_dir, "DRIVING_REPO_URL", url)
             log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env.driving 文件")
 
-        # 创建 .driving/.gitignore 文件，忽略 submodules 目录
+        # 创建 ai-driving/.gitignore 文件，忽略 submodules 目录
         gitignore_path = submodule_path / ".gitignore"
         gitignore_content = """# 框架仓库目录（本地开发使用，不提交到仓库）
 submodules/
@@ -346,8 +346,8 @@ submodules/
 def uninstall():
     """从当前目录移除 driving Git submodule
 
-    移除当前目录的 .driving submodule 并清理相关配置。
-    注意：这也会删除 .driving/submodules/ 中的所有框架仓库。
+    移除当前目录的 ai-driving submodule 并清理相关配置。
+    注意：这也会删除 ai-driving/submodules/ 中的所有框架仓库。
 
     如果当前目录存在 gitlist.json 文件（本地模式），则不需要执行此命令。
     """
@@ -369,18 +369,18 @@ def uninstall():
             raise click.Abort()
 
         repo = git.Repo(git_root)
-        submodule_path = current_dir / ".driving"
+        submodule_path = current_dir / "ai-driving"
 
         # 计算相对于 Git 仓库根目录的相对路径
         try:
             relative_path = current_dir.relative_to(git_root)
             submodule_relative_path = (
-                str(relative_path / ".driving") if str(relative_path) != "." else ".driving"
+                str(relative_path / "ai-driving") if str(relative_path) != "." else "ai-driving"
             )
         except ValueError:
-            submodule_relative_path = ".driving"
+            submodule_relative_path = "ai-driving"
 
-        # 检查 .driving submodule 是否存在
+        # 检查 ai-driving submodule 是否存在
         submodule = None
         for sm in repo.submodules:
             if sm.path == submodule_relative_path:
@@ -388,11 +388,11 @@ def uninstall():
                 break
 
         if not submodule:
-            log_error(f"当前目录不存在 .driving submodule")
+            log_error(f"当前目录不存在 ai-driving submodule")
             log_info(f"查找路径: {submodule_relative_path}")
             raise click.Abort()
 
-        log_warning("⚠️  警告：这将删除 .driving 目录及其中的所有框架仓库！")
+        log_warning("⚠️  警告：这将删除 ai-driving 目录及其中的所有框架仓库！")
         log_info("正在移除 driving Git submodule...")
 
         # 移除 submodule

@@ -12,7 +12,7 @@ def cli():
     """Driving CLI Tool - 管理开发框架文档和代码仓库
 
     支持两种工作模式：
-    - 标准模式：使用 .driving/ 目录（Git submodule）
+    - 标准模式：使用 ai-driving/ 目录（Git submodule）
     - 本地模式：直接在当前目录操作（当前目录存在 gitlist.json）
 
     使用 driving <command> 来执行各种操作。
