@@ -205,14 +205,6 @@ def install(url: str = None):
                     update_env_file(current_dir, "DRIVING_REPO_URL", url)
                     log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env.driving 文件")
                 
-                # 创建 ai-driving/.gitignore 文件，忽略 submodules 目录
-                gitignore_path = submodule_path / ".gitignore"
-                if not gitignore_path.exists():
-                    gitignore_content = """# 框架仓库目录（本地开发使用，不提交到仓库）
-submodules/
-"""
-                    gitignore_path.write_text(gitignore_content, encoding="utf-8")
-                
                 log_success("ai-driving 已就绪！")
                 log_info("")
                 log_info("📝 下一步：")
@@ -252,13 +244,6 @@ submodules/
             log_info(f"保存自定义仓库地址到 {current_dir}/.env.driving")
             update_env_file(current_dir, "DRIVING_REPO_URL", url)
             log_success(f"已将 DRIVING_REPO_URL={url} 保存到 .env.driving 文件")
-
-        # 创建 ai-driving/.gitignore 文件，忽略 submodules 目录
-        gitignore_path = submodule_path / ".gitignore"
-        gitignore_content = """# 框架仓库目录（本地开发使用，不提交到仓库）
-submodules/
-"""
-        gitignore_path.write_text(gitignore_content, encoding="utf-8")
 
         log_success("Git submodule 添加成功！")
 
