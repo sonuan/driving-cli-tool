@@ -6,7 +6,6 @@ from typing import Dict, List, Optional
 
 import click
 
-from driving.utils.config import is_local_mode
 from driving.utils.logger import log_error, log_info, log_success, log_warning
 
 # 尝试导入 yaml，如果失败则使用简单解析器
@@ -99,26 +98,22 @@ def parse_yaml_simple(yaml_content: str) -> Optional[Dict[str, str]]:
 
 
 def find_skills_dir() -> Optional[Path]:
-    """查找 ai-docs/skills 目录
+    """查找 skills 目录
+
+    标准模式和本地模式都从 ai-driving/skills 查找。
 
     Returns:
         Path: skills 目录路径，如果不存在则返回 None
     """
     current_dir = Path.cwd()
 
-    # 本地模式：直接在当前目录查找
-    if is_local_mode():
-        skills_dir = current_dir / "ai-docs" / "skills"
+    # 向上查找包含 ai-driving 的目录
+    search = current_dir
+    while search != search.parent:
+        skills_dir = search / "ai-driving" / "skills"
         if skills_dir.exists():
             return skills_dir
-        return None
-
-    # 标准模式：在 ai-driving 目录查找
-    driving_dir = current_dir / "ai-driving"
-    if driving_dir.exists():
-        skills_dir = driving_dir / "ai-docs" / "skills"
-        if skills_dir.exists():
-            return skills_dir
+        search = search.parent
 
     return None
 
@@ -358,12 +353,12 @@ def update_agents_md(agents_md_path: Path, skills: List[Dict[str, str]]) -> None
 def skills_sync():
     """同步技能列表到 AGENTS.md 文件
 
-    扫描 ai-docs/skills 目录下的所有技能，读取每个技能的 SKILL.md 文件的 YAML 头信息，
+    扫描 ai-driving/skills 目录下的所有技能，读取每个技能的 SKILL.md 文件的 YAML 头信息，
     然后更新 AGENTS.md 文件中的 <skills_system> 部分，保留其他内容不变。
 
     支持两种工作模式：
-    - 标准模式：从 ai-driving/ai-docs/skills 读取技能，更新根目录的 AGENTS.md
-    - 本地模式：从 ai-docs/skills 读取技能，更新根目录的 AGENTS.md
+    - 标准模式：从 ai-driving/skills 读取技能，更新根目录的 AGENTS.md
+    - 本地模式：从 ai-driving/skills 读取技能，更新根目录的 AGENTS.md
     """
     try:
         # 在命令执行时输出 PyYAML 警告
@@ -376,7 +371,7 @@ def skills_sync():
         # 查找 skills 目录
         skills_dir = find_skills_dir()
         if not skills_dir:
-            log_error("未找到 ai-docs/skills 目录")
+            log_error("未找到 ai-driving/skills 目录")
             log_info("请先执行 'driving install' 安装 driving 配置")
             raise click.Abort()
 

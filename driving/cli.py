@@ -13,7 +13,7 @@ def cli():
 
     支持两种工作模式：
     - 标准模式：使用 ai-driving/ 目录（Git submodule）
-    - 本地模式：直接在当前目录操作（当前目录存在 gitlist.json）
+    - 本地模式：直接在当前目录操作（.env.driving 中设置 DRIVING_LOCAL_MODE=true）
 
     使用 driving <command> 来执行各种操作。
     使用 driving <command> --help 查看具体命令的帮助信息。

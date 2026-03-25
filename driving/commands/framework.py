@@ -91,8 +91,7 @@ def git_list(framework_name: str = None, output_json: bool = False):
 
     读取并显示所有 gitlist.json 中配置的框架仓库信息。
 
-    标准模式：读取 ai-driving/ai-docs-local/gitlist.json 和 ai-driving/ai-docs/gitlist.json
-    本地模式：读取 ai-docs-local/gitlist.json 和 ai-docs/gitlist.json
+    读取 ai-docs-local/frameworks/gitlist.json 和 ai-driving/frameworks/gitlist.json
 
     Args:
         framework_name: 框架名称（可选），如果指定则只显示该框架的仓库（精确匹配）
@@ -225,8 +224,7 @@ def git_install(framework_name: str):
     如果本地不存在该仓库，则克隆；如果已存在，则更新。
     如果框架有 extends 字段，会自动安装所有扩展框架。
 
-    标准模式：框架将安装到 ai-driving/submodules/ 目录
-    本地模式：框架将安装到 submodules/ 目录
+    框架将安装到 ai-driving/submodules/ 目录
 
     Args:
         framework_name: 框架名称
@@ -350,8 +348,7 @@ def git_install(framework_name: str):
 def git_checkout(framework_name: str, branch_name: str):
     """切换框架仓库的分支
 
-    标准模式：在 ai-driving/submodules/ 中切换指定框架的分支
-    本地模式：在 submodules/ 中切换指定框架的分支
+    在 ai-driving/submodules/ 中切换指定框架的分支
 
     Args:
         framework_name: 框架名称
@@ -402,8 +399,7 @@ def git_checkout(framework_name: str, branch_name: str):
 def git_pull(framework_name: str):
     """更新指定的框架仓库
 
-    标准模式：更新 ai-driving/submodules/ 中的指定框架
-    本地模式：更新 submodules/ 中的指定框架
+    更新 ai-driving/submodules/ 中的指定框架
 
     Args:
         framework_name: 框架名称
@@ -456,8 +452,7 @@ def git_sources(framework_name: str):
     返回框架的完整源码路径信息（JSON 格式）。
     如果框架有 extends 字段，会自动合并所有扩展框架的 sources。
 
-    标准模式：读取 ai-driving/gitlist.json
-    本地模式：读取当前目录的 gitlist.json
+    读取 ai-docs-local/frameworks/gitlist.json 和 ai-driving/frameworks/gitlist.json
 
     Args:
         framework_name: 框架名称（精确匹配）

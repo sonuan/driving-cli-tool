@@ -10,12 +10,12 @@
 ## 核心特性
 
 - ✅ 双模式支持 - 标准模式（Git submodule）和本地模式（当前目录）
-- ✅ 多配置文件 - 支持 `ai-docs-local/gitlist.json` 和 `ai-docs/gitlist.json`
+- ✅ 多配置文件 - 支持 `ai-docs-local/frameworks/gitlist.json` 和 `ai-driving/frameworks/gitlist.json`
 - ✅ 本地项目支持 - 本地项目和远程框架分离管理
-- ✅ 自动检测 - 根据 gitlist.json 位置自动切换模式
+- ✅ 自动检测 - 通过 `.env.driving` 中的 `DRIVING_LOCAL_MODE=true` 切换本地模式
 - ✅ 子目录支持 - 可在项目的任意子目录运行命令，自动向上查找配置
-- ✅ 无需 Git 仓库 - 不依赖 .git 目录，支持在任意位置装载 .driving 目录
-- ✅ 项目内管理 - 框架仓库存储在 `submodules/` 或 `.driving/submodules/`
+- ✅ 无需 Git 仓库 - 不依赖 .git 目录，支持在任意位置装载 ai-driving 目录
+- ✅ 项目内管理 - 框架仓库存储在 `ai-driving/submodules/`
 - ✅ 团队协作 - 自动同步配置和框架版本
 - ✅ IDE 友好 - 可被正确识别和索引
 - ✅ Context 加载 - 可在 IDE context 中正常加载
@@ -23,19 +23,20 @@
 ## 工作模式
 
 ### 标准模式（Git Submodule）
-当前目录或父目录**不存在** `gitlist.json` 文件时，使用标准模式：
-- 配置存储在 `.driving/` 目录（Git submodule）
-- 框架仓库存储在 `.driving/submodules/`
+当前目录或父目录**不存在** `ai-driving/frameworks/gitlist.json` 且不存在 `ai-docs-local/frameworks/gitlist.json` 时，使用标准模式：
+- 配置存储在 `ai-driving/` 目录（Git submodule）
+- `ai-docs-local/` 与 `ai-driving/` 同级，存放本地项目配置
+- 框架仓库存储在 `ai-driving/submodules/`
 - 适合多项目共享配置
-- 支持在任意子目录运行命令，自动向上查找 `.driving/` 目录
+- 支持在任意子目录运行命令，自动向上查找 `ai-driving/` 目录
 
 ### 本地模式（Direct）
-当前目录或父目录**存在** `gitlist.json` 文件时，使用本地模式：
-- 配置直接在当前目录
-- 框架仓库存储在 `submodules/`
+`.env.driving` 文件中设置 `DRIVING_LOCAL_MODE=true` 时，使用本地模式：
+- 配置直接在当前目录的 `ai-driving/` 和 `ai-docs-local/` 中
+- 框架仓库存储在 `ai-driving/submodules/`
 - 适合 driving 仓库本身或独立项目
 - `install` 和 `uninstall` 命令不需要执行
-- 支持在任意子目录运行命令，自动向上查找 `gitlist.json` 文件
+- 支持在任意子目录运行命令，自动向上查找配置目录
 
 ## 快速开始
 
@@ -80,7 +81,7 @@ cd your-project
 driving install --url https://github.com/your-org/driving  # url为框架文档管理仓库
 
 # 2. 提交 submodule
-git add .gitmodules .driving
+git add .gitmodules ai-driving
 git commit -m "Add driving submodule"
 
 # 3. 查看可用框架
@@ -103,7 +104,7 @@ cd driving
 driving git-list
 driving git-install ximage
 
-# 3. 框架将安装到 submodules/ 目录
+# 3. 框架将安装到 ai-driving/submodules/ 目录
 ```
 
 ## 主要命令
@@ -113,9 +114,9 @@ driving git-install ximage
 ```bash
 driving install --url <url>  # 使用自定义框架文档管理仓库地址安装，并自动保存到 .env.driving 文件
 driving uninstall            # 从当前目录移除 driving Git submodule
-driving pull                 # 更新配置（标准模式：.driving，本地模式：当前目录）
-driving commit               # 提交修改（标准模式：.driving，本地模式：当前目录）
-driving push                 # 推送修改（标准模式：.driving，本地模式：当前目录）
+driving pull                 # 更新配置（ai-driving 目录）
+driving commit               # 提交修改（ai-driving 目录）
+driving push                 # 推送修改（ai-driving 目录）
 ```
 
 **参数说明：**
@@ -132,9 +133,9 @@ driving commit "update config"
 ```
 
 **注意**：
-- `install` 和 `uninstall` 会在**当前工作目录**创建/删除 `.driving` 目录
-- 支持在 Git 仓库的任意子目录中执行 `install`，`.driving` 会创建在执行命令的目录
-- 标准模式：操作 `.driving/` 目录
+- `install` 和 `uninstall` 会在**当前工作目录**创建/删除 `ai-driving` 目录
+- 支持在 Git 仓库的任意子目录中执行 `install`，`ai-driving` 会创建在执行命令的目录
+- 标准模式：操作 `ai-driving/` 目录
 - 本地模式：操作当前目录
 - `install` 和 `uninstall` 在本地模式下不需要执行
 
@@ -146,14 +147,13 @@ driving git-list <framework>        # 显示指定框架的仓库列表
 driving git-list --json             # 以 JSON 格式输出所有框架信息
 driving git-list <framework> --json # 以 JSON 格式输出指定框架信息
 driving git-sources <framework>     # 获取指定框架的源码路径列表（JSON 格式）
-driving git-install <framework>     # 安装框架（标准模式：.driving/submodules/，本地模式：submodules/）
+driving git-install <framework>     # 安装框架（框架安装到 ai-driving/submodules/）
 driving git-checkout <framework> <branch>  # 切换框架分支
 driving git-pull <framework>        # 更新框架仓库
 ```
 
 **注意**：
-- 标准模式：框架安装到 `.driving/submodules/`
-- 本地模式：框架安装到 `submodules/`
+- 框架安装到 `ai-driving/submodules/`
 - `git-list --json` 输出包含完整路径的 sources 字段
 - `git-sources` 自动合并多个仓库的源码路径，适合文档生成工具使用
 
@@ -196,17 +196,17 @@ driving skills-sync         # 同步技能列表到 AGENTS.md 文件
 
 **示例**：
 ```bash
-# 扫描 ai-docs/skills 目录并更新 AGENTS.md
+# 扫描 ai-driving/skills 目录并更新 AGENTS.md
 driving skills-sync
 ```
 
 **说明**：
-- 自动扫描 `ai-docs/skills` 目录下的所有技能
+- 自动扫描 `ai-driving/skills` 目录下的所有技能
 - 读取每个技能的 SKILL.md 文件的 YAML 头信息（name 和 description）
 - 生成或更新 AGENTS.md 文件
 - **按名称排序**：技能按名称字母顺序排列，便于查找和管理
-- 标准模式：从 `.driving/ai-docs/skills` 读取，更新 `.driving/AGENTS.md`
-- 本地模式：从 `ai-docs/skills` 读取，更新 `AGENTS.md`
+- 标准模式：从 `ai-driving/skills` 读取，更新根目录的 `AGENTS.md`
+- 本地模式：从 `ai-driving/skills` 读取，更新根目录的 `AGENTS.md`
 - 跳过特殊目录（如 `other`、`__pycache__`）
 - **自动过滤**：跳过 description 为空的技能，不添加到 AGENTS.md
 - 对缺少 SKILL.md 或 YAML 头信息不完整的技能给出警告
@@ -297,17 +297,16 @@ driving update
 
 ```
 your-project/
-├── .driving/                    # Git submodule
-│   ├── ai-docs/                # 远程框架文档和配置
-│   │   ├── gitlist.json       # 远程框架配置
-│   │   └── frameworks/        # 远程框架文档
-│   ├── ai-docs-local/          # 本地项目文档和配置
-│   │   ├── gitlist.json       # 本地项目配置
-│   │   └── frameworks/        # 本地项目文档
+├── ai-driving/                  # Git submodule（框架文档和配置）
+│   ├── frameworks/             # 框架文档
+│   │   └── gitlist.json       # 远程框架配置
 │   └── submodules/            # 框架仓库（本地，不提交）
 │       ├── ximage/            # XImage 框架
 │       ├── xrequest/          # XRequest 框架
 │       └── ...
+├── ai-docs-local/              # 本地项目文档和配置（与 ai-driving 同级）
+│   └── frameworks/            # 本地项目文档
+│       └── gitlist.json       # 本地项目配置
 ├── .gitmodules                 # Git submodule 配置
 └── ...
 ```
@@ -316,18 +315,17 @@ your-project/
 
 ```
 driving/                        # driving 仓库本身
-├── ai-docs/                   # 远程框架文档和配置
-│   ├── gitlist.json          # 远程框架配置
-│   └── frameworks/           # 远程框架文档
-├── ai-docs-local/            # 本地项目文档和配置
-│   ├── gitlist.json          # 本地项目配置
-│   └── frameworks/           # 本地项目文档
-│       └── driving/          # driving 自身的文档
-├── gitlist.json              # 根目录配置（兼容旧版本）
-├── submodules/               # 框架仓库（本地，不提交）
-│   ├── ximage/               # XImage 框架
-│   ├── xrequest/             # XRequest 框架
-│   └── ...
+├── ai-driving/                # 框架文档和配置
+│   ├── frameworks/           # 框架文档
+│   │   └── gitlist.json     # 远程框架配置
+│   └── submodules/          # 框架仓库（本地，不提交）
+│       ├── ximage/           # XImage 框架
+│       ├── xrequest/         # XRequest 框架
+│       └── ...
+├── ai-docs-local/            # 本地项目文档和配置（与 ai-driving 同级）
+│   └── frameworks/          # 本地项目文档
+│       ├── gitlist.json     # 本地项目配置
+│       └── driving/         # driving 自身的文档
 └── ...
 ```
 
@@ -339,9 +337,8 @@ Driving CLI 支持从多个 `gitlist.json` 文件加载框架配置，实现本�
 
 按以下顺序加载（优先级从高到低）：
 
-1. **ai-docs-local/gitlist.json** - 本地项目配置（优先级最高）
-2. **ai-docs/gitlist.json** - 远程框架配置
-3. **gitlist.json** - 根目录配置（兼容旧版本）
+1. **ai-docs-local/frameworks/gitlist.json** - 本地项目配置（优先级最高）
+2. **ai-driving/frameworks/gitlist.json** - 远程框架配置
 
 ### 本地项目标识
 
@@ -364,7 +361,7 @@ Driving CLI 支持从多个 `gitlist.json` 文件加载框架配置，实现本�
 
 ### 文档存储路径
 
-- **远程框架**：`ai-docs/frameworks/{框架名称}/`
+- **远程框架**：`ai-driving/frameworks/{框架名称}/`
 - **本地项目**：`ai-docs-local/frameworks/{框架名称}/`
 
 ### 使用示例
@@ -400,6 +397,7 @@ Driving CLI 支持通过环境变量进行配置，详细说明请参考 [配置
 
 | 环境变量 | 说明 | 默认值 |
 |---------|------|--------|
+| `DRIVING_LOCAL_MODE` | 是否启用本地模式 | `false` |
 | `DRIVING_REPO_URL` | Driving 仓库的 Git 地址 | 无（需要用户指定） |
 | `DRIVING_UPDATE_VERSION_URL` | version.json 文件的完整 URL | 无（需要用户指定） |
 | `DRIVING_DEFAULT_COMMIT_MESSAGE` | 默认的 Git 提交信息 | `update by driving` |
@@ -430,7 +428,7 @@ driving update --url http://your-server.com/path/version.json
 
 ### gitlist.json 格式
 
-框架列表配置文件 `.driving/gitlist.json` 支持以下字段：
+框架列表配置文件 `ai-driving/frameworks/gitlist.json` 支持以下字段：
 
 ```json
 {
@@ -467,8 +465,8 @@ driving update --url http://your-server.com/path/version.json
 - 文档存储在 `ai-docs-local/frameworks/{框架名称}/`
 
 **配置文件选择：**
-- 本地项目配置应添加到 `ai-docs-local/gitlist.json`
-- 远程框架配置应添加到 `ai-docs/gitlist.json` 或根目录 `gitlist.json`
+- 本地项目配置应添加到 `ai-docs-local/frameworks/gitlist.json`
+- 远程框架配置应添加到 `ai-driving/frameworks/gitlist.json`
 
 **示例 1：远程框架**
 
@@ -537,7 +535,7 @@ driving install --url https://github.com/your-org/driving
 # 此命令会自动创建 .env.driving 文件并保存 DRIVING_REPO_URL=https://github.com/your-org/driving
 
 # 3. 提交（包括 .env.driving 文件）
-git add .gitmodules .driving .env.driving
+git add .gitmodules ai-driving .env.driving
 git commit -m "Initial commit with driving"
 
 # 4. 安装框架
@@ -549,8 +547,8 @@ driving git-list xstatic
 ```
 
 **说明**：
-- `driving install` 会在当前目录创建 `.driving` 目录
-- 如果在子目录执行，`.driving` 会创建在该子目录中
+- `driving install` 会在当前目录创建 `ai-driving` 目录
+- 如果在子目录执行，`ai-driving` 会创建在该子目录中
 - 使用 `--url` 参数时，会自动将配置保存到项目根目录的 `.env.driving` 文件
 - `.env.driving` 文件包含项目配置（非敏感信息），建议提交到 Git 仓库
 - 团队成员克隆项目后，会自动使用 `.env.driving` 中的配置
@@ -565,7 +563,7 @@ cd driving
 driving git-list
 driving git-install ximage
 
-# 3. 框架安装到 submodules/ 目录
+# 3. 框架安装到 ai-driving/submodules/ 目录
 # 4. 提交和推送
 driving commit "add new framework"
 driving push
@@ -584,9 +582,9 @@ driving git-install ximage
 ### 场景 4: 更新配置
 
 ```bash
-# 标准模式：更新 .driving 配置
+# 标准模式：更新 ai-driving 配置
 driving pull
-git add .driving
+git add ai-driving
 git commit -m "Update driving submodule"
 git push
 
@@ -658,7 +656,7 @@ AUTH_TOKEN=token_xyz
 
 ## 故障排除
 
-### 问题：克隆后 .driving 为空
+### 问题：克隆后 ai-driving 为空
 
 ```bash
 # 解决

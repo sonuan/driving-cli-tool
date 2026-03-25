@@ -25,7 +25,7 @@ def install(url: str = None):
 
     注意：
     - 当前目录必须在 Git 仓库中
-    - 如果当前目录存在 gitlist.json 文件，则为本地模式，不需要执行此命令
+    - 如果当前目录存在 ai-driving/frameworks/gitlist.json 或 ai-docs-local/frameworks/gitlist.json，则为本地模式，不需要执行此命令
     - 使用 --url 参数时，会自动将 DRIVING_REPO_URL 保存到 .env.driving 文件，下次无需再指定
 
     示例：
@@ -48,10 +48,11 @@ def install(url: str = None):
             log_info("     DRIVING_REPO_URL=https://github.com/your-org/driving")
             raise click.Abort()
 
-        # 检查当前目录是否存在 gitlist.json（本地模式）
+        # 检查是否为本地模式（.env.driving 中 DRIVING_LOCAL_MODE=true）
+        import os
         current_dir = Path.cwd()
-        if (current_dir / "gitlist.json").exists():
-            log_info("检测到当前目录存在 gitlist.json 文件（本地模式）")
+        if os.getenv("DRIVING_LOCAL_MODE", "").lower() == "true":
+            log_info("检测到本地模式（DRIVING_LOCAL_MODE=true）")
             log_info("本地模式下不需要执行 install 命令")
             log_info("可以直接使用 driving git-list、driving git-install 等命令")
             return
@@ -90,7 +91,7 @@ def install(url: str = None):
 
         # 检查 ai-driving 是否已存在
         if submodule_path.exists():
-            # 检查是否包含必要的文件（gitlist.json 或 ai-docs 等）
+            # 检查是否包含必要的文件（frameworks 目录等）
             contents = list(submodule_path.iterdir())
             # 过滤掉 .git、submodules 和 .gitignore
             essential_contents = [
@@ -273,13 +274,14 @@ def uninstall():
     移除当前目录的 ai-driving submodule 并清理相关配置。
     注意：这也会删除 ai-driving/submodules/ 中的所有框架仓库。
 
-    如果当前目录存在 gitlist.json 文件（本地模式），则不需要执行此命令。
+    如果当前目录存在 ai-driving/frameworks/gitlist.json 或 ai-docs-local/frameworks/gitlist.json（本地模式），则不需要执行此命令。
     """
     try:
-        # 检查当前目录是否存在 gitlist.json（本地模式）
+        # 检查是否为本地模式（.env.driving 中 DRIVING_LOCAL_MODE=true）
+        import os
         current_dir = Path.cwd()
-        if (current_dir / "gitlist.json").exists():
-            log_info("检测到当前目录存在 gitlist.json 文件（本地模式）")
+        if os.getenv("DRIVING_LOCAL_MODE", "").lower() == "true":
+            log_info("检测到本地模式（DRIVING_LOCAL_MODE=true）")
             log_info("本地模式下不需要执行 uninstall 命令")
             return
 
