@@ -107,12 +107,18 @@ def parse_skill_yaml(skill_md_path: Path) -> Optional[Dict[str, str]]:
         if not content.startswith("---"):
             return None
 
-        # 提取 YAML 头（在两个 --- 之间）
-        parts = content.split("---", 2)
-        if len(parts) < 3:
+        # 按独立行的 --- 分割（避免 description 内容含 --- 导致误分割）
+        lines = content.split("\n")
+        end_idx = None
+        for i, line in enumerate(lines[1:], start=1):
+            if line.strip() == "---":
+                end_idx = i
+                break
+
+        if end_idx is None:
             return None
 
-        yaml_content = parts[1].strip()
+        yaml_content = "\n".join(lines[1:end_idx]).strip()
 
         # 优先使用 PyYAML 解析
         if HAS_YAML:
@@ -137,7 +143,7 @@ def parse_skill_yaml(skill_md_path: Path) -> Optional[Dict[str, str]]:
         return None
 
 
-def scan_skills_from_dir(repo_name: str, skills_dir: Path) -> List[Dict[str, str]]:
+def scan_skills_from_dir(repo_name: str, skills_dir: Path, quiet: bool = False) -> List[Dict[str, str]]:
     """扫描单个仓库的 skills 目录，返回技能列表
 
     每个技能的 location 字段为完整路径：ai-driving/<repo-name>/skills/<skill-name>/
@@ -145,6 +151,7 @@ def scan_skills_from_dir(repo_name: str, skills_dir: Path) -> List[Dict[str, str
     Args:
         repo_name: 仓库名称
         skills_dir: skills 目录路径
+        quiet: 静默模式，不输出日志（用于机器读取场景）
 
     Returns:
         List[Dict]: 技能列表，每个技能包含 name、description、location 字段
@@ -162,7 +169,8 @@ def scan_skills_from_dir(repo_name: str, skills_dir: Path) -> List[Dict[str, str
         # 查找 SKILL.md 文件
         skill_md = skill_dir / "SKILL.md"
         if not skill_md.exists():
-            log_warning(f"跳过 {skill_dir.name}：未找到 SKILL.md 文件")
+            if not quiet:
+                log_warning(f"跳过 {skill_dir.name}：未找到 SKILL.md 文件")
             continue
 
         # 解析 YAML 头
@@ -170,21 +178,26 @@ def scan_skills_from_dir(repo_name: str, skills_dir: Path) -> List[Dict[str, str
         if skill_info:
             # 检查 description 是否为空
             if not skill_info["description"] or not skill_info["description"].strip():
-                log_warning(f"跳过技能 {skill_info['name']}：description 为空")
+                if not quiet:
+                    log_warning(f"跳过技能 {skill_info['name']}：description 为空")
                 continue
 
             # 设置完整路径作为 location
             skill_info["location"] = f"ai-driving/{repo_name}/skills/{skill_dir.name}/"
             skills.append(skill_info)
-            log_info(f"发现技能: {skill_info['name']} (来自仓库 {repo_name})")
+            if not quiet:
+                log_info(f"发现技能: {skill_info['name']} (来自仓库 {repo_name})")
         else:
-            log_warning(f"跳过 {skill_dir.name}：YAML 头信息不完整")
+            if not quiet:
+                log_warning(f"跳过 {skill_dir.name}：YAML 头信息不完整")
 
     return skills
 
 
 def merge_skills_from_all_repos(
     skills_dirs: List[Tuple[str, Path]],
+    quiet: bool = False,
+    repo_configs: Optional[List] = None,
 ) -> List[Dict[str, str]]:
     """合并所有仓库的技能列表，同名技能按仓库顺序去重
 
@@ -199,17 +212,36 @@ def merge_skills_from_all_repos(
     merged: Dict[str, Dict[str, str]] = {}  # skill_name -> skill_info
     result: List[Dict[str, str]] = []
 
+    # 构建 repo_name -> RepoConfig 的映射，用于过滤
+    repo_config_map = {}
+    if repo_configs:
+        for rc in repo_configs:
+            repo_config_map[rc.name] = rc
+
     for repo_name, skills_dir in skills_dirs:
-        repo_skills = scan_skills_from_dir(repo_name, skills_dir)
+        repo_skills = scan_skills_from_dir(repo_name, skills_dir, quiet=quiet)
+
+        # 按仓库的 skills.enabled / skills.disabled 过滤
+        rc = repo_config_map.get(repo_name)
+        if rc is not None and rc.skills is not None:
+            enabled = rc.skills.get("enabled") or []
+            disabled = rc.skills.get("disabled") or []
+            if enabled:
+                # 白名单模式：只保留启用列表中的技能
+                repo_skills = [s for s in repo_skills if s["name"] in enabled]
+            elif disabled:
+                # 黑名单模式：排除禁用列表中的技能
+                repo_skills = [s for s in repo_skills if s["name"] not in disabled]
+
         for skill in repo_skills:
             skill_name = skill["name"]
             if skill_name in merged:
-                # 同名技能已存在，记录警告，跳过（先配置的优先）
                 existing_location = merged[skill_name]["location"]
-                log_warning(
-                    f"技能 '{skill_name}' 在多个仓库中存在，"
-                    f"使用 {existing_location}（跳过 {skill['location']}）"
-                )
+                if not quiet:
+                    log_warning(
+                        f"技能 '{skill_name}' 在多个仓库中存在，"
+                        f"使用 {existing_location}（跳过 {skill['location']}）"
+                    )
             else:
                 merged[skill_name] = skill
                 result.append(skill)
@@ -375,8 +407,9 @@ def skill_sync():
 
         log_info(f"扫描 {len(skills_dirs)} 个仓库的 skills 目录...")
 
-        # 合并所有仓库的技能列表（同名去重）
-        skills = merge_skills_from_all_repos(skills_dirs)
+        # 合并所有仓库的技能列表（同名去重，遵守启用/禁用配置）
+        repo_configs = config_manager.get_all_repos()
+        skills = merge_skills_from_all_repos(skills_dirs, repo_configs=repo_configs)
 
         if not skills:
             log_warning("未找到任何有效的技能")
@@ -407,3 +440,322 @@ def skill_sync():
     except Exception as e:
         log_error(f"同步技能列表失败: {e}")
         raise click.Abort()
+
+
+@skill_group.command(name="load")
+@click.option("--format", "output_format", default="json", type=click.Choice(["xml", "json"]), help="输出格式（xml 或 json）")
+def skill_load(output_format: str):
+    """输出当前所有可用技能的完整信息，供 AI 会话注入上下文
+
+    扫描所有已安装仓库的 skills/ 目录，读取每个技能的 SKILL.md 头信息，
+    以结构化格式输出到 stdout，可直接被 AI 会话读取作为上下文。
+
+    示例：
+        driving skill load
+        driving skill load --format json
+    """
+    import json as json_module
+
+    try:
+        project_root = find_project_root()
+        config_manager = ConfigManager(project_root)
+
+        skills_dirs = config_manager.get_all_skills_dirs()
+        if not skills_dirs:
+            click.echo("[]" if output_format == "json" else "<skills></skills>")
+            return
+
+        repo_configs = config_manager.get_all_repos()
+        skills = merge_skills_from_all_repos(skills_dirs, quiet=True, repo_configs=repo_configs)
+
+        if output_format == "json":
+            output = [
+                {
+                    "name": s["name"],
+                    "description": s["description"],
+                    "location": s["location"],
+                }
+                for s in sorted(skills, key=lambda x: x["name"])
+            ]
+            click.echo(json_module.dumps(output, ensure_ascii=False, indent=2))
+        else:
+            # XML 格式：与 AGENTS.md 中 available_skills 结构一致
+            lines = ["<available_skills>"]
+            for s in sorted(skills, key=lambda x: x["name"]):
+                lines.append("<skill>")
+                lines.append(f"<name>{s['name']}</name>")
+                lines.append(f"<description>{s['description']}</description>")
+                lines.append(f"<location>{s['location']}</location>")
+                lines.append("</skill>")
+            lines.append("</available_skills>")
+            click.echo("\n".join(lines))
+
+    except Exception as e:
+        log_error(f"加载技能列表失败: {e}")
+        raise click.Abort()
+
+
+@skill_group.command(name="list")
+@click.option("--repo", "repo_name", default=None, help="只显示指定仓库的技能")
+@click.option("--edit", is_flag=True, default=False, help="进入交互模式，勾选/取消技能")
+def skill_list(repo_name: Optional[str], edit: bool):
+    """列出所有可用技能，按仓库分组显示启用状态
+
+    使用 --edit 进入交互模式，通过空格勾选/取消技能，回车保存。
+
+    示例：
+        driving skill list
+        driving skill list --repo driving
+        driving skill list --edit
+    """
+    try:
+        project_root = find_project_root()
+        config_manager = ConfigManager(project_root)
+
+        # 确定要扫描的仓库范围
+        if repo_name:
+            repo_cfg = config_manager.get_repo(repo_name)
+            if repo_cfg is None:
+                log_error(f"仓库 '{repo_name}' 不存在")
+                raise click.Abort()
+            skills_dirs = [(repo_name, config_manager.get_repo_dir(repo_name) / "skills")]
+            skills_dirs = [(n, d) for n, d in skills_dirs if d.exists()]
+            target_repos = [repo_cfg]
+        else:
+            skills_dirs = config_manager.get_all_skills_dirs()
+            target_repos = config_manager.get_all_repos()
+
+        if not skills_dirs:
+            log_info("未找到任何技能目录")
+            return
+
+        repo_config_map = {r.name: r for r in target_repos}
+
+        # 扫描所有技能（不过滤，展示完整状态）
+        all_skills_by_repo: Dict[str, List[Dict]] = {}
+        for rname, sdir in skills_dirs:
+            all_skills_by_repo[rname] = scan_skills_from_dir(rname, sdir, quiet=True)
+
+        def _is_enabled(rc, sname: str) -> bool:
+            if rc is None or rc.skills is None:
+                return True
+            enabled = rc.skills.get("enabled") or []
+            disabled = rc.skills.get("disabled") or []
+            if enabled:
+                return sname in enabled
+            return sname not in disabled
+
+        if edit:
+            # ── 交互模式 ──────────────────────────────────────────
+            from prompt_toolkit.shortcuts import checkboxlist_dialog
+            from prompt_toolkit.styles import Style as PTStyle
+
+            # 干净样式：选中绿色，光标行无背景，只加下划线区分
+            clean_style = PTStyle.from_dict({
+                "dialog":                    "bg:#1e1e1e",
+                "dialog.body":               "bg:#1e1e1e fg:#ffffff",
+                "dialog.body checkbox":      "fg:#888888",
+                "dialog.body checkbox-selected": "fg:#00cc00 bold",
+                "dialog.body checkbox-checked":  "fg:#00cc00",
+                "button":                    "bg:#333333 fg:#ffffff",
+                "button.focused":            "bg:#00cc00 fg:#000000",
+            })
+
+            for rname, skills in all_skills_by_repo.items():
+                if not skills:
+                    continue
+                rc = repo_config_map.get(rname)
+                values = [(s["name"], s["name"]) for s in skills]
+                default_checked = [s["name"] for s in skills if _is_enabled(rc, s["name"])]
+
+                click.echo(f"\n仓库：{rname}")
+                result = checkboxlist_dialog(
+                    title=f"仓库：{rname}",
+                    text="空格勾选/取消，Tab 切换到 OK，回车确认",
+                    values=values,
+                    default_values=default_checked,
+                    style=clean_style,
+                ).run()
+
+                if result is None:
+                    continue
+
+                all_names = [s["name"] for s in skills]
+                new_disabled = [n for n in all_names if n not in result]
+
+                if rc is None:
+                    continue
+
+                # 计算变更内容
+                old_disabled = set((rc.skills or {}).get("disabled") or [])
+                new_disabled_set = set(new_disabled)
+                newly_enabled = sorted(old_disabled - new_disabled_set)   # 原来禁用，现在启用
+                newly_disabled = sorted(new_disabled_set - old_disabled)  # 原来启用，现在禁用
+
+                rc.skills = None if not new_disabled else {"enabled": [], "disabled": sorted(new_disabled)}
+                config_manager.update_repo(rc)
+
+                if not newly_enabled and not newly_disabled:
+                    log_info(f"仓库 '{rname}' 无变更")
+                else:
+                    log_success(f"仓库 '{rname}' 技能配置已保存")
+                    for name in newly_enabled:
+                        click.echo(f"  + {name}  （已启用）")
+                    for name in newly_disabled:
+                        click.echo(f"  - {name}  （已禁用）")
+        else:
+            # ── 只读展示模式 ──────────────────────────────────────
+            total = 0
+            for rname, skills in all_skills_by_repo.items():
+                rc = repo_config_map.get(rname)
+                click.echo(f"\n仓库：{rname}")
+                for s in skills:
+                    sname = s["name"]
+                    mark = "✓" if _is_enabled(rc, sname) else "✗"
+                    click.echo(f"  [{mark}] {sname}")
+                    total += 1
+            click.echo(f"\n共 {total} 个技能  （使用 --edit 进入编辑模式）")
+
+    except click.Abort:
+        raise
+    except Exception as e:
+        log_error(f"列出技能失败: {e}")
+        raise click.Abort()
+
+
+@skill_group.command(name="enable")
+@click.argument("skill_spec")
+def skill_enable(skill_spec: str):
+    """启用指定技能
+
+    将技能加入对应仓库的白名单（skills_enabled）。
+    支持 <repo-name>/<skill-name> 格式指定仓库，否则在所有仓库中查找。
+
+    示例：
+        driving skill enable code-review
+        driving skill enable driving/code-review
+    """
+    try:
+        project_root = find_project_root()
+        config_manager = ConfigManager(project_root)
+
+        repo_name, skill_name = _parse_skill_spec(skill_spec, config_manager)
+        if repo_name is None:
+            raise click.Abort()
+
+        repo_cfg = config_manager.get_repo(repo_name)
+
+        # 确保 skills 字段存在
+        if repo_cfg.skills is None:
+            repo_cfg.skills = {"enabled": [], "disabled": []}
+        enabled = repo_cfg.skills.setdefault("enabled", [])
+        disabled = repo_cfg.skills.setdefault("disabled", [])
+
+        # 从黑名单中移除（如果存在）
+        if skill_name in disabled:
+            disabled.remove(skill_name)
+
+        # 加入白名单（如果已有白名单模式）
+        if enabled:
+            if skill_name not in enabled:
+                enabled.append(skill_name)
+                enabled.sort()
+        else:
+            # 白名单为空表示全部启用，检查技能是否存在即可
+            skills_dir = config_manager.get_repo_dir(repo_name) / "skills"
+            if not (skills_dir / skill_name).exists():
+                log_error(f"技能 '{skill_name}' 在仓库 '{repo_name}' 中不存在")
+                raise click.Abort()
+            # 清理空的 skills 字段
+            if not enabled and not disabled:
+                repo_cfg.skills = None
+            log_success(f"技能 '{skill_name}'（仓库：{repo_name}）已处于启用状态（默认全部启用）")
+            config_manager.update_repo(repo_cfg)
+            return
+
+        config_manager.update_repo(repo_cfg)
+        log_success(f"已启用技能 '{skill_name}'（仓库：{repo_name}）")
+
+    except click.Abort:
+        raise
+    except Exception as e:
+        log_error(f"启用技能失败: {e}")
+        raise click.Abort()
+
+
+@skill_group.command(name="disable")
+@click.argument("skill_spec")
+def skill_disable(skill_spec: str):
+    """禁用指定技能
+
+    将技能加入对应仓库的黑名单（skills_disabled）。
+    支持 <repo-name>/<skill-name> 格式指定仓库，否则在所有仓库中查找。
+
+    示例：
+        driving skill disable refactor
+        driving skill disable driving/refactor
+    """
+    try:
+        project_root = find_project_root()
+        config_manager = ConfigManager(project_root)
+
+        repo_name, skill_name = _parse_skill_spec(skill_spec, config_manager)
+        if repo_name is None:
+            raise click.Abort()
+
+        repo_cfg = config_manager.get_repo(repo_name)
+
+        # 确保 skills 字段存在
+        if repo_cfg.skills is None:
+            repo_cfg.skills = {"enabled": [], "disabled": []}
+        enabled = repo_cfg.skills.setdefault("enabled", [])
+        disabled = repo_cfg.skills.setdefault("disabled", [])
+
+        # 从白名单中移除（如果存在）
+        if skill_name in enabled:
+            enabled.remove(skill_name)
+
+        # 加入黑名单
+        if skill_name not in disabled:
+            disabled.append(skill_name)
+            disabled.sort()
+
+        config_manager.update_repo(repo_cfg)
+        log_success(f"已禁用技能 '{skill_name}'（仓库：{repo_name}）")
+
+    except click.Abort:
+        raise
+    except Exception as e:
+        log_error(f"禁用技能失败: {e}")
+        raise click.Abort()
+
+
+def _parse_skill_spec(skill_spec: str, config_manager: ConfigManager):
+    """解析 skill_spec，支持 <repo>/<skill> 或 <skill> 格式
+
+    Returns:
+        (repo_name, skill_name) 或 (None, None) 表示出错
+    """
+    if "/" in skill_spec:
+        repo_name, skill_name = skill_spec.split("/", 1)
+        if config_manager.get_repo(repo_name) is None:
+            log_error(f"仓库 '{repo_name}' 不存在")
+            return None, None
+        return repo_name, skill_name
+
+    # 未指定仓库：在所有仓库中查找该技能
+    matches = []
+    for repo_name, skills_dir in config_manager.get_all_skills_dirs():
+        if (skills_dir / skill_spec).exists():
+            matches.append(repo_name)
+
+    if not matches:
+        log_error(f"技能 '{skill_spec}' 在任何仓库中都不存在")
+        return None, None
+
+    if len(matches) > 1:
+        log_error(f"技能 '{skill_spec}' 存在于多个仓库：{', '.join(matches)}")
+        log_error(f"请使用 '<repo-name>/{skill_spec}' 格式指定仓库")
+        return None, None
+
+    return matches[0], skill_spec

@@ -252,3 +252,20 @@ class ConfigManager:
             if skills_dir.exists():
                 result.append((repo.name, skills_dir))
         return result
+
+    def update_repo(self, repo: RepoConfig) -> None:
+        """更新已存在仓库的配置
+
+        Args:
+            repo: 更新后的仓库配置
+
+        Raises:
+            ValueError: 仓库不存在时抛出
+        """
+        config = self.load()
+        for i, r in enumerate(config.repos):
+            if r.name == repo.name:
+                config.repos[i] = repo
+                self.save(config)
+                return
+        raise ValueError(f"仓库 '{repo.name}' 不存在")

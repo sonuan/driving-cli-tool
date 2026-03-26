@@ -16,36 +16,25 @@ class RepoConfig:
     path: str  # 安装路径（相对于项目根目录，如 ai-driving/main）
     url: Optional[str] = None  # Git URL（remote 类型必填）
     local_path: Optional[str] = None  # 本地原始路径（local 类型可选，有值时创建软链接）
+    skills: Optional[dict] = None  # 技能过滤配置，格式：{"enabled": [...], "disabled": [...]}
 
     def to_dict(self) -> dict:
-        """序列化为字典（JSON 兼容格式）
-
-        Returns:
-            dict: 包含所有字段的字典
-        """
-        return {
+        """序列化为字典（JSON 兼容格式）"""
+        d = {
             "name": self.name,
             "type": self.type,
             "url": self.url,
             "path": self.path,
             "local_path": self.local_path,
         }
+        # 只在有值时写入，保持 config.json 简洁
+        if self.skills is not None:
+            d["skills"] = self.skills
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "RepoConfig":
-        """从字典反序列化为 RepoConfig 对象
-
-        Args:
-            data: 包含仓库配置的字典
-
-        Returns:
-            RepoConfig: 仓库配置对象
-
-        Raises:
-            KeyError: 缺少必填字段时抛出
-            ValueError: 字段类型不合法时抛出
-        """
-        # 校验必填字段
+        """从字典反序列化为 RepoConfig 对象"""
         for required_field in ("name", "type", "path"):
             if required_field not in data:
                 raise KeyError(f"缺少必填字段：{required_field}")
@@ -56,6 +45,7 @@ class RepoConfig:
             path=data["path"],
             url=data.get("url"),
             local_path=data.get("local_path"),
+            skills=data.get("skills"),
         )
 
 
