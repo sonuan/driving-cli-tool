@@ -23,7 +23,7 @@ from driving.utils.validators import (
 
 @click.group(name="repo")
 def repo_group():
-    """管理 driving 仓库（安装、列出、卸载、git 操作）
+    """AI Coding 规范仓库管理（安装、列出、卸载、git 操作）
 
     支持远程仓库（git submodule）和本地仓库（软链接或普通目录）。
 

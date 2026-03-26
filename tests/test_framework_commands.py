@@ -445,15 +445,7 @@ class TestCliIntegration:
         assert "pull" in result.output
         assert "sources" in result.output
 
-    def test_旧命令git_list仍可用(self, runner):
-        """旧版 git-list 命令应仍然可用（向后兼容）"""
-        result = runner.invoke(cli, ["git-list", "--help"])
-        assert result.exit_code == 0
 
-    def test_旧命令git_install仍可用(self, runner):
-        """旧版 git-install 命令应仍然可用（向后兼容）"""
-        result = runner.invoke(cli, ["git-install", "--help"])
-        assert result.exit_code == 0
 
 
 # ==================== 属性测试（Property 6） ====================

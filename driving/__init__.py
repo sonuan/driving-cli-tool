@@ -1,3 +1,3 @@
-"""Driving CLI Tool - 管理开发框架文档和代码仓库"""
+"""Driving CLI Tool - AI Coding工程化管理工具"""
 
 __version__ = "1.0.4"

@@ -369,16 +369,18 @@ def update_agents_md(agents_md_path: Path, skills: List[Dict[str, str]]) -> None
 
 @click.group(name="skill")
 def skill_group():
-    """Skill 管理命令组
+    """技能管理
 
-    管理 driving 技能，支持扫描所有已安装仓库的 skills/ 目录并同步到 AGENTS.md。
+    - 支持扫描多个仓库的 skills/ 目录\n
+    - 管理多个仓库技能的启用和禁用\n
+    - 获取多个仓库可用技能的信息加载到上下文
     """
     pass
 
 
 @skill_group.command(name="sync")
 def skill_sync():
-    """扫描所有仓库 skills/ 并同步到 AGENTS.md
+    """【废弃】扫描所有仓库 skills/ 并同步到 AGENTS.md
 
     遍历 driving.config.json 中所有已安装仓库的 skills/ 目录，
     读取每个技能的 SKILL.md 文件的 YAML 头信息，
@@ -499,7 +501,7 @@ def skill_load(output_format: str):
 @click.option("--repo", "repo_name", default=None, help="只显示指定仓库的技能")
 @click.option("--edit", is_flag=True, default=False, help="进入交互模式，勾选/取消技能")
 def skill_list(repo_name: Optional[str], edit: bool):
-    """列出所有可用技能，按仓库分组显示启用状态
+    """列出所有可用技能，按仓库分组显示启用状态，支持编辑模式
 
     使用 --edit 进入交互模式，通过空格勾选/取消技能，回车保存。
 
@@ -626,7 +628,7 @@ def skill_list(repo_name: Optional[str], edit: bool):
 @skill_group.command(name="enable")
 @click.argument("skill_spec")
 def skill_enable(skill_spec: str):
-    """启用指定技能
+    """【废弃】启用指定技能，使用 list --edit 代替
 
     将技能加入对应仓库的白名单（skills_enabled）。
     支持 <repo-name>/<skill-name> 格式指定仓库，否则在所有仓库中查找。
@@ -686,7 +688,7 @@ def skill_enable(skill_spec: str):
 @skill_group.command(name="disable")
 @click.argument("skill_spec")
 def skill_disable(skill_spec: str):
-    """禁用指定技能
+    """【废弃】禁用指定技能，使用 list --edit 代替
 
     将技能加入对应仓库的黑名单（skills_disabled）。
     支持 <repo-name>/<skill-name> 格式指定仓库，否则在所有仓库中查找。

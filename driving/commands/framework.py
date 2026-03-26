@@ -107,7 +107,7 @@ def _resolve_framework_name(framework_name: str, all_frameworks: list[dict]) -> 
 
 @click.group(name="framework")
 def framework_group():
-    """框架仓库管理命令组
+    """框架仓库管理
 
     支持跨多个仓库查找、安装和管理框架。
     """
@@ -477,46 +477,3 @@ def framework_sources(framework_name: str):
         raise click.Abort()
 
 
-# ==================== 旧版命令（兼容保留） ====================
-# 以下命令保留旧名称，供 cli.py 向后兼容注册使用
-
-@click.command(name="git-list")
-@click.argument("framework_name", required=False)
-@click.option("--json", "output_json", is_flag=True, help="以 JSON 格式输出")
-def git_list(framework_name: Optional[str] = None, output_json: bool = False):
-    """[已废弃] 请使用 'driving framework list'"""
-    ctx = click.get_current_context()
-    ctx.invoke(framework_list, framework_name=framework_name, output_json=output_json)
-
-
-@click.command(name="git-install")
-@click.argument("framework_name")
-def git_install(framework_name: str):
-    """[已废弃] 请使用 'driving framework install'"""
-    ctx = click.get_current_context()
-    ctx.invoke(framework_install, framework_name=framework_name)
-
-
-@click.command(name="git-checkout")
-@click.argument("framework_name")
-@click.argument("branch_name")
-def git_checkout(framework_name: str, branch_name: str):
-    """[已废弃] 请使用 'driving framework checkout'"""
-    ctx = click.get_current_context()
-    ctx.invoke(framework_checkout, framework_name=framework_name, branch_name=branch_name)
-
-
-@click.command(name="git-pull")
-@click.argument("framework_name")
-def git_pull(framework_name: str):
-    """[已废弃] 请使用 'driving framework pull'"""
-    ctx = click.get_current_context()
-    ctx.invoke(framework_pull, framework_name=framework_name)
-
-
-@click.command(name="git-sources")
-@click.argument("framework_name")
-def git_sources(framework_name: str):
-    """[已废弃] 请使用 'driving framework sources'"""
-    ctx = click.get_current_context()
-    ctx.invoke(framework_sources, framework_name=framework_name)

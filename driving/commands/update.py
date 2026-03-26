@@ -108,92 +108,20 @@ def compare_versions(current: str, latest: str) -> int:
         return 0
 
 
-@click.command("version")
-@click.option("--check", is_flag=True, help="检查是否有新版本可用")
-@click.option("--url", default=None, help="自定义 version.json 文件的完整 URL")
-def version(check: bool, url: str = None):
-    """显示当前版本或检查更新
-
-    参数：
-        --url: 自定义 version.json 文件的完整 URL（优先级：参数 > 环境变量 > .env.driving 文件 > 默认值）
-
-    示例：
-        driving version              # 显示当前版本
-        driving version --check      # 检查是否有新版本
-        driving version --check --url http://your-server.com/path/version.json
-    """
-    current_version = get_current_version()
-
-    if not check:
-        # 只显示当前版本
-        log_info(f"Driving CLI Tool 版本: {current_version}")
-        return
-
-    # 确定使用的 version.json URL（优先级：命令行参数 > driving.config.json > 默认值）
-    version_url = url if url else _get_update_version_url()
-    log_info(f"当前版本: {current_version}")
-    log_info(f"版本文件: {version_url}")
-
-    version_info = fetch_version_info(version_url)
-    if not version_info:
-        log_warning("无法检查更新，请稍后重试")
-        return
-
-    latest_version = version_info.get("version", "unknown")
-    log_info(f"最新版本: {latest_version}")
-
-    comparison = compare_versions(current_version, latest_version)
-
-    if comparison < 0:
-        log_warning(f"\n🎉 发现新版本: {latest_version}")
-
-        # 显示更新日志
-        changelog = version_info.get("changelog", [])
-        if changelog:
-            log_info("\n更新内容:")
-            for item in changelog:
-                log_info(f"  • {item}")
-
-        log_info("\n执行以下命令更新:")
-        log_info("  driving update")
-
-    elif comparison == 0:
-        log_success("\n✓ 已是最新版本")
-    else:
-        log_info("\n当前版本高于服务器版本")
-
-
 @click.command("update")
+@click.option("--check", is_flag=True, help="仅检查是否有新版本，不安装")
 @click.option("--force", is_flag=True, help="强制重新安装当前版本")
 @click.option("--yes", "-y", is_flag=True, help="跳过确认提示")
-@click.option(
-    "--url", default=None, help="自定义 version.json 文件的完整 URL（自动保存到 .env.driving 文件）"
-)
-def update(force: bool, yes: bool, url: str = None):
-    """从服务器更新 driving CLI 工具
-
-    参数：
-        --url: 自定义 version.json 文件的完整 URL，会自动保存到项目根目录的 .env.driving 文件
-               （优先级：参数 > 环境变量 > .env.driving 文件 > 默认值）
-
-    配置方式：
-        1. 使用 --url 参数（推荐，会自动保存）：
-           driving update --url http://your-server.com/path/version.json
-        2. 设置环境变量 DRIVING_UPDATE_VERSION_URL：
-           export DRIVING_UPDATE_VERSION_URL=http://your-server.com/path/version.json
-        3. 在项目根目录创建 .env.driving 文件并添加：
-           DRIVING_UPDATE_VERSION_URL=http://your-server.com/path/version.json
-        4. 默认值：https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/version.json
-
-    注意：
-    - 使用 --url 参数时，会自动将地址保存到 .env.driving 文件，下次无需再指定
-    - URL 应该是 version.json 文件的完整路径
+@click.option("--url", default=None, help="自定义 version.json 文件的完整 URL")
+def update(check: bool, force: bool, yes: bool, url: str = None):
+    """更新管理
 
     示例：
-        driving update               # 使用默认 URL 检查并安装更新
-        driving update --url http://your-server.com/path/version.json  # 使用自定义 URL
+        driving update               # 检查并安装更新
+        driving update --check       # 仅检查是否有新版本
         driving update --force       # 强制重新安装
         driving update -y            # 跳过确认提示
+        driving update --url http://your-server.com/path/version.json
     """
     import os
     import shutil
@@ -206,6 +134,31 @@ def update(force: bool, yes: bool, url: str = None):
 
     current_version = get_current_version()
     log_info(f"当前版本: {current_version}")
+
+    # --check 模式：仅检查版本，不安装
+    if check:
+        version_info = fetch_version_info(version_url)
+        if not version_info:
+            log_warning("无法检查更新，请稍后重试")
+            return
+        latest_version = version_info.get("version", "unknown")
+        log_info(f"最新版本: {latest_version}")
+        comparison = compare_versions(current_version, latest_version)
+        if comparison < 0:
+            log_warning(f"\n🎉 发现新版本: {latest_version}")
+            changelog = version_info.get("changelog", [])
+            if changelog:
+                log_info("\n更新内容:")
+                for item in changelog:
+                    log_info(f"  • {item}")
+            log_info("\n执行以下命令更新:")
+            log_info("  driving update")
+        elif comparison == 0:
+            log_success("\n✓ 已是最新版本")
+        else:
+            log_info("\n当前版本高于服务器版本")
+        return
+
     log_info(f"版本文件: {version_url}")
 
     # 如果使用了自定义 URL，保存到 driving.config.json
@@ -377,4 +330,4 @@ def update(force: bool, yes: bool, url: str = None):
 
 
 if __name__ == "__main__":
-    version()
+    update()
