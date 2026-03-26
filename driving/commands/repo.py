@@ -69,6 +69,36 @@ def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[s
     _install_local(config_mgr, project_root, local_path, repo_name, force)
 
 
+def _cleanup_stale_git_modules(git_root: Path, submodule_path: str):
+    """清理残留的 .git/modules 数据
+
+    当 submodule 的工作目录不存在，但 .git/modules 中有残留数据时，
+    自动清理以避免 git submodule add 报错。
+
+    清理规则：
+    - .git/modules/ai-driving 存在但 ai-driving/ 不存在 → 清理整个 modules/ai-driving
+    - .git/modules/ai-driving/<name> 存在但 ai-driving/<name>/ 不存在 → 只清理该子目录
+    """
+    import shutil
+
+    modules_dir = git_root / ".git" / "modules"
+    parts = Path(submodule_path).parts  # e.g. ('ai-driving', 'driving')
+
+    # 从最深层往上检查，找到需要清理的最小范围
+    for depth in range(len(parts), 0, -1):
+        partial_path = Path(*parts[:depth])
+        modules_path = modules_dir / partial_path
+        work_path = git_root / partial_path
+
+        # 工作目录不存在，或存在但为空（视为未初始化）
+        work_dir_empty = not work_path.exists() or (work_path.is_dir() and not any(work_path.iterdir()))
+        if modules_path.exists() and work_dir_empty:
+            log_warning(f"检测到残留 git modules 数据：{modules_path}，正在清理...")
+            shutil.rmtree(modules_path)
+            log_info(f"已清理：{modules_path}")
+            break  # 清理最小范围后停止
+
+
 def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
     """无参数 install：初始化所有未初始化的远程仓库"""
     try:
@@ -104,12 +134,38 @@ def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
             continue
 
         log_info(f"正在初始化仓库 '{repo_cfg.name}'...")
+
+        # 计算相对于 git 根目录的 submodule 路径
         try:
-            git_repo.git.submodule("update", "--init", repo_cfg.path)
-            log_success(f"仓库 '{repo_cfg.name}' 初始化成功")
-            initialized_count += 1
-        except git.exc.GitCommandError as e:
-            log_error(f"初始化仓库 '{repo_cfg.name}' 失败: {e}")
+            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root))
+        except ValueError:
+            submodule_path = repo_cfg.path
+
+        # 检查 submodule 是否已在 .gitmodules 中注册
+        registered_paths = [sm.path for sm in git_repo.submodules]
+        if submodule_path in registered_paths:
+            # 已注册：直接 update --init
+            try:
+                git_repo.git.submodule("update", "--init", submodule_path)
+                log_success(f"仓库 '{repo_cfg.name}' 初始化成功")
+                initialized_count += 1
+            except git.exc.GitCommandError as e:
+                log_error(f"初始化仓库 '{repo_cfg.name}' 失败: {e}")
+        else:
+            # 未注册：执行 git submodule add
+            if not repo_cfg.url:
+                log_error(f"仓库 '{repo_cfg.name}' 缺少 URL，无法添加 submodule")
+                continue
+            # 清理残留的 .git/modules 数据（目录不存在但 git modules 数据残留）
+            _cleanup_stale_git_modules(git_root, submodule_path)
+            try:
+                # 确保父目录存在
+                (git_root / submodule_path).parent.mkdir(parents=True, exist_ok=True)
+                git_repo.git.submodule("add", repo_cfg.url, submodule_path)
+                log_success(f"仓库 '{repo_cfg.name}' 添加并初始化成功")
+                initialized_count += 1
+            except git.exc.GitCommandError as e:
+                log_error(f"添加仓库 '{repo_cfg.name}' 失败: {e}")
 
     log_info(f"完成：初始化 {initialized_count} 个，跳过 {skipped_count} 个")
 
