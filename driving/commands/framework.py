@@ -107,7 +107,7 @@ def _resolve_framework_name(framework_name: str, all_frameworks: list[dict]) -> 
 
 @click.group(name="framework")
 def framework_group():
-    """框架仓库管理
+    """框架文档管理
 
     支持跨多个仓库查找、安装和管理框架。
     """
@@ -116,16 +116,16 @@ def framework_group():
 
 @framework_group.command(name="list")
 @click.argument("framework_name", required=False)
-@click.option("--json", "output_json", is_flag=True, help="以 JSON 格式输出")
-def framework_list(framework_name: Optional[str] = None, output_json: bool = False):
-    """显示可用的框架列表
+@click.option("--table", "output_table", is_flag=True, help="以表格格式输出")
+def framework_list(framework_name: Optional[str] = None, output_table: bool = False):
+    """显示可用的框架列表（默认 JSON 格式）
 
     合并所有已安装仓库的 gitlist.json 并展示完整框架列表，
-    同时显示每个框架所属的仓库名称（repo 列）。
+    同时显示每个框架所属的仓库名称（repo 字段）。
 
     Args:
         framework_name: 框架名称（可选），如果指定则只显示该框架
-        output_json: 是否以 JSON 格式输出
+        output_table: 是否以表格格式输出
     """
     try:
         config_manager = _get_config_manager()
@@ -146,29 +146,38 @@ def framework_list(framework_name: Optional[str] = None, output_json: bool = Fal
         else:
             frameworks = all_frameworks
 
-        # JSON 格式输出
-        if output_json:
+        # JSON 格式输出（默认）
+        if not output_table:
             processed = []
             for fw in frameworks:
-                fw_copy = {k: v for k, v in fw.items() if not k.startswith("_")}
                 repo_name_for_fw = fw.get("_repo_name", "")
-                if "sources" in fw_copy and fw_copy["sources"]:
-                    if is_local_framework(fw_copy):
-                        try:
-                            project_root = find_git_root()
+                if framework_name:
+                    # 指定了具体框架，输出完整字段
+                    fw_copy = {k: v for k, v in fw.items() if not k.startswith("_")}
+                    if "sources" in fw_copy and fw_copy["sources"]:
+                        if is_local_framework(fw_copy):
+                            try:
+                                project_root = find_git_root()
+                                fw_copy["sources"] = [
+                                    f"{project_root}/{s}" for s in fw_copy["sources"]
+                                ]
+                            except Exception as e:
+                                log_error(f"获取本地项目路径失败: {e}")
+                        else:
+                            base_dir = config_manager.get_framework_base_dir(repo_name_for_fw)
+                            project_name = fw_copy.get("project_name", "")
                             fw_copy["sources"] = [
-                                f"{project_root}/{s}" for s in fw_copy["sources"]
+                                f"{base_dir}/{project_name}/{s}" for s in fw_copy["sources"]
                             ]
-                        except Exception as e:
-                            log_error(f"获取本地项目路径失败: {e}")
-                    else:
-                        base_dir = config_manager.get_framework_base_dir(repo_name_for_fw)
-                        project_name = fw_copy.get("project_name", "")
-                        fw_copy["sources"] = [
-                            f"{base_dir}/{project_name}/{s}" for s in fw_copy["sources"]
-                        ]
-                fw_copy["repo"] = repo_name_for_fw
-                processed.append(fw_copy)
+                    fw_copy["repo"] = repo_name_for_fw
+                    processed.append(fw_copy)
+                else:
+                    # 默认列表，只输出 3 个核心字段
+                    processed.append({
+                        "name": fw.get("name", ""),
+                        "description": fw.get("description", ""),
+                        "repo": repo_name_for_fw,
+                    })
 
             output_data = {
                 "frameworks": processed,
@@ -420,6 +429,7 @@ def framework_sources(framework_name: str):
         for fw in matched_frameworks:
             fw_copy = {k: v for k, v in fw.items() if not k.startswith("_")}
             fw_repo_name = fw.get("_repo_name", repo_name)
+            fw_copy["repo"] = fw_repo_name
 
             if "sources" in fw_copy and fw_copy["sources"]:
                 if is_local_framework(fw_copy):
@@ -462,9 +472,10 @@ def framework_sources(framework_name: str):
 
         # 只保留核心字段
         core_fields = [
-            "name", "description", "project_name", "url",
+            "name", "repo", "description", "project_name", "url",
             "branch", "module", "creator", "date", "sources",
         ]
+        result["repo"] = result.pop("_repo_name", repo_name)
         filtered_result = {k: v for k, v in result.items() if k in core_fields}
 
         print(json.dumps(filtered_result, ensure_ascii=False, indent=2))
