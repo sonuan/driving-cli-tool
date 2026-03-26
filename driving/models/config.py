@@ -16,6 +16,7 @@ class RepoConfig:
     path: str  # 安装路径（相对于项目根目录，如 ai-driving/main）
     url: Optional[str] = None  # Git URL（remote 类型必填）
     local_path: Optional[str] = None  # 本地原始路径（local 类型可选，有值时创建软链接）
+    description: Optional[str] = None  # 仓库描述，用于 AI 关键词匹配
     skills: Optional[dict] = None  # 技能过滤配置，格式：{"enabled": [...], "disabled": [...]}
 
     def to_dict(self) -> dict:
@@ -27,6 +28,8 @@ class RepoConfig:
             "path": self.path,
             "local_path": self.local_path,
         }
+        if self.description is not None:
+            d["description"] = self.description
         # 只在有值时写入，保持 config.json 简洁
         if self.skills is not None:
             d["skills"] = self.skills
@@ -45,6 +48,7 @@ class RepoConfig:
             path=data["path"],
             url=data.get("url"),
             local_path=data.get("local_path"),
+            description=data.get("description"),
             skills=data.get("skills"),
         )
 

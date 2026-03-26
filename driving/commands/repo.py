@@ -44,13 +44,14 @@ def repo_group():
 @click.option("--url", default=None, help="远程 Git 仓库地址")
 @click.option("--local", "local_path", default=None, is_flag=False, flag_value="", help="注册本地仓库（可选路径）")
 @click.option("--name", "repo_name", default=None, help="自定义仓库名称")
+@click.option("--description", "description", default=None, help="仓库描述，用于 AI 关键词匹配")
 @click.option("--force", is_flag=True, default=False, help="强制覆盖已存在的同名仓库")
-def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[str], force: bool):
+def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[str], description: Optional[str], force: bool):
     """安装仓库
 
-    无参数：读取配置初始化所有未初始化的远程仓库。
-    --url：将远程 Git 仓库作为 submodule 安装。
-    --local [path]：注册本地仓库（有路径则创建软链接，无路径则创建普通目录）。
+    无参数：读取配置初始化所有未初始化的远程仓库。\n
+    --url：将远程 Git 仓库作为 submodule 安装。\n
+    --local [path]：注册本地仓库（有路径则创建软链接，无路径则创建普通目录）。\n
     """
     project_root = find_project_root()
     config_mgr = ConfigManager(project_root)
@@ -62,11 +63,11 @@ def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[s
 
     # 安装远程仓库
     if url is not None:
-        _install_remote(config_mgr, project_root, url, repo_name, force)
+        _install_remote(config_mgr, project_root, url, repo_name, force, description)
         return
 
     # 注册本地仓库（local_path 为 "" 表示 --local 无值，为具体路径表示有值）
-    _install_local(config_mgr, project_root, local_path, repo_name, force)
+    _install_local(config_mgr, project_root, local_path, repo_name, force, description)
 
 
 def _cleanup_stale_git_modules(git_root: Path, submodule_path: str):
@@ -170,7 +171,7 @@ def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
     log_info(f"完成：初始化 {initialized_count} 个，跳过 {skipped_count} 个")
 
 
-def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, repo_name: Optional[str], force: bool):
+def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, repo_name: Optional[str], force: bool, description: Optional[str] = None):
     """安装远程 Git 仓库（submodule）"""
     # 校验 Git URL 格式
     if not validate_git_url(url):
@@ -232,6 +233,7 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
         url=url,
         path=install_path,
         local_path=None,
+        description=description,
     )
     try:
         config_mgr.add_repo(repo_cfg)
@@ -246,7 +248,7 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
     log_info(f"  git commit -m 'Add repo {repo_name}'")
 
 
-def _install_local(config_mgr: ConfigManager, project_root: Path, local_path: str, repo_name: Optional[str], force: bool):
+def _install_local(config_mgr: ConfigManager, project_root: Path, local_path: str, repo_name: Optional[str], force: bool, description: Optional[str] = None):
     """注册本地仓库（软链接或普通目录）"""
     # 确定仓库名称
     if repo_name is None:
@@ -315,6 +317,7 @@ def _install_local(config_mgr: ConfigManager, project_root: Path, local_path: st
         url=None,
         path=install_path,
         local_path=stored_local_path,
+        description=description,
     )
     try:
         config_mgr.add_repo(repo_cfg)
@@ -329,10 +332,8 @@ def _install_local(config_mgr: ConfigManager, project_root: Path, local_path: st
 
 @repo_group.command(name="list")
 def repo_list():
-    """查看已安装的仓库列表
-
-    读取 driving.config.json 并展示所有已安装仓库的信息，区分 remote/local 类型。
-    """
+    """查看已安装的仓库列表（JSON 格式）"""
+    import json
     project_root = find_project_root()
     config_mgr = ConfigManager(project_root)
 
@@ -342,40 +343,29 @@ def repo_list():
         log_error(str(e))
         raise click.Abort()
 
-    if not repos:
-        log_info("尚未安装任何仓库")
-        log_info("使用 'driving repo install --url <git-url>' 安装远程仓库")
-        log_info("使用 'driving repo install --local [path]' 注册本地仓库")
-        return
-
-    log_info(f"已安装仓库（共 {len(repos)} 个）：")
-    log_info("")
-
-    remote_repos = [r for r in repos if r.type == "remote"]
-    local_repos = [r for r in repos if r.type == "local"]
-
-    if remote_repos:
-        log_info("远程仓库（remote）：")
-        for repo in remote_repos:
-            repo_dir = project_root / repo.path
-            # 检查是否已初始化
+    result = []
+    for repo in repos:
+        repo_dir = project_root / repo.path
+        if repo.type == "remote":
             is_init = repo_dir.exists() and any(repo_dir.iterdir())
-            status = "✓ 已初始化" if is_init else "✗ 未初始化"
-            log_info(f"  [{status}] {repo.name}")
-            log_info(f"    URL：{repo.url}")
-            log_info(f"    路径：{repo.path}")
+            status = "initialized" if is_init else "uninitialized"
+        else:
+            status = "exists" if (repo_dir.exists() or repo_dir.is_symlink()) else "missing"
 
-    if local_repos:
-        log_info("本地仓库（local）：")
-        for repo in local_repos:
-            repo_dir = project_root / repo.path
-            exists = repo_dir.exists() or repo_dir.is_symlink()
-            status = "✓ 存在" if exists else "✗ 不存在"
-            log_info(f"  [{status}] {repo.name}")
-            if repo.local_path:
-                log_info(f"    源路径：{repo.local_path}（软链接）")
-            else:
-                log_info(f"    路径：{repo.path}（普通目录）")
+        entry = {
+            "name": repo.name,
+            "type": repo.type,
+            "description": repo.description or "",
+            "path": repo.path,
+            "status": status,
+        }
+        if repo.type == "remote":
+            entry["url"] = repo.url
+        elif repo.local_path:
+            entry["local_path"] = repo.local_path
+        result.append(entry)
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 # ==================== repo uninstall ====================
