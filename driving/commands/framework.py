@@ -1,51 +1,58 @@
-"""框架仓库管理命令"""
+"""框架仓库管理命令
+
+提供 `driving framework` 子命令组，支持多仓库框架管理。
+"""
 
 import json
 from pathlib import Path
+from typing import Optional, Tuple
 
 import click
 import git
 from rich.console import Console
 from rich.table import Table
 
-from driving.models.framework import get_framework_by_name
-from driving.utils.config import (
-    check_environment,
-    get_all_gitlist_files,
-    get_driving_dir,
-    get_framework_base_dir,
-    get_gitlist_file,
-    is_local_mode,
-)
+from driving.utils.config_manager import ConfigManager, find_project_root
 from driving.utils.git_helper import clone_repository, find_git_root, is_local_framework
 from driving.utils.logger import log_error, log_info, log_success
 
 
-def load_all_frameworks() -> list[dict]:
-    """加载所有 gitlist.json 文件中的框架配置
+def _get_config_manager() -> ConfigManager:
+    """获取 ConfigManager 实例"""
+    return ConfigManager(find_project_root())
+
+
+def _load_all_frameworks_with_repo(config_manager: ConfigManager) -> list[dict]:
+    """从所有仓库的 gitlist.json 加载框架，并附加 repo_name 字段
+
+    Args:
+        config_manager: ConfigManager 实例
 
     Returns:
-        list[dict]: 所有框架配置列表
+        list[dict]: 每个框架 dict 包含额外的 _repo_name 字段
 
     Raises:
-        click.Abort: 如果没有找到任何配置文件或解析失败
+        click.Abort: 未找到任何配置文件或框架时
     """
-    gitlist_files = get_all_gitlist_files()
+    gitlist_files = config_manager.get_all_gitlist_files()
 
     if not gitlist_files:
         log_error("未找到任何 gitlist.json 配置文件")
         raise click.Abort()
 
     all_frameworks = []
-    for gitlist_file in gitlist_files:
+    for repo_name, gitlist_path in gitlist_files:
         try:
-            with open(gitlist_file, "r", encoding="utf-8") as f:
+            with open(gitlist_path, "r", encoding="utf-8") as f:
                 frameworks = json.load(f)
-                # 跳过模板条目
-                frameworks = [fw for fw in frameworks if fw.get("name") != "框架名称"]
-                all_frameworks.extend(frameworks)
+            # 跳过模板条目
+            frameworks = [fw for fw in frameworks if fw.get("name") != "框架名称"]
+            # 附加来源仓库名称
+            for fw in frameworks:
+                fw["_repo_name"] = repo_name
+            all_frameworks.extend(frameworks)
         except json.JSONDecodeError as e:
-            log_error(f"解析配置文件 {gitlist_file} 失败: {e}")
+            log_error(f"解析配置文件 {gitlist_path} 失败: {e}")
             continue
 
     if not all_frameworks:
@@ -55,131 +62,126 @@ def load_all_frameworks() -> list[dict]:
     return all_frameworks
 
 
-def find_framework_by_name(framework_name: str) -> tuple[dict, Path]:
-    """在所有 gitlist.json 文件中查找指定框架
+def _resolve_framework_name(framework_name: str, all_frameworks: list[dict]) -> Tuple[dict, str]:
+    """解析框架名称，支持 <repo-name>/<framework-name> 格式
 
     Args:
-        framework_name: 框架名称
+        framework_name: 框架名称，可以是 "name" 或 "repo/name" 格式
+        all_frameworks: 所有框架列表（含 _repo_name 字段）
 
     Returns:
-        tuple[dict, Path]: (框架配置, 所在的 gitlist.json 文件路径)
+        Tuple[dict, str]: (框架配置, 仓库名称)
 
     Raises:
-        click.Abort: 如果未找到框架
+        click.Abort: 未找到框架或存在同名冲突时
     """
-    gitlist_files = get_all_gitlist_files()
+    # 解析 <repo-name>/<framework-name> 格式
+    if "/" in framework_name:
+        parts = framework_name.split("/", 1)
+        repo_name, fw_name = parts[0], parts[1]
+        for fw in all_frameworks:
+            if fw.get("name") == fw_name and fw.get("_repo_name") == repo_name:
+                return fw, repo_name
+        log_error(f"未找到框架 '{fw_name}'（仓库：{repo_name}）")
+        raise click.Abort()
 
-    for gitlist_file in gitlist_files:
-        try:
-            with open(gitlist_file, "r", encoding="utf-8") as f:
-                frameworks = json.load(f)
-                for fw in frameworks:
-                    if fw.get("name") == framework_name:
-                        return fw, gitlist_file
-        except json.JSONDecodeError:
-            continue
+    # 普通名称查找，检测同名冲突
+    matched = [fw for fw in all_frameworks if fw.get("name") == framework_name]
 
-    log_error(f"未找到框架 '{framework_name}'")
-    raise click.Abort()
+    if not matched:
+        log_error(f"未找到框架 '{framework_name}'")
+        raise click.Abort()
+
+    if len(matched) > 1:
+        # 同名冲突，提示用户使用 <repo-name>/<framework-name> 格式
+        repos = [fw["_repo_name"] for fw in matched]
+        log_error(f"框架 '{framework_name}' 存在于多个仓库：{', '.join(repos)}")
+        log_error(f"请使用 '<repo-name>/{framework_name}' 格式指定具体仓库，例如：")
+        for repo in repos:
+            log_error(f"  driving framework install {repo}/{framework_name}")
+        raise click.Abort()
+
+    fw = matched[0]
+    return fw, fw["_repo_name"]
 
 
-@click.command(name="git-list")
+@click.group(name="framework")
+def framework_group():
+    """框架仓库管理命令组
+
+    支持跨多个仓库查找、安装和管理框架。
+    """
+    pass
+
+
+@framework_group.command(name="list")
 @click.argument("framework_name", required=False)
 @click.option("--json", "output_json", is_flag=True, help="以 JSON 格式输出")
-def git_list(framework_name: str = None, output_json: bool = False):
-    """显示可用的框架仓库列表
+def framework_list(framework_name: Optional[str] = None, output_json: bool = False):
+    """显示可用的框架列表
 
-    读取并显示所有 gitlist.json 中配置的框架仓库信息。
-
-    读取 ai-docs-local/frameworks/gitlist.json 和 ai-driving/frameworks/gitlist.json
+    合并所有已安装仓库的 gitlist.json 并展示完整框架列表，
+    同时显示每个框架所属的仓库名称（repo 列）。
 
     Args:
-        framework_name: 框架名称（可选），如果指定则只显示该框架的仓库（精确匹配）
+        framework_name: 框架名称（可选），如果指定则只显示该框架
         output_json: 是否以 JSON 格式输出
     """
     try:
-        # 检查环境配置
-        is_valid, error_msg = check_environment()
-        if not is_valid:
-            log_error(error_msg)
-            raise click.Abort()
-
-        local_mode = is_local_mode()
-
-        # 加载所有框架配置
-        all_frameworks = load_all_frameworks()
+        config_manager = _get_config_manager()
+        all_frameworks = _load_all_frameworks_with_repo(config_manager)
 
         # 如果指定了框架名，进行精确匹配并处理 extends
         if framework_name:
-            # 精确匹配框架
-            matched_framework = None
-            for fw in all_frameworks:
-                if fw.get("name", "") == framework_name:
-                    matched_framework = fw
-                    break
-
-            if not matched_framework:
-                log_error(f"未找到框架 '{framework_name}'")
-                raise click.Abort()
-
-            # 初始化结果列表，包含主框架
-            frameworks = [matched_framework]
+            main_fw, repo_name = _resolve_framework_name(framework_name, all_frameworks)
+            frameworks = [main_fw]
 
             # 处理 extends 字段
-            if "extends" in matched_framework and matched_framework["extends"]:
-                for extend_name in matched_framework["extends"]:
-                    # 查找扩展框架
+            if "extends" in main_fw and main_fw["extends"]:
+                for extend_name in main_fw["extends"]:
                     for fw in all_frameworks:
-                        if fw.get("name", "") == extend_name:
+                        if fw.get("name") == extend_name:
                             frameworks.append(fw)
                             break
         else:
             frameworks = all_frameworks
 
-        # 如果指定了 JSON 输出
+        # JSON 格式输出
         if output_json:
-            framework_base_dir = get_framework_base_dir()
-
-            # 处理 sources 字段，拼接完整路径
-            processed_frameworks = []
+            processed = []
             for fw in frameworks:
-                fw_copy = fw.copy()
+                fw_copy = {k: v for k, v in fw.items() if not k.startswith("_")}
+                repo_name_for_fw = fw.get("_repo_name", "")
                 if "sources" in fw_copy and fw_copy["sources"]:
-                    # 检查是否为本地项目
                     if is_local_framework(fw_copy):
-                        # 本地项目：使用当前项目根目录
                         try:
                             project_root = find_git_root()
-                            full_path_sources = []
-                            for source in fw_copy["sources"]:
-                                full_path = f"{project_root}/{source}"
-                                full_path_sources.append(full_path)
-                            fw_copy["sources"] = full_path_sources
+                            fw_copy["sources"] = [
+                                f"{project_root}/{s}" for s in fw_copy["sources"]
+                            ]
                         except Exception as e:
                             log_error(f"获取本地项目路径失败: {e}")
                     else:
-                        # 远程项目：使用 submodules 路径
+                        base_dir = config_manager.get_framework_base_dir(repo_name_for_fw)
                         project_name = fw_copy.get("project_name", "")
-                        full_path_sources = []
-                        for source in fw_copy["sources"]:
-                            full_path = f"{framework_base_dir}/{project_name}/{source}"
-                            full_path_sources.append(full_path)
-                        fw_copy["sources"] = full_path_sources
-
-                processed_frameworks.append(fw_copy)
+                        fw_copy["sources"] = [
+                            f"{base_dir}/{project_name}/{s}" for s in fw_copy["sources"]
+                        ]
+                fw_copy["repo"] = repo_name_for_fw
+                processed.append(fw_copy)
 
             output_data = {
-                "frameworks": processed_frameworks,
-                "install_path": str(framework_base_dir),
-                "mode": "local" if local_mode else "standard",
+                "frameworks": processed,
+                "mode": "multi-repo",
             }
             print(json.dumps(output_data, ensure_ascii=False, indent=2))
             return
 
-        # 使用 Rich 创建表格
+        # Rich 表格输出
         title = f"框架 '{framework_name}' 的仓库列表" if framework_name else "可用框架列表"
         table = Table(title=title)
         table.add_column("框架名称", style="cyan", no_wrap=True)
+        table.add_column("仓库", style="bright_cyan", no_wrap=True)
         table.add_column("项目名", style="green")
         table.add_column("URL", style="blue")
         table.add_column("分支", style="magenta")
@@ -190,6 +192,7 @@ def git_list(framework_name: str = None, output_json: bool = False):
         for fw in frameworks:
             table.add_row(
                 fw.get("name", ""),
+                fw.get("_repo_name", ""),
                 fw.get("project_name", ""),
                 fw.get("url", ""),
                 fw.get("branch", "-"),
@@ -201,13 +204,6 @@ def git_list(framework_name: str = None, output_json: bool = False):
         console = Console()
         console.print(table)
 
-        # 显示存储路径信息
-        framework_base_dir = get_framework_base_dir()
-        if local_mode:
-            log_info(f"\n框架将安装到: {framework_base_dir} (本地模式)")
-        else:
-            log_info(f"\n框架将安装到: {framework_base_dir}")
-
     except json.JSONDecodeError as e:
         log_error(f"解析配置文件失败: {e}")
         raise click.Abort()
@@ -216,49 +212,29 @@ def git_list(framework_name: str = None, output_json: bool = False):
         raise click.Abort()
 
 
-@click.command(name="git-install")
+@framework_group.command(name="install")
 @click.argument("framework_name")
-def git_install(framework_name: str):
+def framework_install(framework_name: str):
     """安装指定的框架仓库
 
+    支持 <repo-name>/<framework-name> 格式指定具体仓库。
     如果本地不存在该仓库，则克隆；如果已存在，则更新。
     如果框架有 extends 字段，会自动安装所有扩展框架。
 
-    框架将安装到 ai-driving/submodules/ 目录
+    框架将安装到对应仓库的 submodules/ 目录。
 
     Args:
-        framework_name: 框架名称
+        framework_name: 框架名称，支持 <repo-name>/<framework-name> 格式
     """
     try:
-        # 检查环境配置
-        is_valid, error_msg = check_environment()
-        if not is_valid:
-            log_error(error_msg)
-            raise click.Abort()
+        config_manager = _get_config_manager()
+        all_frameworks = _load_all_frameworks_with_repo(config_manager)
 
-        driving_dir = get_driving_dir()
-        gitlist_file = get_gitlist_file()
-        framework_base_dir = get_framework_base_dir()
-        local_mode = is_local_mode()
+        # 解析框架名称（支持 repo/name 格式，处理同名冲突）
+        main_framework, repo_name = _resolve_framework_name(framework_name, all_frameworks)
 
-        if not local_mode and not driving_dir.exists():
-            log_error(f"目录 {driving_dir} 不存在")
-            log_error("请先执行 'driving install' 命令添加 driving submodule")
-            raise click.Abort()
-
-        # 加载所有框架配置
-        all_frameworks = load_all_frameworks()
-
-        # 精确匹配主框架
-        main_framework = None
-        for fw in all_frameworks:
-            if fw.get("name", "") == framework_name:
-                main_framework = fw
-                break
-
-        if not main_framework:
-            log_error(f"框架 '{framework_name}' 不存在，请使用 'driving git-list' 查看可用框架")
-            raise click.Abort()
+        # 获取对应仓库的框架安装目录
+        framework_base_dir = config_manager.get_framework_base_dir(repo_name)
 
         # 收集所有需要安装的框架（包括主框架和扩展框架）
         frameworks_to_install = [main_framework]
@@ -267,9 +243,8 @@ def git_install(framework_name: str):
         if "extends" in main_framework and main_framework["extends"]:
             log_info(f"检测到扩展框架: {', '.join(main_framework['extends'])}")
             for extend_name in main_framework["extends"]:
-                # 查找扩展框架
                 for fw in all_frameworks:
-                    if fw.get("name", "") == extend_name:
+                    if fw.get("name") == extend_name:
                         frameworks_to_install.append(fw)
                         break
 
@@ -280,43 +255,42 @@ def git_install(framework_name: str):
         installed_count = 0
         skipped_count = 0
         for framework in frameworks_to_install:
-            framework_display_name = framework.get("name", "")
+            fw_display_name = framework.get("name", "")
+            fw_repo_name = framework.get("_repo_name", repo_name)
+            fw_base_dir = config_manager.get_framework_base_dir(fw_repo_name)
 
             log_info(f"\n{'='*50}")
-            log_info(f"正在处理框架: {framework_display_name}")
+            log_info(f"正在处理框架: {fw_display_name}（仓库：{fw_repo_name}）")
             log_info(f"{'='*50}")
 
             # 检查是否为本地项目
             if is_local_framework(framework):
-                log_info(f"检测到本地项目配置，跳过安装")
+                log_info("检测到本地项目配置，跳过安装")
                 log_info(f"源码路径: {', '.join(framework.get('sources', []))}")
                 skipped_count += 1
                 continue
 
-            repo_path = framework_base_dir / framework["project_name"]
+            repo_path = fw_base_dir / framework["project_name"]
             branch = framework.get("branch")
 
             if repo_path.exists():
-                log_info(f"仓库已存在，正在更新...")
+                log_info("仓库已存在，正在更新...")
                 repo = git.Repo(repo_path)
-
-                # 如果配置了分支，先切换到指定分支
                 if branch:
                     try:
                         repo.git.checkout(branch)
                         log_info(f"已切换到分支: {branch}")
                     except git.exc.GitCommandError:
                         log_info(f"分支 {branch} 不存在，保持当前分支")
-
                 repo.remotes.origin.pull()
-                log_success(f"✓ {framework_display_name} 更新成功！")
+                log_success(f"✓ {fw_display_name} 更新成功！")
             else:
                 if branch:
                     log_info(f"正在克隆仓库到 {repo_path} (分支: {branch})...")
                 else:
                     log_info(f"正在克隆仓库到 {repo_path}...")
                 clone_repository(framework["url"], repo_path, branch)
-                log_success(f"✓ {framework_display_name} 安装成功！")
+                log_success(f"✓ {fw_display_name} 安装成功！")
 
             log_info(f"框架路径: {repo_path}")
             if branch:
@@ -342,43 +316,28 @@ def git_install(framework_name: str):
         raise click.Abort()
 
 
-@click.command(name="git-checkout")
+@framework_group.command(name="checkout")
 @click.argument("framework_name")
 @click.argument("branch_name")
-def git_checkout(framework_name: str, branch_name: str):
+def framework_checkout(framework_name: str, branch_name: str):
     """切换框架仓库的分支
 
-    在 ai-driving/submodules/ 中切换指定框架的分支
+    在对应仓库的 submodules/ 中切换指定框架的分支。
 
     Args:
-        framework_name: 框架名称
+        framework_name: 框架名称，支持 <repo-name>/<framework-name> 格式
         branch_name: 分支名称
     """
     try:
-        # 检查环境配置
-        is_valid, error_msg = check_environment()
-        if not is_valid:
-            log_error(error_msg)
-            raise click.Abort()
+        config_manager = _get_config_manager()
+        all_frameworks = _load_all_frameworks_with_repo(config_manager)
 
-        driving_dir = get_driving_dir()
-        gitlist_file = get_gitlist_file()
-        framework_base_dir = get_framework_base_dir()
-        local_mode = is_local_mode()
-
-        if not local_mode and not driving_dir.exists():
-            log_error(f"目录 {driving_dir} 不存在")
-            log_error("请先执行 'driving install' 命令添加 driving submodule")
-            raise click.Abort()
-
-        framework = get_framework_by_name(gitlist_file, framework_name)
-        if not framework:
-            log_error(f"框架 '{framework_name}' 不存在，请使用 'driving git-list' 查看可用框架")
-            raise click.Abort()
+        framework, repo_name = _resolve_framework_name(framework_name, all_frameworks)
+        framework_base_dir = config_manager.get_framework_base_dir(repo_name)
 
         repo_path = framework_base_dir / framework["project_name"]
         if not repo_path.exists():
-            log_error(f"仓库不存在，请先执行 'driving git-install {framework_name}'")
+            log_error(f"仓库不存在，请先执行 'driving framework install {framework_name}'")
             raise click.Abort()
 
         log_info(f"正在切换到分支 {branch_name}...")
@@ -394,41 +353,26 @@ def git_checkout(framework_name: str, branch_name: str):
         raise click.Abort()
 
 
-@click.command(name="git-pull")
+@framework_group.command(name="pull")
 @click.argument("framework_name")
-def git_pull(framework_name: str):
+def framework_pull(framework_name: str):
     """更新指定的框架仓库
 
-    更新 ai-driving/submodules/ 中的指定框架
+    更新对应仓库 submodules/ 中的指定框架。
 
     Args:
-        framework_name: 框架名称
+        framework_name: 框架名称，支持 <repo-name>/<framework-name> 格式
     """
     try:
-        # 检查环境配置
-        is_valid, error_msg = check_environment()
-        if not is_valid:
-            log_error(error_msg)
-            raise click.Abort()
+        config_manager = _get_config_manager()
+        all_frameworks = _load_all_frameworks_with_repo(config_manager)
 
-        driving_dir = get_driving_dir()
-        gitlist_file = get_gitlist_file()
-        framework_base_dir = get_framework_base_dir()
-        local_mode = is_local_mode()
-
-        if not local_mode and not driving_dir.exists():
-            log_error(f"目录 {driving_dir} 不存在")
-            log_error("请先执行 'driving install' 命令添加 driving submodule")
-            raise click.Abort()
-
-        framework = get_framework_by_name(gitlist_file, framework_name)
-        if not framework:
-            log_error(f"框架 '{framework_name}' 不存在，请使用 'driving git-list' 查看可用框架")
-            raise click.Abort()
+        framework, repo_name = _resolve_framework_name(framework_name, all_frameworks)
+        framework_base_dir = config_manager.get_framework_base_dir(repo_name)
 
         repo_path = framework_base_dir / framework["project_name"]
         if not repo_path.exists():
-            log_error(f"仓库不存在，请先执行 'driving git-install {framework_name}'")
+            log_error(f"仓库不存在，请先执行 'driving framework install {framework_name}'")
             raise click.Abort()
 
         log_info("正在更新仓库...")
@@ -444,127 +388,85 @@ def git_pull(framework_name: str):
         raise click.Abort()
 
 
-@click.command(name="git-sources")
+@framework_group.command(name="sources")
 @click.argument("framework_name")
-def git_sources(framework_name: str):
+def framework_sources(framework_name: str):
     """获取指定框架的源码路径列表
 
     返回框架的完整源码路径信息（JSON 格式）。
+    路径基于对应仓库的 submodules/ 目录。
     如果框架有 extends 字段，会自动合并所有扩展框架的 sources。
 
-    读取 ai-docs-local/frameworks/gitlist.json 和 ai-driving/frameworks/gitlist.json
-
     Args:
-        framework_name: 框架名称（精确匹配）
-
-    示例:
-        driving git-sources xstatic
+        framework_name: 框架名称，支持 <repo-name>/<framework-name> 格式
     """
     try:
-        # 检查环境配置
-        is_valid, error_msg = check_environment()
-        if not is_valid:
-            log_error(error_msg)
-            raise click.Abort()
+        config_manager = _get_config_manager()
+        all_frameworks = _load_all_frameworks_with_repo(config_manager)
 
-        gitlist_file = get_gitlist_file()
-        local_mode = is_local_mode()
+        main_fw, repo_name = _resolve_framework_name(framework_name, all_frameworks)
 
-        # 加载所有框架配置
-        all_frameworks = load_all_frameworks()
-
-        # 精确匹配框架
-        matched_framework = None
-        for fw in all_frameworks:
-            if fw.get("name", "") == framework_name:
-                matched_framework = fw
-                break
-
-        if not matched_framework:
-            log_error(f"未找到框架 '{framework_name}'")
-            raise click.Abort()
-
-        # 初始化结果列表，包含主框架
-        matched_frameworks = [matched_framework]
-
-        # 处理 extends 字段
-        if "extends" in matched_framework and matched_framework["extends"]:
-            for extend_name in matched_framework["extends"]:
-                # 查找扩展框架
+        # 收集主框架和扩展框架
+        matched_frameworks = [main_fw]
+        if "extends" in main_fw and main_fw["extends"]:
+            for extend_name in main_fw["extends"]:
                 for fw in all_frameworks:
-                    if fw.get("name", "") == extend_name:
+                    if fw.get("name") == extend_name:
                         matched_frameworks.append(fw)
                         break
-
-        framework_base_dir = get_framework_base_dir()
 
         # 处理 sources 字段，拼接完整路径
         processed_frameworks = []
         for fw in matched_frameworks:
-            fw_copy = fw.copy()
+            fw_copy = {k: v for k, v in fw.items() if not k.startswith("_")}
+            fw_repo_name = fw.get("_repo_name", repo_name)
+
             if "sources" in fw_copy and fw_copy["sources"]:
-                # 检查是否为本地项目
                 if is_local_framework(fw_copy):
                     # 本地项目：使用当前项目根目录
                     try:
                         project_root = find_git_root()
-                        full_path_sources = []
-                        for source in fw_copy["sources"]:
-                            full_path = f"{project_root}/{source}"
-                            full_path_sources.append(full_path)
-                        fw_copy["sources"] = full_path_sources
+                        fw_copy["sources"] = [
+                            f"{project_root}/{s}" for s in fw_copy["sources"]
+                        ]
                     except Exception as e:
                         log_error(f"获取本地项目路径失败: {e}")
                         raise click.Abort()
                 else:
-                    # 远程项目：使用 submodules 路径
+                    # 远程项目：使用对应仓库的 submodules 路径
+                    base_dir = config_manager.get_framework_base_dir(fw_repo_name)
                     project_name = fw_copy.get("project_name", "")
-                    full_path_sources = []
-                    for source in fw_copy["sources"]:
-                        full_path = f"{framework_base_dir}/{project_name}/{source}"
-                        full_path_sources.append(full_path)
-                    fw_copy["sources"] = full_path_sources
+                    fw_copy["sources"] = [
+                        f"{base_dir}/{project_name}/{s}" for s in fw_copy["sources"]
+                    ]
 
             processed_frameworks.append(fw_copy)
 
-        # 如果有多个框架（包含 extends），合并所有 sources 到第一个
+        # 合并多个框架的 sources（处理 extends）
         if len(processed_frameworks) > 1:
-            first_framework = processed_frameworks[0]
-            all_sources = first_framework.get("sources", [])
-
-            # 合并其他框架的 sources
+            first = processed_frameworks[0]
+            all_sources = list(first.get("sources", []))
             for fw in processed_frameworks[1:]:
-                if "sources" in fw and fw["sources"]:
-                    all_sources.extend(fw["sources"])
-
-            # 去重并保持顺序
+                all_sources.extend(fw.get("sources", []))
+            # 去重保持顺序
             seen = set()
             unique_sources = []
-            for source in all_sources:
-                if source not in seen:
-                    seen.add(source)
-                    unique_sources.append(source)
-
-            first_framework["sources"] = unique_sources
-            result = first_framework
+            for s in all_sources:
+                if s not in seen:
+                    seen.add(s)
+                    unique_sources.append(s)
+            first["sources"] = unique_sources
+            result = first
         else:
             result = processed_frameworks[0]
 
-        # 只保留核心字段，移除文档相关字段
+        # 只保留核心字段
         core_fields = [
-            "name",
-            "description",
-            "project_name",
-            "url",
-            "branch",
-            "module",
-            "creator",
-            "date",
-            "sources",
+            "name", "description", "project_name", "url",
+            "branch", "module", "creator", "date", "sources",
         ]
         filtered_result = {k: v for k, v in result.items() if k in core_fields}
 
-        # 输出 JSON 格式
         print(json.dumps(filtered_result, ensure_ascii=False, indent=2))
 
     except json.JSONDecodeError as e:
@@ -573,3 +475,48 @@ def git_sources(framework_name: str):
     except Exception as e:
         log_error(f"获取源码列表失败: {e}")
         raise click.Abort()
+
+
+# ==================== 旧版命令（兼容保留） ====================
+# 以下命令保留旧名称，供 cli.py 向后兼容注册使用
+
+@click.command(name="git-list")
+@click.argument("framework_name", required=False)
+@click.option("--json", "output_json", is_flag=True, help="以 JSON 格式输出")
+def git_list(framework_name: Optional[str] = None, output_json: bool = False):
+    """[已废弃] 请使用 'driving framework list'"""
+    ctx = click.get_current_context()
+    ctx.invoke(framework_list, framework_name=framework_name, output_json=output_json)
+
+
+@click.command(name="git-install")
+@click.argument("framework_name")
+def git_install(framework_name: str):
+    """[已废弃] 请使用 'driving framework install'"""
+    ctx = click.get_current_context()
+    ctx.invoke(framework_install, framework_name=framework_name)
+
+
+@click.command(name="git-checkout")
+@click.argument("framework_name")
+@click.argument("branch_name")
+def git_checkout(framework_name: str, branch_name: str):
+    """[已废弃] 请使用 'driving framework checkout'"""
+    ctx = click.get_current_context()
+    ctx.invoke(framework_checkout, framework_name=framework_name, branch_name=branch_name)
+
+
+@click.command(name="git-pull")
+@click.argument("framework_name")
+def git_pull(framework_name: str):
+    """[已废弃] 请使用 'driving framework pull'"""
+    ctx = click.get_current_context()
+    ctx.invoke(framework_pull, framework_name=framework_name)
+
+
+@click.command(name="git-sources")
+@click.argument("framework_name")
+def git_sources(framework_name: str):
+    """[已废弃] 请使用 'driving framework sources'"""
+    ctx = click.get_current_context()
+    ctx.invoke(framework_sources, framework_name=framework_name)

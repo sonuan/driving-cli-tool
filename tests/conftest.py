@@ -1,8 +1,16 @@
 """Pytest 配置和共享 fixtures"""
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def disable_migration_check():
+    """自动禁用迁移检测，避免测试环境中的 .env.driving 触发警告干扰输出"""
+    with patch("driving.cli.check_migration_needed", return_value=False):
+        yield
 
 
 @pytest.fixture

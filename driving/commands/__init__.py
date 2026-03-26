@@ -1,5 +1,5 @@
 """命令实现模块"""
 
-from . import framework, ide, link, repo, skills, update
+from . import framework, ide, migrate, repo, skill, update
 
-__all__ = ["repo", "link", "framework", "ide", "skills", "update"]
+__all__ = ["repo", "framework", "ide", "skill", "migrate", "update"]

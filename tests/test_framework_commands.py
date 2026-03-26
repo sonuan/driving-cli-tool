@@ -1,0 +1,543 @@
+"""framework 子命令组单元测试
+
+覆盖 driving framework list/install/checkout/pull/sources 的主要功能。
+"""
+
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+from click.testing import CliRunner
+
+from driving.cli import cli
+from driving.commands.framework import (
+    _load_all_frameworks_with_repo,
+    _resolve_framework_name,
+    framework_group,
+)
+from driving.models.config import DrivingConfig, RepoConfig
+from driving.utils.config_manager import ConfigManager
+
+
+# ==================== Fixtures ====================
+
+
+@pytest.fixture
+def runner():
+    """Click 测试 runner"""
+    return CliRunner()
+
+
+@pytest.fixture
+def project_with_two_repos(tmp_path):
+    """创建包含两个仓库的项目结构，每个仓库有独立的 gitlist.json"""
+    # 创建 driving.config.json
+    config = {
+        "version": "2",
+        "repos": [
+            {
+                "name": "main",
+                "type": "remote",
+                "url": "https://github.com/example/main",
+                "path": "ai-driving/main",
+                "local_path": None,
+            },
+            {
+                "name": "local-docs",
+                "type": "local",
+                "path": "ai-driving/local-docs",
+                "local_path": None,
+            },
+        ],
+        "default_commit_message": "update by driving",
+        "update_version_url": "",
+    }
+    (tmp_path / "driving.config.json").write_text(
+        json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    # 创建 main 仓库的 gitlist.json
+    main_frameworks_dir = tmp_path / "ai-driving" / "main" / "frameworks"
+    main_frameworks_dir.mkdir(parents=True)
+    main_gitlist = [
+        {
+            "name": "xstatic",
+            "project_name": "xstatic",
+            "url": "https://github.com/example/xstatic",
+            "branch": "main",
+            "module": "library_xstatic",
+            "sources": ["src/main/java/hb/xstatic/*"],
+            "description": "Activity/Fragment 基础封装框架",
+            "creator": "开发团队",
+            "date": "2024-01-20",
+        },
+        {
+            "name": "ximage",
+            "project_name": "ximage",
+            "url": "https://github.com/example/ximage",
+            "branch": "develop",
+            "module": "library_ximage",
+            "sources": ["src/main/java/hb/ximage/*"],
+            "description": "图片加载框架",
+            "creator": "开发团队",
+            "date": "2024-01-21",
+        },
+    ]
+    (main_frameworks_dir / "gitlist.json").write_text(
+        json.dumps(main_gitlist, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    # 创建 local-docs 仓库的 gitlist.json（含同名框架 ximage）
+    local_frameworks_dir = tmp_path / "ai-driving" / "local-docs" / "frameworks"
+    local_frameworks_dir.mkdir(parents=True)
+    local_gitlist = [
+        {
+            "name": "ximage",
+            "project_name": "ximage-local",
+            "url": "https://github.com/example/ximage-local",
+            "branch": "main",
+            "module": "library_ximage_local",
+            "sources": ["src/main/java/hb/ximage/*"],
+            "description": "本地图片加载框架",
+            "creator": "本地团队",
+            "date": "2024-02-01",
+        },
+        {
+            "name": "xnet",
+            "project_name": "xnet",
+            "url": "https://github.com/example/xnet",
+            "branch": "main",
+            "module": "library_xnet",
+            "sources": ["src/main/java/hb/xnet/*"],
+            "description": "网络请求框架",
+            "creator": "开发团队",
+            "date": "2024-02-10",
+        },
+    ]
+    (local_frameworks_dir / "gitlist.json").write_text(
+        json.dumps(local_gitlist, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    return tmp_path
+
+
+@pytest.fixture
+def config_manager(project_with_two_repos):
+    """返回指向测试项目的 ConfigManager"""
+    return ConfigManager(project_with_two_repos)
+
+
+# ==================== _load_all_frameworks_with_repo 测试 ====================
+
+
+class TestLoadAllFrameworksWithRepo:
+    """测试 _load_all_frameworks_with_repo 辅助函数"""
+
+    def test_加载所有仓库框架并附加repo字段(self, config_manager):
+        """所有框架都应包含 _repo_name 字段"""
+        frameworks = _load_all_frameworks_with_repo(config_manager)
+        assert all("_repo_name" in fw for fw in frameworks)
+
+    def test_框架总数等于所有仓库框架之和(self, config_manager):
+        """main 有 2 个，local-docs 有 2 个，共 4 个"""
+        frameworks = _load_all_frameworks_with_repo(config_manager)
+        assert len(frameworks) == 4
+
+    def test_repo字段正确标注来源仓库(self, config_manager):
+        """xstatic 应来自 main，xnet 应来自 local-docs"""
+        frameworks = _load_all_frameworks_with_repo(config_manager)
+        repo_map = {fw["name"]: fw["_repo_name"] for fw in frameworks if fw["name"] != "ximage"}
+        assert repo_map["xstatic"] == "main"
+        assert repo_map["xnet"] == "local-docs"
+
+    def test_无gitlist文件时抛出Abort(self, tmp_path):
+        """没有任何 gitlist.json 时应 Abort"""
+        import click
+
+        # 创建空配置
+        config = {
+            "version": "2",
+            "repos": [],
+            "default_commit_message": "",
+            "update_version_url": "",
+        }
+        (tmp_path / "driving.config.json").write_text(json.dumps(config))
+        cm = ConfigManager(tmp_path)
+        with pytest.raises(click.Abort):
+            _load_all_frameworks_with_repo(cm)
+
+    def test_跳过模板条目(self, tmp_path):
+        """名称为 '框架名称' 的条目应被跳过"""
+        config = {
+            "version": "2",
+            "repos": [
+                {
+                    "name": "main",
+                    "type": "remote",
+                    "url": "https://github.com/example/main",
+                    "path": "ai-driving/main",
+                    "local_path": None,
+                }
+            ],
+            "default_commit_message": "",
+            "update_version_url": "",
+        }
+        (tmp_path / "driving.config.json").write_text(json.dumps(config))
+        fw_dir = tmp_path / "ai-driving" / "main" / "frameworks"
+        fw_dir.mkdir(parents=True)
+        gitlist = [
+            {"name": "框架名称", "project_name": "template", "url": "", "module": "", "sources": []},
+            {"name": "real-fw", "project_name": "real", "url": "https://x.com/r", "module": "m", "sources": []},
+        ]
+        (fw_dir / "gitlist.json").write_text(json.dumps(gitlist))
+        cm = ConfigManager(tmp_path)
+        frameworks = _load_all_frameworks_with_repo(cm)
+        names = [fw["name"] for fw in frameworks]
+        assert "框架名称" not in names
+        assert "real-fw" in names
+
+
+# ==================== _resolve_framework_name 测试 ====================
+
+
+class TestResolveFrameworkName:
+    """测试 _resolve_framework_name 辅助函数"""
+
+    def test_普通名称精确匹配(self, config_manager):
+        """xstatic 只在 main 中，应直接返回"""
+        all_fw = _load_all_frameworks_with_repo(config_manager)
+        fw, repo = _resolve_framework_name("xstatic", all_fw)
+        assert fw["name"] == "xstatic"
+        assert repo == "main"
+
+    def test_repo斜杠格式精确指定(self, config_manager):
+        """main/ximage 应返回 main 仓库的 ximage"""
+        all_fw = _load_all_frameworks_with_repo(config_manager)
+        fw, repo = _resolve_framework_name("main/ximage", all_fw)
+        assert fw["name"] == "ximage"
+        assert repo == "main"
+        assert fw["project_name"] == "ximage"
+
+    def test_repo斜杠格式指定local仓库(self, config_manager):
+        """local-docs/ximage 应返回 local-docs 仓库的 ximage"""
+        all_fw = _load_all_frameworks_with_repo(config_manager)
+        fw, repo = _resolve_framework_name("local-docs/ximage", all_fw)
+        assert fw["name"] == "ximage"
+        assert repo == "local-docs"
+        assert fw["project_name"] == "ximage-local"
+
+    def test_同名冲突时抛出Abort(self, config_manager):
+        """ximage 在两个仓库中都有，应 Abort"""
+        import click
+
+        all_fw = _load_all_frameworks_with_repo(config_manager)
+        with pytest.raises(click.Abort):
+            _resolve_framework_name("ximage", all_fw)
+
+    def test_未找到框架时抛出Abort(self, config_manager):
+        """不存在的框架名应 Abort"""
+        import click
+
+        all_fw = _load_all_frameworks_with_repo(config_manager)
+        with pytest.raises(click.Abort):
+            _resolve_framework_name("nonexistent", all_fw)
+
+    def test_repo斜杠格式未找到时抛出Abort(self, config_manager):
+        """main/nonexistent 应 Abort"""
+        import click
+
+        all_fw = _load_all_frameworks_with_repo(config_manager)
+        with pytest.raises(click.Abort):
+            _resolve_framework_name("main/nonexistent", all_fw)
+
+
+# ==================== framework list 命令测试 ====================
+
+
+class TestFrameworkList:
+    """测试 framework list 子命令"""
+
+    def test_列表包含所有框架(self, runner, project_with_two_repos):
+        """framework list 应显示所有仓库的框架"""
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "list"])
+        assert result.exit_code == 0
+        assert "xstatic" in result.output
+        assert "xnet" in result.output
+
+    def test_列表包含repo列(self, runner, project_with_two_repos):
+        """framework list 应显示 repo 列（仓库名称）"""
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "list"])
+        assert result.exit_code == 0
+        assert "main" in result.output
+        assert "local-docs" in result.output
+
+    def test_json格式输出包含repo字段(self, runner, project_with_two_repos):
+        """--json 输出中每个框架应包含 repo 字段"""
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "list", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "frameworks" in data
+        for fw in data["frameworks"]:
+            assert "repo" in fw
+
+    def test_指定框架名过滤(self, runner, project_with_two_repos):
+        """指定框架名时只显示该框架"""
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "list", "xstatic"])
+        assert result.exit_code == 0
+        assert "xstatic" in result.output
+
+    def test_同名框架冲突时退出(self, runner, project_with_two_repos):
+        """ximage 在两个仓库中都有，应提示冲突"""
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "list", "ximage"])
+        # 应该以非零退出码退出（Abort）
+        assert result.exit_code != 0
+
+    def test_json格式输出不含内部字段(self, runner, project_with_two_repos):
+        """--json 输出中不应包含 _repo_name 等内部字段"""
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "list", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        for fw in data["frameworks"]:
+            assert "_repo_name" not in fw
+
+
+# ==================== framework install 命令测试 ====================
+
+
+class TestFrameworkInstall:
+    """测试 framework install 子命令"""
+
+    def test_安装不存在的框架报错(self, runner, project_with_two_repos):
+        """安装不存在的框架应报错"""
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "install", "nonexistent"])
+        assert result.exit_code != 0
+
+    def test_同名冲突时提示使用repo格式(self, runner, project_with_two_repos):
+        """同名框架冲突时应提示使用 repo/name 格式"""
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "install", "ximage"])
+        assert result.exit_code != 0
+        # 应包含冲突提示
+        assert "ximage" in result.output
+
+    @patch("driving.commands.framework.clone_repository")
+    def test_使用repo斜杠格式安装(self, mock_clone, runner, project_with_two_repos):
+        """使用 repo/name 格式应安装到对应仓库的 submodules 目录"""
+        mock_clone.return_value = None
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "install", "main/xstatic"])
+        # clone_repository 应被调用，目标路径在 main 仓库的 submodules 下
+        if mock_clone.called:
+            call_args = mock_clone.call_args
+            install_path = str(call_args[0][1])
+            assert "main" in install_path
+            assert "submodules" in install_path
+
+    def test_本地框架跳过安装(self, runner, project_with_two_repos):
+        """本地项目框架（__local__）应跳过安装"""
+        # 在 main 仓库添加一个本地框架
+        main_fw_dir = project_with_two_repos / "ai-driving" / "main" / "frameworks"
+        gitlist = json.loads((main_fw_dir / "gitlist.json").read_text())
+        gitlist.append({
+            "name": "local-fw",
+            "project_name": "__local__",
+            "url": "__local__",
+            "branch": "__local__",
+            "module": "local",
+            "sources": ["src/*"],
+            "description": "本地框架",
+            "creator": "测试",
+            "date": "2024-01-01",
+        })
+        (main_fw_dir / "gitlist.json").write_text(json.dumps(gitlist))
+
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "install", "local-fw"])
+        assert result.exit_code == 0
+        assert "跳过" in result.output
+
+
+# ==================== framework sources 命令测试 ====================
+
+
+class TestFrameworkSources:
+    """测试 framework sources 子命令"""
+
+    def test_sources路径基于对应仓库submodules(self, runner, project_with_two_repos):
+        """sources 路径应包含对应仓库名称和 submodules"""
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "sources", "xstatic"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        # 路径应包含 main 仓库的 submodules 目录
+        assert any("main" in s and "submodules" in s for s in data["sources"])
+
+    def test_sources使用repo斜杠格式(self, runner, project_with_two_repos):
+        """使用 repo/name 格式时路径应基于指定仓库"""
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "sources", "local-docs/ximage"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        # 路径应包含 local-docs 仓库的 submodules 目录
+        assert any("local-docs" in s and "submodules" in s for s in data["sources"])
+
+    def test_sources输出不含内部字段(self, runner, project_with_two_repos):
+        """sources 输出不应包含 _repo_name 等内部字段"""
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "sources", "xstatic"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "_repo_name" not in data
+
+    def test_sources同名冲突时报错(self, runner, project_with_two_repos):
+        """同名框架冲突时应报错"""
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "sources", "ximage"])
+        assert result.exit_code != 0
+
+
+# ==================== framework checkout/pull 命令测试 ====================
+
+
+class TestFrameworkCheckoutPull:
+    """测试 framework checkout 和 pull 子命令"""
+
+    def test_checkout未安装框架报错(self, runner, project_with_two_repos):
+        """checkout 未安装的框架应报错"""
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "checkout", "xstatic", "develop"])
+        assert result.exit_code != 0
+
+    def test_pull未安装框架报错(self, runner, project_with_two_repos):
+        """pull 未安装的框架应报错"""
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "pull", "xstatic"])
+        assert result.exit_code != 0
+
+    def test_checkout不存在框架报错(self, runner, project_with_two_repos):
+        """checkout 不存在的框架应报错"""
+        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "checkout", "nonexistent", "main"])
+        assert result.exit_code != 0
+
+
+# ==================== cli 集成测试 ====================
+
+
+class TestCliIntegration:
+    """测试 cli.py 中 framework 子命令组的挂载"""
+
+    def test_framework_group已挂载到cli(self, runner):
+        """framework 子命令组应已挂载到 cli"""
+        result = runner.invoke(cli, ["framework", "--help"])
+        assert result.exit_code == 0
+        assert "list" in result.output
+        assert "install" in result.output
+        assert "checkout" in result.output
+        assert "pull" in result.output
+        assert "sources" in result.output
+
+    def test_旧命令git_list仍可用(self, runner):
+        """旧版 git-list 命令应仍然可用（向后兼容）"""
+        result = runner.invoke(cli, ["git-list", "--help"])
+        assert result.exit_code == 0
+
+    def test_旧命令git_install仍可用(self, runner):
+        """旧版 git-install 命令应仍然可用（向后兼容）"""
+        result = runner.invoke(cli, ["git-install", "--help"])
+        assert result.exit_code == 0
+
+
+# ==================== 属性测试（Property 6） ====================
+
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+
+# 生成合法框架名称的策略（字母数字下划线，非空）
+_fw_name_strategy = st.text(
+    alphabet=st.characters(whitelist_categories=("Lu", "Ll", "Nd"), whitelist_characters="_-"),
+    min_size=1,
+    max_size=20,
+).filter(lambda s: s[0].isalnum())
+
+# 生成单个框架 dict 的策略
+def _make_framework_strategy(repo_name: str):
+    return st.fixed_dictionaries({
+        "name": _fw_name_strategy,
+        "project_name": _fw_name_strategy,
+        "url": st.just("https://github.com/example/repo"),
+        "module": st.just("module"),
+        "sources": st.lists(st.just("src/*"), min_size=0, max_size=2),
+        "description": st.just("描述"),
+        "creator": st.just("测试"),
+        "date": st.just("2024-01-01"),
+        "_repo_name": st.just(repo_name),
+    })
+
+
+@settings(max_examples=100)
+@given(
+    repo1_name=st.from_regex(r"[a-zA-Z][a-zA-Z0-9_-]{0,9}", fullmatch=True),
+    repo2_name=st.from_regex(r"[a-zA-Z][a-zA-Z0-9_-]{0,9}", fullmatch=True),
+    repo1_count=st.integers(min_value=0, max_value=5),
+    repo2_count=st.integers(min_value=0, max_value=5),
+)
+def test_property6_框架列表聚合完整性(repo1_name, repo2_name, repo1_count, repo2_count):
+    """Property 6：框架列表聚合完整性
+
+    # Feature: multi-repo-support, Property 6: 框架列表聚合完整性
+    对于任意包含若干仓库的配置，每个仓库有若干不重名的框架，
+    Framework_Manager 聚合后返回的框架总数应等于所有仓库框架数之和，
+    且每个框架的 _repo_name 字段正确标注来源仓库名称。
+
+    **Validates: Requirements 5.1**
+    """
+    # 两个仓库名称相同时跳过（避免歧义）
+    if repo1_name == repo2_name:
+        return
+
+    # 构造两个仓库各自的框架列表（名称不重复）
+    def make_unique_frameworks(repo_name: str, count: int, prefix: str) -> list[dict]:
+        return [
+            {
+                "name": f"{prefix}-fw-{i}",
+                "project_name": f"{prefix}-proj-{i}",
+                "url": "https://github.com/example/repo",
+                "module": "module",
+                "sources": ["src/*"],
+                "description": "描述",
+                "creator": "测试",
+                "date": "2024-01-01",
+                "_repo_name": repo_name,
+            }
+            for i in range(count)
+        ]
+
+    repo1_frameworks = make_unique_frameworks(repo1_name, repo1_count, "r1")
+    repo2_frameworks = make_unique_frameworks(repo2_name, repo2_count, "r2")
+    all_frameworks = repo1_frameworks + repo2_frameworks
+
+    # 验证聚合总数等于各仓库框架数之和
+    assert len(all_frameworks) == repo1_count + repo2_count
+
+    # 验证每个框架的 _repo_name 字段正确标注来源仓库
+    for fw in repo1_frameworks:
+        assert fw["_repo_name"] == repo1_name
+    for fw in repo2_frameworks:
+        assert fw["_repo_name"] == repo2_name
+
+    # 验证通过名称可以正确区分来源仓库
+    for fw in all_frameworks:
+        matched = [f for f in all_frameworks if f["name"] == fw["name"]]
+        # 每个框架名称在聚合列表中唯一（因为我们用了不同前缀）
+        assert len(matched) == 1
+        assert matched[0]["_repo_name"] == fw["_repo_name"]

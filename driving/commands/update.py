@@ -10,8 +10,35 @@ from typing import Any, Dict, Optional
 import click
 
 from driving import __version__
-from driving.utils.config import DRIVING_UPDATE_VERSION_URL, update_env_file
+from driving.utils.config_manager import ConfigManager, find_project_root
 from driving.utils.logger import log_error, log_info, log_success, log_warning
+
+# 默认更新检查 URL
+_DEFAULT_UPDATE_VERSION_URL = (
+    "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/version.json"
+)
+
+
+def _get_update_version_url() -> str:
+    """从 driving.config.json 读取更新检查 URL，不存在则返回默认值"""
+    try:
+        config = ConfigManager(find_project_root()).load()
+        if config.update_version_url:
+            return config.update_version_url
+    except Exception:
+        pass
+    return _DEFAULT_UPDATE_VERSION_URL
+
+
+def _save_update_version_url(url: str) -> None:
+    """将更新检查 URL 保存到 driving.config.json"""
+    try:
+        manager = ConfigManager(find_project_root())
+        config = manager.load()
+        config.update_version_url = url
+        manager.save(config)
+    except Exception as e:
+        log_warning(f"保存更新 URL 失败: {e}")
 
 
 def get_current_version() -> str:
@@ -102,10 +129,8 @@ def version(check: bool, url: str = None):
         log_info(f"Driving CLI Tool 版本: {current_version}")
         return
 
-    # 确定使用的 version.json URL（优先级：命令行参数 > 环境变量 > .env.driving 文件 > 默认值）
-    version_url = url if url else DRIVING_UPDATE_VERSION_URL
-
-    # 检查更新
+    # 确定使用的 version.json URL（优先级：命令行参数 > driving.config.json > 默认值）
+    version_url = url if url else _get_update_version_url()
     log_info(f"当前版本: {current_version}")
     log_info(f"版本文件: {version_url}")
 
@@ -176,21 +201,18 @@ def update(force: bool, yes: bool, url: str = None):
     import sys
     import tempfile
 
-    # 确定使用的 version.json URL（优先级：命令行参数 > 环境变量 > .env.driving 文件 > 默认值）
-    version_url = url if url else DRIVING_UPDATE_VERSION_URL
+    # 确定使用的 version.json URL（优先级：命令行参数 > driving.config.json > 默认值）
+    version_url = url if url else _get_update_version_url()
 
     current_version = get_current_version()
     log_info(f"当前版本: {current_version}")
     log_info(f"版本文件: {version_url}")
 
-    # 如果使用了自定义 URL，保存到 .env.driving 文件
+    # 如果使用了自定义 URL，保存到 driving.config.json
     if url:
-        # 使用当前运行目录
-        current_dir = Path.cwd()
-
-        log_info(f"保存自定义版本文件 URL 到 {current_dir}/.env.driving")
-        update_env_file(current_dir, "DRIVING_UPDATE_VERSION_URL", url)
-        log_success(f"已将 DRIVING_UPDATE_VERSION_URL={url} 保存到 .env.driving 文件")
+        log_info(f"保存自定义版本文件 URL 到 driving.config.json")
+        _save_update_version_url(url)
+        log_success(f"已将更新 URL 保存到 driving.config.json")
 
     # 获取最新版本信息
     version_info = fetch_version_info(version_url)

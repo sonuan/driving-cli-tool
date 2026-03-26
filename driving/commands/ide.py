@@ -9,9 +9,32 @@ from typing import Any, Dict, Set, Tuple
 import click
 import git
 
-from driving.utils.config import SENSITIVE_KEYWORDS, get_driving_dir
+from driving.utils.config_manager import ConfigManager, find_project_root
 from driving.utils.git_helper import find_git_root
 from driving.utils.logger import log_error, log_info, log_success, log_warning
+
+# 敏感字段关键词列表（用于 IDE 配置中的敏感信息检测）
+SENSITIVE_KEYWORDS = [
+    "api_key",
+    "apikey",
+    "api-key",
+    "token",
+    "access_token",
+    "auth_token",
+    "secret",
+    "password",
+    "passwd",
+    "credential",
+    "auth",
+    "authorization",
+    "private_key",
+    "privatekey",
+]
+
+
+def _get_driving_dir():
+    """获取 ai-driving 目录路径（通过 ConfigManager）"""
+    return ConfigManager(find_project_root()).get_ai_driving_dir()
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -212,7 +235,7 @@ def ide_list():
     显示 install 目录下所有可用的 IDE 配置名称。
     """
     try:
-        driving_dir = get_driving_dir()
+        driving_dir = _get_driving_dir()
         install_dir = driving_dir / "install"
 
         if not install_dir.exists():
@@ -267,7 +290,7 @@ def ide_sync(ide_name: str):
             log_error("当前目录不在 Git 仓库中")
             raise click.Abort()
 
-        driving_dir = get_driving_dir()
+        driving_dir = _get_driving_dir()
         install_dir = driving_dir / "install"
 
         if not install_dir.exists():
