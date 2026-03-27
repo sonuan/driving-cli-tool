@@ -18,6 +18,7 @@ class RepoConfig:
     local_path: Optional[str] = None  # 本地原始路径（local 类型可选，有值时创建软链接）
     description: Optional[str] = None  # 仓库描述，用于 AI 关键词匹配
     skills: Optional[dict] = None  # 技能过滤配置，格式：{"enabled": [...], "disabled": [...]}
+    rules: Optional[dict] = None  # 规则过滤配置，格式：{"enabled": [...], "disabled": [...]}
 
     def to_dict(self) -> dict:
         """序列化为字典（JSON 兼容格式）"""
@@ -33,6 +34,8 @@ class RepoConfig:
         # 只在有值时写入，保持 config.json 简洁
         if self.skills is not None:
             d["skills"] = self.skills
+        if self.rules is not None:
+            d["rules"] = self.rules
         return d
 
     @classmethod
@@ -50,6 +53,7 @@ class RepoConfig:
             local_path=data.get("local_path"),
             description=data.get("description"),
             skills=data.get("skills"),
+            rules=data.get("rules"),
         )
 
 

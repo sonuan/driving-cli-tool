@@ -117,7 +117,8 @@ def framework_group():
 @framework_group.command(name="list")
 @click.argument("framework_name", required=False)
 @click.option("--table", "output_table", is_flag=True, help="以表格格式输出")
-def framework_list(framework_name: Optional[str] = None, output_table: bool = False):
+@click.option("--json", "output_json", is_flag=True, help="以 JSON 格式输出（默认）")
+def framework_list(framework_name: Optional[str] = None, output_table: bool = False, output_json: bool = False):
     """显示可用的框架列表（默认 JSON 格式）
 
     合并所有已安装仓库的 gitlist.json 并展示完整框架列表，

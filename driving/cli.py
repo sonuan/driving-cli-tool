@@ -3,7 +3,7 @@
 import click
 
 from driving import __version__
-from driving.commands import framework, ide, repo, skill, update
+from driving.commands import feature, framework, ide, repo, rule, skill, update
 
 
 @click.group()
@@ -27,6 +27,12 @@ cli.add_command(framework.framework_group)
 
 # 注册 skill 子命令组（多仓库 skill 管理）
 cli.add_command(skill.skill_group)
+
+# 注册 rule 子命令组（多仓库规则管理）
+cli.add_command(rule.rule_group)
+
+# 注册 feature 子命令组（多仓库需求功能管理）
+cli.add_command(feature.feature_group)
 
 # 注册更新命令
 cli.add_command(update.update)

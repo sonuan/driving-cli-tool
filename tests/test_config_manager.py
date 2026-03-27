@@ -386,3 +386,77 @@ class TestConfigManagerPaths:
         mgr = ConfigManager(tmp_path)
         mgr.load()
         assert mgr.get_all_skills_dirs() == []
+
+    def test_get_all_features_dirs_only_existing(self, tmp_path):
+        """只返回实际存在的 features/ 目录"""
+        mgr = ConfigManager(tmp_path)
+        mgr.load()
+        mgr.add_repo(make_repo("repo1"))
+        mgr.add_repo(make_repo("repo2"))
+
+        # 只为 repo1 创建 features 目录
+        features_dir = tmp_path / "ai-driving" / "repo1" / "features"
+        features_dir.mkdir(parents=True)
+
+        dirs = mgr.get_all_features_dirs()
+        assert len(dirs) == 1
+        assert dirs[0][0] == "repo1"
+        assert dirs[0][1] == features_dir
+
+    def test_get_all_features_dirs_empty_when_no_repos(self, tmp_path):
+        """没有仓库时返回空列表"""
+        mgr = ConfigManager(tmp_path)
+        mgr.load()
+        assert mgr.get_all_features_dirs() == []
+
+    def test_get_all_features_dirs_multiple_repos(self, tmp_path):
+        """多个仓库都有 features/ 目录时全部返回"""
+        mgr = ConfigManager(tmp_path)
+        mgr.load()
+        mgr.add_repo(make_repo("repo1"))
+        mgr.add_repo(make_repo("repo2"))
+
+        for name in ("repo1", "repo2"):
+            (tmp_path / "ai-driving" / name / "features").mkdir(parents=True)
+
+        dirs = mgr.get_all_features_dirs()
+        assert len(dirs) == 2
+        names = {d[0] for d in dirs}
+        assert names == {"repo1", "repo2"}
+
+    def test_get_all_rules_dirs_only_existing(self, tmp_path):
+        """只返回实际存在的 rules/ 目录"""
+        mgr = ConfigManager(tmp_path)
+        mgr.load()
+        mgr.add_repo(make_repo("repo1"))
+        mgr.add_repo(make_repo("repo2"))
+
+        # 只为 repo2 创建 rules 目录
+        rules_dir = tmp_path / "ai-driving" / "repo2" / "rules"
+        rules_dir.mkdir(parents=True)
+
+        dirs = mgr.get_all_rules_dirs()
+        assert len(dirs) == 1
+        assert dirs[0][0] == "repo2"
+        assert dirs[0][1] == rules_dir
+
+    def test_get_all_rules_dirs_empty_when_no_repos(self, tmp_path):
+        """没有仓库时返回空列表"""
+        mgr = ConfigManager(tmp_path)
+        mgr.load()
+        assert mgr.get_all_rules_dirs() == []
+
+    def test_get_all_rules_dirs_multiple_repos(self, tmp_path):
+        """多个仓库都有 rules/ 目录时全部返回"""
+        mgr = ConfigManager(tmp_path)
+        mgr.load()
+        mgr.add_repo(make_repo("repo1"))
+        mgr.add_repo(make_repo("repo2"))
+
+        for name in ("repo1", "repo2"):
+            (tmp_path / "ai-driving" / name / "rules").mkdir(parents=True)
+
+        dirs = mgr.get_all_rules_dirs()
+        assert len(dirs) == 2
+        names = {d[0] for d in dirs}
+        assert names == {"repo1", "repo2"}

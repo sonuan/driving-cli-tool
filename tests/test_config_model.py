@@ -97,6 +97,33 @@ class TestRepoConfig:
         with pytest.raises(KeyError):
             RepoConfig.from_dict({"name": "main", "type": "remote"})  # 缺少 path
 
+    def test_rules_none_not_in_to_dict(self):
+        """rules=None 时，to_dict() 输出不应包含 rules 键"""
+        repo = RepoConfig(name="r", type="local", path="ai-driving/r", rules=None)
+        d = repo.to_dict()
+        assert "rules" not in d
+
+    def test_rules_value_in_to_dict(self):
+        """rules 有值时，to_dict() 应包含 rules 键"""
+        rules = {"enabled": ["nav", "style"], "disabled": []}
+        repo = RepoConfig(name="r", type="local", path="ai-driving/r", rules=rules)
+        d = repo.to_dict()
+        assert "rules" in d
+        assert d["rules"] == rules
+
+    def test_rules_roundtrip(self):
+        """rules 字段通过 to_dict() / from_dict() 往返后应保持一致"""
+        rules = {"enabled": ["nav"], "disabled": ["old-rule"]}
+        repo = RepoConfig(name="r", type="local", path="ai-driving/r", rules=rules)
+        restored = RepoConfig.from_dict(repo.to_dict())
+        assert restored.rules == rules
+
+    def test_rules_none_roundtrip(self):
+        """rules=None 往返后仍为 None"""
+        repo = RepoConfig(name="r", type="local", path="ai-driving/r", rules=None)
+        restored = RepoConfig.from_dict(repo.to_dict())
+        assert restored.rules is None
+
 
 class TestDrivingConfig:
     """DrivingConfig 序列化测试"""

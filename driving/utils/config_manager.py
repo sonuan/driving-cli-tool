@@ -253,6 +253,36 @@ class ConfigManager:
                 result.append((repo.name, skills_dir))
         return result
 
+    def get_all_features_dirs(self) -> List[Tuple[str, Path]]:
+        """返回所有仓库的 features/ 目录路径列表
+
+        只返回目录实际存在的条目。
+
+        Returns:
+            List[Tuple[str, Path]]: [(repo_name, features_dir_path), ...] 列表
+        """
+        result = []
+        for repo in self.get_all_repos():
+            features_dir = self.get_repo_dir(repo.name) / "features"
+            if features_dir.exists():
+                result.append((repo.name, features_dir))
+        return result
+
+    def get_all_rules_dirs(self) -> List[Tuple[str, Path]]:
+        """返回所有仓库的 rules/ 目录路径列表
+
+        只返回目录实际存在的条目。
+
+        Returns:
+            List[Tuple[str, Path]]: [(repo_name, rules_dir_path), ...] 列表
+        """
+        result = []
+        for repo in self.get_all_repos():
+            rules_dir = self.get_repo_dir(repo.name) / "rules"
+            if rules_dir.exists():
+                result.append((repo.name, rules_dir))
+        return result
+
     def update_repo(self, repo: RepoConfig) -> None:
         """更新已存在仓库的配置
 
