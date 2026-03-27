@@ -92,7 +92,7 @@ def parse_yaml_simple(yaml_content: str) -> Optional[Dict[str, str]]:
 
 
 def parse_skill_yaml(skill_md_path: Path) -> Optional[Dict[str, str]]:
-    """解析 SKILL.md 文件的 YAML 头信息
+    """解析 SKILL.md 文件的 YAML 头信息，逐行读取到第二个 --- 即停止
 
     Args:
         skill_md_path: SKILL.md 文件路径
@@ -101,33 +101,26 @@ def parse_skill_yaml(skill_md_path: Path) -> Optional[Dict[str, str]]:
         Dict: 包含 name 和 description 的字典，如果解析失败则返回 None
     """
     try:
-        content = skill_md_path.read_text(encoding="utf-8")
+        yaml_lines = []
+        with skill_md_path.open(encoding="utf-8") as f:
+            for lineno, line in enumerate(f):
+                if lineno == 0:
+                    if line.rstrip("\n") != "---":
+                        return None
+                    continue
+                if line.strip() == "---":
+                    break
+                yaml_lines.append(line)
+            else:
+                return None  # 未找到结束 ---
 
-        # 检查是否有 YAML 头
-        if not content.startswith("---"):
-            return None
+        yaml_content = "".join(yaml_lines).strip()
 
-        # 按独立行的 --- 分割（避免 description 内容含 --- 导致误分割）
-        lines = content.split("\n")
-        end_idx = None
-        for i, line in enumerate(lines[1:], start=1):
-            if line.strip() == "---":
-                end_idx = i
-                break
-
-        if end_idx is None:
-            return None
-
-        yaml_content = "\n".join(lines[1:end_idx]).strip()
-
-        # 优先使用 PyYAML 解析
         if HAS_YAML:
             try:
                 yaml_data = yaml.safe_load(yaml_content)
-
                 if not yaml_data or "name" not in yaml_data:
                     return None
-
                 return {
                     "name": yaml_data.get("name", ""),
                     "description": yaml_data.get("description", ""),
@@ -146,7 +139,7 @@ def parse_skill_yaml(skill_md_path: Path) -> Optional[Dict[str, str]]:
 def scan_skills_from_dir(repo_name: str, skills_dir: Path, quiet: bool = False) -> List[Dict[str, str]]:
     """扫描单个仓库的 skills 目录，返回技能列表
 
-    每个技能的 location 字段为完整路径：ai-driving/<repo-name>/skills/<skill-name>/
+    每个技能的 path 字段为完整路径：ai-driving/<repo-name>/skills/<skill-name>/
 
     Args:
         repo_name: 仓库名称
@@ -154,7 +147,7 @@ def scan_skills_from_dir(repo_name: str, skills_dir: Path, quiet: bool = False) 
         quiet: 静默模式，不输出日志（用于机器读取场景）
 
     Returns:
-        List[Dict]: 技能列表，每个技能包含 name、description、location 字段
+        List[Dict]: 技能列表，每个技能包含 name、description、path 字段
     """
     skills = []
 
@@ -182,8 +175,7 @@ def scan_skills_from_dir(repo_name: str, skills_dir: Path, quiet: bool = False) 
                     log_warning(f"跳过技能 {skill_info['name']}：description 为空")
                 continue
 
-            # 设置完整路径作为 location
-            skill_info["location"] = f"ai-driving/{repo_name}/skills/{skill_dir.name}/"
+            skill_info["path"] = f"ai-driving/{repo_name}/skills/{skill_dir.name}/"
             skills.append(skill_info)
             if not quiet:
                 log_info(f"发现技能: {skill_info['name']} (来自仓库 {repo_name})")
@@ -207,7 +199,7 @@ def merge_skills_from_all_repos(
         skills_dirs: [(repo_name, skills_dir_path), ...] 列表
 
     Returns:
-        List[Dict]: 合并后的技能列表，每个技能包含 name、description、location 字段
+        List[Dict]: 合并后的技能列表，每个技能包含 name、description、path 字段
     """
     merged: Dict[str, Dict[str, str]] = {}  # skill_name -> skill_info
     result: List[Dict[str, str]] = []
@@ -227,20 +219,18 @@ def merge_skills_from_all_repos(
             enabled = rc.skills.get("enabled") or []
             disabled = rc.skills.get("disabled") or []
             if enabled:
-                # 白名单模式：只保留启用列表中的技能
                 repo_skills = [s for s in repo_skills if s["name"] in enabled]
             elif disabled:
-                # 黑名单模式：排除禁用列表中的技能
                 repo_skills = [s for s in repo_skills if s["name"] not in disabled]
 
         for skill in repo_skills:
             skill_name = skill["name"]
             if skill_name in merged:
-                existing_location = merged[skill_name]["location"]
+                existing_path = merged[skill_name]["path"]
                 if not quiet:
                     log_warning(
                         f"技能 '{skill_name}' 在多个仓库中存在，"
-                        f"使用 {existing_location}（跳过 {skill['location']}）"
+                        f"使用 {existing_path}（跳过 {skill['path']}）"
                     )
             else:
                 merged[skill_name] = skill
@@ -267,7 +257,7 @@ def generate_available_skills_content(skills: List[Dict[str, str]]) -> str:
 <skill>
 <name>{skill['name']}</name>
 <description>{skill['description']}</description>
-<location>{skill['location']}</location>
+<path>{skill['path']}</path>
 </skill>
 """
 
@@ -387,7 +377,7 @@ def skill_sync():
     然后更新 AGENTS.md 文件中的 <skills_system> 部分，保留其他内容不变。
 
     同名技能按仓库在配置文件中的顺序去重（先配置的优先）。
-    <location> 字段为完整路径：ai-driving/<repo-name>/skills/<skill-name>/
+    path 字段为完整路径：ai-driving/<repo-name>/skills/<skill-name>/
     """
     try:
         # 在命令执行时输出 PyYAML 警告
@@ -435,7 +425,7 @@ def skill_sync():
                 else skill["description"]
             )
             log_info(f"  - {skill['name']}: {desc}")
-            log_info(f"    📁 {skill['location']}")
+            log_info(f"    📁 {skill['path']}")
 
     except click.Abort:
         raise
@@ -445,16 +435,14 @@ def skill_sync():
 
 
 @skill_group.command(name="load")
-@click.option("--format", "output_format", default="json", type=click.Choice(["xml", "json"]), help="输出格式（xml 或 json）")
-def skill_load(output_format: str):
+def skill_load():
     """输出当前所有可用技能的完整信息，供 AI 会话注入上下文
 
     扫描所有已安装仓库的 skills/ 目录，读取每个技能的 SKILL.md 头信息，
-    以结构化格式输出到 stdout，可直接被 AI 会话读取作为上下文。
+    以 JSON 数组格式输出到 stdout，可直接被 AI 会话读取作为上下文。
 
     示例：
         driving skill load
-        driving skill load --format json
     """
     import json as json_module
 
@@ -464,33 +452,21 @@ def skill_load(output_format: str):
 
         skills_dirs = config_manager.get_all_skills_dirs()
         if not skills_dirs:
-            click.echo("[]" if output_format == "json" else "<skills></skills>")
+            click.echo("[]")
             return
 
         repo_configs = config_manager.get_all_repos()
         skills = merge_skills_from_all_repos(skills_dirs, quiet=True, repo_configs=repo_configs)
 
-        if output_format == "json":
-            output = [
-                {
-                    "name": s["name"],
-                    "description": s["description"],
-                    "location": s["location"],
-                }
-                for s in sorted(skills, key=lambda x: x["name"])
-            ]
-            click.echo(json_module.dumps(output, ensure_ascii=False, indent=2))
-        else:
-            # XML 格式：与 AGENTS.md 中 available_skills 结构一致
-            lines = ["<available_skills>"]
-            for s in sorted(skills, key=lambda x: x["name"]):
-                lines.append("<skill>")
-                lines.append(f"<name>{s['name']}</name>")
-                lines.append(f"<description>{s['description']}</description>")
-                lines.append(f"<location>{s['location']}</location>")
-                lines.append("</skill>")
-            lines.append("</available_skills>")
-            click.echo("\n".join(lines))
+        output = [
+            {
+                "name": s["name"],
+                "description": s["description"],
+                "path": s["path"],
+            }
+            for s in sorted(skills, key=lambda x: x["name"])
+        ]
+        click.echo(json_module.dumps(output, ensure_ascii=False, indent=2))
 
     except Exception as e:
         log_error(f"加载技能列表失败: {e}")

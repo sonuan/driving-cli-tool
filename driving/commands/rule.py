@@ -172,7 +172,7 @@ def scan_rules_from_dir(repo_name: str, rules_dir: Path, quiet: bool = False, he
         header_only: True 时只解析 frontmatter，不读取正文（更快）
 
     Returns:
-        List[Dict]: 规则列表，每条包含 name、description、location、content 字段
+        List[Dict]: 规则列表，每条包含 name、description、path、content 字段
     """
     rules = []
 
@@ -187,7 +187,7 @@ def scan_rules_from_dir(repo_name: str, rules_dir: Path, quiet: bool = False, he
             continue
 
         file_stem = rule_file.stem
-        rule_info["location"] = f"ai-driving/{repo_name}/rules/{file_stem}.md"
+        rule_info["path"] = f"ai-driving/{repo_name}/rules/{file_stem}.md"
         rules.append(rule_info)
 
         if not quiet:
@@ -244,7 +244,7 @@ def rule_load():
     扫描所有已安装仓库的 rules/ 目录，读取每个规则文件的 YAML frontmatter 和正文，
     以 JSON 数组格式输出到 stdout，可直接被 AI 会话读取作为上下文。
 
-    输出字段：name、description、location
+    输出字段：name、description、path
 
     示例：
         driving rule load
@@ -273,7 +273,7 @@ def rule_load():
             {
                 "name": r["name"],
                 "description": r["description"],
-                "location": r["location"],
+                "path": r["path"],
             }
             for r in all_rules
         ]
@@ -399,8 +399,7 @@ def rule_list(repo_name: Optional[str], edit: bool):
                 for r in rules:
                     rname_rule = r["name"]
                     mark = "✓" if _is_enabled(rc, rname_rule) else "✗"
-                    desc = r.get("description", "")
-                    click.echo(f"  [{mark}] {rname_rule}" + (f" — {desc}" if desc else ""))
+                    click.echo(f"  [{mark}] {rname_rule}")
                     total += 1
             click.echo(f"\n共 {total} 条规则  （使用 --edit 进入编辑模式）")
 

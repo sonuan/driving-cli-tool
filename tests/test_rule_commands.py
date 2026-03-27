@@ -126,14 +126,14 @@ class TestScanRulesFromDir:
 
         result = scan_rules_from_dir("my-local", rules_dir)
         assert len(result) == 1
-        assert result[0]["location"] == "ai-driving/my-local/rules/nav.md"
+        assert result[0]["path"] == "ai-driving/my-local/rules/nav.md"
 
     def test_location包含仓库名(self, tmp_path):
         rules_dir = tmp_path / "rules"
         _make_rule_md(rules_dir / "code.md", "code-rules", "代码规则", "内容")
 
         result = scan_rules_from_dir("driving", rules_dir)
-        assert result[0]["location"].startswith("ai-driving/driving/")
+        assert result[0]["path"].startswith("ai-driving/driving/")
 
     def test_跳过无frontmatter文件(self, tmp_path):
         rules_dir = tmp_path / "rules"
@@ -181,7 +181,7 @@ class TestScanRulesFromDir:
 
 class TestFilterRulesByConfig:
     def _make_rules(self, names):
-        return [{"name": n, "description": "", "location": f"ai-driving/r/rules/{n}.md", "content": ""} for n in names]
+        return [{"name": n, "description": "", "path": f"ai-driving/r/rules/{n}.md", "content": ""} for n in names]
 
     def _make_repo_config(self, rules_cfg):
         return RepoConfig(name="repo", type="local", path="ai-driving/repo", rules=rules_cfg)
@@ -294,7 +294,7 @@ class TestRuleLoadCommand:
         for item in data:
             assert "name" in item
             assert "description" in item
-            assert "location" in item
+            assert "path" in item
             assert "content" not in item  # rule load 不返回正文
 
     def test_load_location格式正确(self, runner, project_with_rules):
@@ -303,8 +303,8 @@ class TestRuleLoadCommand:
         assert result.exit_code == 0
         data = json.loads(result.output)
         for item in data:
-            assert item["location"].startswith("ai-driving/")
-            assert item["location"].endswith(".md")
+            assert item["path"].startswith("ai-driving/")
+            assert item["path"].endswith(".md")
 
     def test_load无规则目录时返回空数组(self, runner, tmp_path):
         _make_config(tmp_path, [
@@ -421,11 +421,11 @@ def test_property5_rule输出字段完整性(
     for item in result:
         assert "name" in item
         assert "description" in item
-        assert "location" in item
+        assert "path" in item
         assert "content" in item
         # location 格式验证
-        assert item["location"].startswith(f"ai-driving/{repo_name}/rules/")
-        assert item["location"].endswith(".md")
+        assert item["path"].startswith(f"ai-driving/{repo_name}/rules/")
+        assert item["path"].endswith(".md")
 
 
 # Feature: feature-and-rule-commands, Property 6: content 不含 frontmatter
@@ -478,7 +478,7 @@ def test_property7_规则过滤正确性(rule_names, enabled, disabled):
     **Validates: Requirements 2.6, 4.2, 4.3, 4.4**
     """
     rules = [
-        {"name": n, "description": "", "location": f"ai-driving/r/rules/{n}.md", "content": ""}
+        {"name": n, "description": "", "path": f"ai-driving/r/rules/{n}.md", "content": ""}
         for n in rule_names
     ]
     rule_name_set = set(rule_names)

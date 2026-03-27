@@ -199,14 +199,14 @@ class TestScanSkillsFromDir:
 
         result = scan_skills_from_dir("main", skills_dir)
         assert len(result) == 1
-        assert result[0]["location"] == "ai-driving/main/skills/my-skill/"
+        assert result[0]["path"] == "ai-driving/main/skills/my-skill/"
 
     def test_location路径包含仓库名(self, tmp_path):
         skills_dir = tmp_path / "skills"
         _make_skill_md(skills_dir / "test-skill", "test-skill", "描述")
 
         result = scan_skills_from_dir("local-docs", skills_dir)
-        assert result[0]["location"] == "ai-driving/local-docs/skills/test-skill/"
+        assert result[0]["path"] == "ai-driving/local-docs/skills/test-skill/"
 
     def test_跳过无SKILL_md的目录(self, tmp_path):
         skills_dir = tmp_path / "skills"
@@ -271,7 +271,7 @@ class TestMergeSkillsFromAllRepos:
         result = merge_skills_from_all_repos([("main", main_skills), ("local", local_skills)])
         assert len(result) == 1
         assert result[0]["description"] == "main 版本描述"
-        assert result[0]["location"] == "ai-driving/main/skills/code-review/"
+        assert result[0]["path"] == "ai-driving/main/skills/code-review/"
 
     def test_同名技能后配置的被跳过(self, tmp_path):
         """后配置仓库的同名技能应被跳过，location 应指向先配置的仓库"""
@@ -282,7 +282,7 @@ class TestMergeSkillsFromAllRepos:
 
         result = merge_skills_from_all_repos([("main", main_skills), ("local", local_skills)])
         assert len(result) == 1
-        assert "main" in result[0]["location"]
+        assert "main" in result[0]["path"]
 
     def test_空仓库列表返回空列表(self):
         result = merge_skills_from_all_repos([])
@@ -311,7 +311,7 @@ class TestGenerateAvailableSkillsContent:
 
     def test_生成包含技能名称和描述(self):
         skills = [
-            {"name": "skill-a", "description": "描述 A", "location": "ai-driving/main/skills/skill-a/"},
+            {"name": "skill-a", "description": "描述 A", "path": "ai-driving/main/skills/skill-a/"},
         ]
         content = generate_available_skills_content(skills)
         assert "skill-a" in content
@@ -320,15 +320,15 @@ class TestGenerateAvailableSkillsContent:
 
     def test_location字段出现在输出中(self):
         skills = [
-            {"name": "my-skill", "description": "描述", "location": "ai-driving/repo/skills/my-skill/"},
+            {"name": "my-skill", "description": "描述", "path": "ai-driving/repo/skills/my-skill/"},
         ]
         content = generate_available_skills_content(skills)
-        assert "<location>ai-driving/repo/skills/my-skill/</location>" in content
+        assert "<path>ai-driving/repo/skills/my-skill/</path>" in content
 
     def test_技能按名称排序(self):
         skills = [
-            {"name": "z-skill", "description": "Z 技能", "location": "ai-driving/main/skills/z-skill/"},
-            {"name": "a-skill", "description": "A 技能", "location": "ai-driving/main/skills/a-skill/"},
+            {"name": "z-skill", "description": "Z 技能", "path": "ai-driving/main/skills/z-skill/"},
+            {"name": "a-skill", "description": "A 技能", "path": "ai-driving/main/skills/a-skill/"},
         ]
         content = generate_available_skills_content(skills)
         # a-skill 应在 z-skill 之前
@@ -344,7 +344,7 @@ class TestUpdateAgentsMd:
     def test_新建AGENTS_md时插入skills_system(self, tmp_path):
         agents_md = tmp_path / "AGENTS.md"
         skills = [
-            {"name": "skill-a", "description": "描述 A", "location": "ai-driving/main/skills/skill-a/"},
+            {"name": "skill-a", "description": "描述 A", "path": "ai-driving/main/skills/skill-a/"},
         ]
         update_agents_md(agents_md, skills)
         content = agents_md.read_text(encoding="utf-8")
@@ -359,7 +359,7 @@ class TestUpdateAgentsMd:
             encoding="utf-8",
         )
         skills = [
-            {"name": "new-skill", "description": "新技能", "location": "ai-driving/main/skills/new-skill/"},
+            {"name": "new-skill", "description": "新技能", "path": "ai-driving/main/skills/new-skill/"},
         ]
         update_agents_md(agents_md, skills)
         content = agents_md.read_text(encoding="utf-8")
@@ -371,7 +371,7 @@ class TestUpdateAgentsMd:
         agents_md = tmp_path / "AGENTS.md"
         agents_md.write_text("# AGENTS\n\n## 其他内容\n\n保留这段文字。\n", encoding="utf-8")
         skills = [
-            {"name": "skill-a", "description": "描述", "location": "ai-driving/main/skills/skill-a/"},
+            {"name": "skill-a", "description": "描述", "path": "ai-driving/main/skills/skill-a/"},
         ]
         update_agents_md(agents_md, skills)
         content = agents_md.read_text(encoding="utf-8")
@@ -381,7 +381,7 @@ class TestUpdateAgentsMd:
     def test_location字段写入AGENTS_md(self, tmp_path):
         agents_md = tmp_path / "AGENTS.md"
         skills = [
-            {"name": "my-skill", "description": "描述", "location": "ai-driving/repo/skills/my-skill/"},
+            {"name": "my-skill", "description": "描述", "path": "ai-driving/repo/skills/my-skill/"},
         ]
         update_agents_md(agents_md, skills)
         content = agents_md.read_text(encoding="utf-8")
@@ -517,7 +517,7 @@ def test_property10_skill合并路径标注(
 
     # 验证：每个技能的 location 字段格式正确
     for skill in result:
-        location = skill["location"]
+        location = skill["path"]
         # location 必须以 ai-driving/ 开头
         assert location.startswith("ai-driving/")
         # location 必须以 / 结尾
@@ -540,4 +540,4 @@ def test_property10_skill合并路径标注(
         matched = [s for s in result if s["name"] == name]
         assert len(matched) == 1
         # 应来自 repo1（先配置的）
-        assert matched[0]["location"] == f"ai-driving/{repo1_name}/skills/{name}/"
+        assert matched[0]["path"] == f"ai-driving/{repo1_name}/skills/{name}/"
