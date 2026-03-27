@@ -320,7 +320,7 @@ def feature_group():
 
 @feature_group.command(name="list")
 @click.option("--repo", "repo_name", default=None, help="只扫描指定仓库的 features")
-@click.option("--keywords", "keywords", multiple=True, help="关键词过滤（可多次指定，OR 关系）")
+@click.option("--keywords", "keywords", multiple=True, help="关键词过滤，OR 关系（可多次指定，或用逗号分割：--keywords kw1,kw2）")
 @click.option("--detail", is_flag=True, default=False, help="输出完整字段（默认只输出精简摘要）")
 def feature_list(repo_name: Optional[str], keywords: Tuple[str, ...], detail: bool):
     """列出所有 features，支持关键词搜索，以 JSON 数组格式输出
@@ -328,9 +328,11 @@ def feature_list(repo_name: Optional[str], keywords: Tuple[str, ...], detail: bo
     扫描所有已安装仓库（或指定仓库）的 features/ 目录，
     解析每个 FEATURE.md 的 YAML frontmatter，支持关键词全字段模糊搜索。
 
+    \b
     示例：
         driving feature list
         driving feature list --repo my-local
+        driving feature list --keywords game,list
         driving feature list --keywords game --keywords list
         driving feature list --detail
     """
@@ -361,9 +363,12 @@ def feature_list(repo_name: Optional[str], keywords: Tuple[str, ...], detail: bo
             repo_features = scan_features_from_dir(rname, fdir, quiet=True)
             all_features.extend(repo_features)
 
-        # 关键词过滤
+        # 关键词过滤（支持逗号分割，如 --keywords kw1,kw2,kw3）
         if keywords:
-            all_features = filter_features(all_features, list(keywords))
+            expanded = []
+            for kw in keywords:
+                expanded.extend(k.strip() for k in kw.split(",") if k.strip())
+            all_features = filter_features(all_features, expanded)
 
         # 格式化输出
         output = [format_feature_output(f, detail) for f in all_features]
