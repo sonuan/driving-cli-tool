@@ -327,9 +327,8 @@ def _install_local(config_mgr: ConfigManager, project_root: Path, local_path: st
 # ==================== repo list ====================
 
 @repo_group.command(name="list")
-@click.option("--json", "output_json", is_flag=True, help="以 JSON 格式输出")
-def repo_list(output_json: bool = False):
-    """查看已安装的仓库列表"""
+def repo_list():
+    """查看已安装的仓库列表（JSON 格式输出）"""
     import json as _json
     project_root = find_project_root()
     config_mgr = ConfigManager(project_root)
@@ -340,54 +339,28 @@ def repo_list(output_json: bool = False):
         log_error(str(e))
         raise click.Abort()
 
-    if output_json:
-        result = []
-        for repo in repos:
-            repo_dir = project_root / repo.path
-            if repo.type == "remote":
-                is_init = repo_dir.exists() and any(repo_dir.iterdir())
-                status = "initialized" if is_init else "uninitialized"
-            else:
-                status = "exists" if (repo_dir.exists() or repo_dir.is_symlink()) else "missing"
-
-            entry = {
-                "name": repo.name,
-                "type": repo.type,
-                "description": repo.description or "",
-                "path": repo.path,
-                "status": status,
-            }
-            if repo.type == "remote":
-                entry["url"] = repo.url
-            elif repo.local_path:
-                entry["local_path"] = repo.local_path
-            result.append(entry)
-        print(_json.dumps(result, ensure_ascii=False, indent=2))
-        return
-
-    # 人类可读格式
-    if not repos:
-        log_info("尚未安装任何仓库")
-        return
-
-    remote_repos = [r for r in repos if r.type == "remote"]
-    local_repos = [r for r in repos if r.type == "local"]
-
-    if remote_repos:
-        click.echo("远程仓库：")
-        for repo in remote_repos:
-            repo_dir = project_root / repo.path
+    result = []
+    for repo in repos:
+        repo_dir = project_root / repo.path
+        if repo.type == "remote":
             is_init = repo_dir.exists() and any(repo_dir.iterdir())
-            status = "已初始化" if is_init else "未初始化"
-            click.echo(f"  [{status}] {repo.name}  [remote]  {repo.url or ''}  ({repo.path})")
+            status = "initialized" if is_init else "uninitialized"
+        else:
+            status = "exists" if (repo_dir.exists() or repo_dir.is_symlink()) else "missing"
 
-    if local_repos:
-        click.echo("本地仓库：")
-        for repo in local_repos:
-            repo_dir = project_root / repo.path
-            exists = repo_dir.exists() or repo_dir.is_symlink()
-            status = "存在" if exists else "缺失"
-            click.echo(f"  [{status}] {repo.name}  [local]  ({repo.path})")
+        entry = {
+            "name": repo.name,
+            "type": repo.type,
+            "description": repo.description or "",
+            "path": repo.path,
+            "status": status,
+        }
+        if repo.type == "remote":
+            entry["url"] = repo.url
+        elif repo.local_path:
+            entry["local_path"] = repo.local_path
+        result.append(entry)
+    print(_json.dumps(result, ensure_ascii=False, indent=2))
 
 
 # ==================== repo uninstall ====================
