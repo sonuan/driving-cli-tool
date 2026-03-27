@@ -162,23 +162,27 @@ if [ -n "$VERSION_URL" ]; then
     print_info "将默认更新地址设置为: ${VERSION_URL}"
     
     # 备份原始文件
-    cp driving/utils/config.py driving/utils/config.py.bak
+    cp driving/commands/update.py driving/commands/update.py.bak
     
-    # 使用 Python 替换默认值（更可靠）
+    # 使用 Python 替换默认值
     python3 << PYEOF
 import re
 
-with open('driving/utils/config.py', 'r', encoding='utf-8') as f:
+with open('driving/commands/update.py', 'r', encoding='utf-8') as f:
     content = f.read()
 
-# 替换 DRIVING_UPDATE_VERSION_URL 的默认值
-pattern = r'DRIVING_UPDATE_VERSION_URL = os\.getenv\(\s*"DRIVING_UPDATE_VERSION_URL",\s*"[^"]*"\s*\)'
-replacement = f'DRIVING_UPDATE_VERSION_URL = os.getenv(\n    "DRIVING_UPDATE_VERSION_URL",\n    "${VERSION_URL}"\n)'
+# 替换 _DEFAULT_UPDATE_VERSION_URL 的默认值
+pattern = r'(_DEFAULT_UPDATE_VERSION_URL\s*=\s*\(\s*\n\s*)"[^"]*"(\s*\n\s*\))'
+replacement = r'\g<1>"${VERSION_URL}"\g<2>'
+new_content = re.sub(pattern, replacement, content)
 
-content = re.sub(pattern, replacement, content)
+# 兼容单行写法
+if new_content == content:
+    pattern2 = r'(_DEFAULT_UPDATE_VERSION_URL\s*=\s*)"[^"]*"'
+    new_content = re.sub(pattern2, r'\g<1>"${VERSION_URL}"', content)
 
-with open('driving/utils/config.py', 'w', encoding='utf-8') as f:
-    f.write(content)
+with open('driving/commands/update.py', 'w', encoding='utf-8') as f:
+    f.write(new_content)
 
 print("默认更新地址已替换")
 PYEOF
@@ -204,9 +208,9 @@ python3 -m PyInstaller \
 BUILD_RESULT=$?
 
 # 恢复原始配置文件（如果有备份）
-if [ -f "driving/utils/config.py.bak" ]; then
+if [ -f "driving/commands/update.py.bak" ]; then
     print_info "恢复原始配置文件..."
-    mv driving/utils/config.py.bak driving/utils/config.py
+    mv driving/commands/update.py.bak driving/commands/update.py
 fi
 
 if [ $BUILD_RESULT -ne 0 ]; then
