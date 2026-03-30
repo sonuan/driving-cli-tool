@@ -69,3 +69,13 @@ Thumbs.db
 
 # Internal design documents (not for open source)
 docs/
+
+
+# 示例
+.kiro
+.gitmodules
+driving.config.json
+ai-driving/my-local
+
+# 内网构建产物
+dist-internal
