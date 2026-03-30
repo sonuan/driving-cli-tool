@@ -1,19 +1,19 @@
 {
-  "version": "1.0.3",
-  "build_date": "2026-03-23T17:06:29+08:00",
+  "version": "1.0.4",
+  "build_date": "2026-03-30T10:49:52+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
-      "修改原来 .env.local 为 .env；修改文档；",
-      "修改 .env 为 .env.driving，避免.env文件被占用",
-      "fix: 优化install时如果.driving不存在，但.gitmodules里存在，的处理",
-      "fix: driving update 保持.env时，也保存到当前运行目录",
-      "v1.0.2",
-      "fix: 优化install可能出现  stderr: 'error: pathspec 'taqu/.driving' did not match any file(s) known to git'",
-      "fix: 在执行 driving install 命令时，生成的 .env 文件，希望在运行目录，而不是在.git根目录。",
-      "fix：1.0.1 修复driving instal --url 时，没有将 url 插入到 .env 文件中",
-      "添加gitignore部分",
-      "init project"
+      "feat：git管理，排除非必要的变更提交",
+      "修复无法打包问题",
+      "修改重构后的README.md",
+      "修改 feature list 的打印",
+      "修改 repo list 默认json输出",
+      "调整字段和删除xml输出格式",
+      "新增feature\\rule命令行，用于管理需求和rules",
+      "repo list 内容输出修改为json格式",
+      "feat: framework list 默认修改为json，且只返回name\\desc\\repo，减少token消耗",
+      "feat：删除无用代码，优化命令行打印输出"
   ]
 }
