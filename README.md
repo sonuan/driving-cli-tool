@@ -100,7 +100,7 @@ ai-driving/
               └── FEATURE.md     # 功能说明（含 YAML frontmatter）
 ```
 
-### 示例
+### 仓库配置示例
 
 ```
 ai-driving/
@@ -136,6 +136,47 @@ ai-driving/
     }
   ]
 }
+```
+
+### gitlist.json配置
+
+`project_name`、`url`、`branch` 这三个参数为 `__local__` 时，定位到本地项目源码路径，不需要拉取git仓库。
+
+```
+[
+  {
+    "name": "框架名称",
+    "description": "框架描述",
+    "project_name": "本地仓库名称",
+    "url": "远程仓库地址",
+    "branch": "分支名（可选）",
+    "module": "模块名",
+    "creator": "创建者（如果是AI，则填模型名称）",
+    "date": "创建日期（YYYY-MM-DD）",
+    "sources": [
+      "源码路径（包含module路径）"
+    ],
+    "extends": [
+      "框架名"
+    ]
+  },
+  {
+    "name": "框架名称",
+    "description": "框架描述",
+    "project_name": "__local__",
+    "url": "__local__",
+    "branch": "__local__",
+    "module": "模块名",
+    "creator": "创建者（如果是AI，则填模型名称）",
+    "date": "创建日期（YYYY-MM-DD）",
+    "sources": [
+      "本地源码路径（包含module路径）"
+    ],
+    "extends": [
+      "框架名"
+    ]
+  }
+]
 ```
 
 ---
