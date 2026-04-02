@@ -3,7 +3,7 @@
 import click
 
 from driving import __version__
-from driving.commands import feature, framework, ide, repo, rule, skill, update
+from driving.commands import agent, feature, framework, ide, repo, rule, skill, update
 
 
 @click.group()
@@ -14,6 +14,9 @@ def cli():
     """
     pass
 
+
+# 注册 agent 子命令组（多仓库 agent 管理）
+cli.add_command(agent.agent_group)
 
 # 注册 repo 子命令组（多仓库管理）
 cli.add_command(repo.repo_group)

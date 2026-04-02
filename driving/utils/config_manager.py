@@ -283,6 +283,21 @@ class ConfigManager:
                 result.append((repo.name, rules_dir))
         return result
 
+    def get_all_agents_dirs(self) -> List[Tuple[str, Path]]:
+        """返回所有仓库的 agents/ 目录路径列表
+
+        只返回目录实际存在的条目。
+
+        Returns:
+            List[Tuple[str, Path]]: [(repo_name, agents_dir_path), ...] 列表
+        """
+        result = []
+        for repo in self.get_all_repos():
+            agents_dir = self.get_repo_dir(repo.name) / "agents"
+            if agents_dir.exists():
+                result.append((repo.name, agents_dir))
+        return result
+
     def update_repo(self, repo: RepoConfig) -> None:
         """更新已存在仓库的配置
 
