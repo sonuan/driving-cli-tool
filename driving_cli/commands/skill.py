@@ -435,14 +435,19 @@ def skill_sync():
 
 
 @skill_group.command(name="load")
-def skill_load():
+@click.argument("keywords", nargs=-1, required=False)
+def skill_load(keywords: tuple):
     """输出当前所有可用技能的完整信息，供 AI 会话注入上下文
 
-    扫描所有已安装仓库的 skills/ 目录，读取每个技能的 SKILL.md 头信息，
-    以 JSON 数组格式输出到 stdout，可直接被 AI 会话读取作为上下文。
+    不传关键词时，只加载 tags 含 "base" 的仓库的技能。
+    传入关键词时，在 base 仓库基础上，额外匹配 repo.name 或 skill.name 的技能（取并集）。
+    支持多个关键词：driving skill load f-message f-qucall
 
     示例：
         driving skill load
+        driving skill load f-message
+        driving skill load f-message f-qucall
+        driving skill load code-review
     """
     import json as json_module
 
@@ -456,15 +461,56 @@ def skill_load():
             return
 
         repo_configs = config_manager.get_all_repos()
-        skills = merge_skills_from_all_repos(skills_dirs, quiet=True, repo_configs=repo_configs)
+        repo_config_map = {r.name: r for r in repo_configs}
+
+        # 扫描所有仓库的全量技能（quiet 模式，遵守 enabled/disabled 配置）
+        all_skills_by_repo: dict = {}
+        for repo_name, skills_dir in skills_dirs:
+            rc = repo_config_map.get(repo_name)
+            repo_skills = scan_skills_from_dir(repo_name, skills_dir, quiet=True)
+            # 应用仓库的 enabled/disabled 过滤
+            if rc is not None and rc.skills is not None:
+                enabled = rc.skills.get("enabled") or []
+                disabled = rc.skills.get("disabled") or []
+                if enabled:
+                    repo_skills = [s for s in repo_skills if s["name"] in enabled]
+                elif disabled:
+                    repo_skills = [s for s in repo_skills if s["name"] not in disabled]
+            all_skills_by_repo[repo_name] = repo_skills
+
+        result_skills: list = []
+        seen_paths: set = set()
+
+        def _add_skills(skills: list):
+            for s in skills:
+                if s["path"] not in seen_paths:
+                    seen_paths.add(s["path"])
+                    result_skills.append(s)
+
+        if not keywords:
+            # 无关键词：只加载 tag=base 的仓库
+            for repo_name, repo_skills in all_skills_by_repo.items():
+                rc = repo_config_map.get(repo_name)
+                tags = rc.tags if rc and rc.tags else []
+                if "base" in tags:
+                    _add_skills(repo_skills)
+        else:
+            # 有关键词：忽略 tags，只按 repo.name 或 skill.name 精确匹配
+            kw_set = set(keywords)
+
+            for repo_name, repo_skills in all_skills_by_repo.items():
+                # repo.name 匹配任意关键词 → 整个仓库的 skills 全部加载
+                if repo_name in kw_set:
+                    _add_skills(repo_skills)
+                    continue
+
+                # skill.name 匹配任意关键词 → 只加载匹配的 skill
+                matched = [s for s in repo_skills if s["name"] in kw_set]
+                _add_skills(matched)
 
         output = [
-            {
-                "name": s["name"],
-                "description": s["description"],
-                "path": s["path"],
-            }
-            for s in sorted(skills, key=lambda x: x["name"])
+            {"name": s["name"], "description": s["description"], "path": s["path"]}
+            for s in sorted(result_skills, key=lambda x: x["name"])
         ]
         click.echo(json_module.dumps(output, ensure_ascii=False, indent=2))
 

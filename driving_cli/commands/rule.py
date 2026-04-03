@@ -238,16 +238,19 @@ def rule_group():
 
 
 @rule_group.command(name="load")
-def rule_load():
+@click.argument("keywords", nargs=-1, required=False)
+def rule_load(keywords: tuple):
     """输出所有已启用规则的完整内容，供 AI 会话注入上下文
 
-    扫描所有已安装仓库的 rules/ 目录，读取每个规则文件的 YAML frontmatter 和正文，
-    以 JSON 数组格式输出到 stdout，可直接被 AI 会话读取作为上下文。
-
-    输出字段：name、description、path
+    不传关键词时，只加载 tags 含 "base" 的仓库的规则。
+    传入关键词时，在 base 仓库基础上，额外匹配 repo.name 或 rule.name 的规则（取并集）。
+    支持多个关键词：driving rule load f-message f-qucall
 
     示例：
         driving rule load
+        driving rule load f-message
+        driving rule load f-message f-qucall
+        driving rule load code-style
     """
     try:
         project_root = find_project_root()
@@ -261,21 +264,48 @@ def rule_load():
         repo_configs = config_manager.get_all_repos()
         repo_config_map = {r.name: r for r in repo_configs}
 
-        all_rules = []
+        # 扫描所有仓库的全量规则（quiet 模式，遵守 enabled/disabled 配置）
+        all_rules_by_repo: dict = {}
         for repo_name, rules_dir in rules_dirs:
-            repo_rules = scan_rules_from_dir(repo_name, rules_dir, quiet=True, header_only=True)
             rc = repo_config_map.get(repo_name)
+            repo_rules = scan_rules_from_dir(repo_name, rules_dir, quiet=True, header_only=True)
             if rc is not None:
                 repo_rules = filter_rules_by_config(repo_rules, rc)
-            all_rules.extend(repo_rules)
+            all_rules_by_repo[repo_name] = repo_rules
+
+        result_rules: list = []
+        seen_paths: set = set()
+
+        def _add_rules(rules: list):
+            for r in rules:
+                if r["path"] not in seen_paths:
+                    seen_paths.add(r["path"])
+                    result_rules.append(r)
+
+        if not keywords:
+            # 无关键词：只加载 tag=base 的仓库
+            for repo_name, repo_rules in all_rules_by_repo.items():
+                rc = repo_config_map.get(repo_name)
+                tags = rc.tags if rc and rc.tags else []
+                if "base" in tags:
+                    _add_rules(repo_rules)
+        else:
+            # 有关键词：忽略 tags，只按 repo.name 或 rule.name 精确匹配
+            kw_set = set(keywords)
+
+            for repo_name, repo_rules in all_rules_by_repo.items():
+                # repo.name 匹配任意关键词 → 整个仓库的 rules 全部加载
+                if repo_name in kw_set:
+                    _add_rules(repo_rules)
+                    continue
+
+                # rule.name 匹配任意关键词 → 只加载匹配的 rule
+                matched = [r for r in repo_rules if r["name"] in kw_set]
+                _add_rules(matched)
 
         output = [
-            {
-                "name": r["name"],
-                "description": r["description"],
-                "path": r["path"],
-            }
-            for r in all_rules
+            {"name": r["name"], "description": r["description"], "path": r["path"]}
+            for r in result_rules
         ]
         click.echo(json_module.dumps(output, ensure_ascii=False, indent=2))
 

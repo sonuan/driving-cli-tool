@@ -230,6 +230,7 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
         path=install_path,
         local_path=None,
         description=description,
+        tags=[],
     )
     try:
         config_mgr.add_repo(repo_cfg)
@@ -314,6 +315,7 @@ def _install_local(config_mgr: ConfigManager, project_root: Path, local_path: st
         path=install_path,
         local_path=stored_local_path,
         description=description,
+        tags=[],
     )
     try:
         config_mgr.add_repo(repo_cfg)

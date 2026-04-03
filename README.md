@@ -47,7 +47,8 @@ driving framework sources <name>              # 获取框架源码路径列表
 driving skill list                   # 列出所有技能（按仓库分组）
 driving skill list --repo <name>     # 只显示指定仓库的技能
 driving skill list --edit            # 交互模式，勾选启用/禁用技能
-driving skill load                   # 输出已启用技能信息（供 AI 注入上下文）
+driving skill load                   # 只加载 tags=base 的仓库技能（供 AI 注入上下文）
+driving skill load <keywords...>     # 忽略 tags，精确匹配 repo.name 或 skill.name（取并集）
 ```
 
 ## rule — 规则管理
@@ -55,7 +56,8 @@ driving skill load                   # 输出已启用技能信息（供 AI 注�
 ```bash
 driving rule list                    # 列出所有规则（按仓库分组）
 driving rule list --edit             # 交互模式，勾选启用/禁用规则
-driving rule load                    # 输出已启用规则内容（供 AI 注入上下文）
+driving rule load                    # 只加载 tags=base 的仓库规则（供 AI 注入上下文）
+driving rule load <keywords...>      # 忽略 tags，精确匹配 repo.name 或 rule.name（取并集）
 ```
 
 ## feature — 需求功能管理
@@ -162,20 +164,24 @@ trigger: manual                 # Windsurf 所需（可选，不加则 export �
       "type": "remote",
       "url": "https://github.com/your-org/driving",
       "path": "ai-driving/driving",
+      "tags": ["base"],
       "skills": { "enabled": [], "disabled": [] },
       "rules":  { "enabled": [], "disabled": [] },
       "agents": { "enabled": [], "disabled": [] }
     },
     {
-      "name": "my-local",
+      "name": "f-message",
       "type": "local",
-      "path": "ai-driving/my-local"
+      "path": "ai-driving/f-message",
+      "tags": []
     }
   ],
   "default_commit_message": "update by driving",
   "update_version_url": ""
 }
 ```
+
+`tags` 含 `"base"` 的仓库在无关键词时默认加载；传入关键词时忽略 tags，只按 repo.name / skill.name / rule.name 精确匹配。
 
 `skills` / `rules` / `agents` 均支持白名单（`enabled` 非空）和黑名单（`disabled` 非空）两种模式。
 
@@ -209,8 +215,10 @@ trigger: manual                 # Windsurf 所需（可选，不加则 export �
 driving repo install --url https://github.com/your-org/driving
 
 # 2. 在 AI 会话中加载上下文
-driving skill load
-driving rule load
+driving skill load                    # 只加载 tags=base 的仓库
+driving skill load f-message          # 精确匹配 repo.name=f-message
+driving skill load f-message f-qucall # 精确匹配多个 repo.name，取并集
+driving rule load f-message
 driving agent load
 
 # 3. 查看可用框架并安装
