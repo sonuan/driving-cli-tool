@@ -1,19 +1,19 @@
 {
-  "version": "1.0.4",
-  "build_date": "2026-03-30T10:49:52+08:00",
+  "version": "1.0.5",
+  "build_date": "2026-04-03T16:41:17+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
-      "feat：git管理，排除非必要的变更提交",
-      "修复无法打包问题",
-      "修改重构后的README.md",
-      "修改 feature list 的打印",
-      "修改 repo list 默认json输出",
-      "调整字段和删除xml输出格式",
-      "新增feature\\rule命令行，用于管理需求和rules",
-      "repo list 内容输出修改为json格式",
-      "feat: framework list 默认修改为json，且只返回name\\desc\\repo，减少token消耗",
-      "feat：删除无用代码，优化命令行打印输出"
+      "feat：agent简化memory记忆",
+      "feat：优化AGENTS.md的渐进式加载",
+      "feat: AGENTS.md 优化强制前置描述，避免每次发消息都加载",
+      "feat: driving重命名为driving_cli",
+      "feat: 增加子agent导出配置的能力，提供给技能创建子agent",
+      "feat：agent 管理记忆添加时间和提交者信息",
+      "feat：新增driving agent命令组，管理多agent",
+      "readme.md 添加gitlist.json配置说明",
+      "v1.0.4 cli重构，支持多仓管理",
+      "feat：git管理，排除非必要的变更提交"
   ]
 }
