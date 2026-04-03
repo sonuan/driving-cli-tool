@@ -404,6 +404,47 @@ def project_with_agent_memory(tmp_path):
 
 
 class TestAgentMemoryCommands:
+    def test_memory_append追加内容包含时间戳(self, runner, project_with_agent_memory):
+        agent_dir = (project_with_agent_memory / "ai-driving" / "my-local" /
+                     "agents" / "test-agent")
+        with patch("driving.commands.agent.find_project_root",
+                   return_value=project_with_agent_memory):
+            result = runner.invoke(cli, ["agent", "memory", "append",
+                                         "test-agent", "facts", "新事实"])
+        assert result.exit_code == 0
+        facts_file = agent_dir / "memory" / "facts.md"
+        content = facts_file.read_text(encoding="utf-8")
+        assert "新事实" in content
+        assert "<!--" in content
+        assert "-->" in content
+
+    def test_memory_set覆盖已有内容需要force(self, runner, project_with_agent_memory):
+        agent_dir = (project_with_agent_memory / "ai-driving" / "my-local" /
+                     "agents" / "test-agent")
+        _make_memory(agent_dir, {"context.md": "旧内容"})
+
+        with patch("driving.commands.agent.find_project_root",
+                   return_value=project_with_agent_memory):
+            result = runner.invoke(cli, ["agent", "memory", "set",
+                                         "test-agent", "context", "新内容"], input="n\n")
+        context_file = agent_dir / "memory" / "context.md"
+        assert "旧内容" in context_file.read_text(encoding="utf-8")
+
+    def test_memory_set_force强制覆盖(self, runner, project_with_agent_memory):
+        agent_dir = (project_with_agent_memory / "ai-driving" / "my-local" /
+                     "agents" / "test-agent")
+        _make_memory(agent_dir, {"context.md": "旧内容"})
+
+        with patch("driving.commands.agent.find_project_root",
+                   return_value=project_with_agent_memory):
+            result = runner.invoke(cli, ["agent", "memory", "set",
+                                         "test-agent", "context", "新内容", "--force"])
+        assert result.exit_code == 0
+        context_file = agent_dir / "memory" / "context.md"
+        content = context_file.read_text(encoding="utf-8")
+        assert "新内容" in content
+        assert "<!--" in content
+
     def test_memory_set写入文件(self, runner, project_with_agent_memory):
         with patch("driving.commands.agent.find_project_root",
                    return_value=project_with_agent_memory):
@@ -453,18 +494,6 @@ class TestAgentMemoryCommands:
         content = facts_file.read_text(encoding="utf-8")
         assert "第一行" in content
         assert "第二行" in content
-
-    def test_memory_set覆盖已有内容(self, runner, project_with_agent_memory):
-        agent_dir = (project_with_agent_memory / "ai-driving" / "my-local" /
-                     "agents" / "test-agent")
-        _make_memory(agent_dir, {"context.md": "旧内容"})
-
-        with patch("driving.commands.agent.find_project_root",
-                   return_value=project_with_agent_memory):
-            runner.invoke(cli, ["agent", "memory", "set", "test-agent", "context", "新内容"])
-
-        context_file = agent_dir / "memory" / "context.md"
-        assert context_file.read_text(encoding="utf-8") == "新内容"
 
     def test_memory_clear指定key删除文件(self, runner, project_with_agent_memory):
         agent_dir = (project_with_agent_memory / "ai-driving" / "my-local" /

@@ -3,7 +3,7 @@
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-命令行工具，用于管理 AI Coding 规范仓库、框架文档、技能、规则和需求目录。
+命令行工具，用于管理 AI Coding 规范仓库、框架文档、技能、规则、需求目录和 Agent。
 
 ## 安装
 
@@ -15,6 +15,8 @@ sudo sh -c 'curl -fsSL https://raw.githubusercontent.com/sonuan/driving-cli-tool
 pip3 install -e .
 ```
 
+---
+
 ## repo — 规范仓库管理
 
 ```bash
@@ -22,9 +24,9 @@ driving repo install --url <url>     # 安装远程仓库（Git submodule）
 driving repo install --local <path>  # 安装本地仓库（软链接）
 driving repo uninstall <name>        # 卸载仓库
 driving repo list                    # 查看已安装仓库列表
-driving repo pull                    # 从远程拉取更新
-driving repo commit [message]        # 提交修改
-driving repo push                    # 推送到远程
+driving repo pull [name]             # 从远程拉取更新
+driving repo commit [name] [message] # 提交修改
+driving repo push [name]             # 推送到远程
 ```
 
 ## framework — 框架文档管理
@@ -62,8 +64,49 @@ driving rule load                    # 输出已启用规则内容（供 AI 注�
 driving feature list                          # 列出所有 features
 driving feature list --repo <name>            # 只扫描指定仓库
 driving feature list --keywords game,list     # 关键词过滤（OR 关系）
-driving feature list --keywords game --keywords list
 driving feature list --detail                 # 输出完整字段
+```
+
+## agent — Agent 管理
+
+每个 agent 存放在仓库的 `agents/<name>/` 目录，包含：
+- `AGENTS.md`（必填）：YAML frontmatter + agent 指令/系统提示
+- `SOUL.md`（可选）：人格、价值观、沟通风格
+- `memory/`（可选）：append-only 时间线记忆，随 git 同步，团队共享
+
+```bash
+driving agent list                        # 列出所有 agent（按仓库分组）
+driving agent list --repo <name>          # 只显示指定仓库的 agent
+driving agent list --edit                 # 交互模式，勾选启用/禁用 agent
+driving agent load                        # 输出已启用 agent 元数据（供 AI 注入上下文）
+
+# 记忆管理
+driving agent memory get <name>                      # 读取全部记忆（JSON）
+driving agent memory get <name> <key>                # 读取指定 key（facts/context/...）
+driving agent memory append <name> <key> <content>   # 追加记录（自动附加时间戳和作者）
+driving agent memory set <name> <key> <content>      # 覆盖写入（谨慎，会提示确认）
+driving agent memory set <name> <key> <content> --force  # 强制覆盖
+driving agent memory clear <name>                    # 清空全部记忆
+driving agent memory clear <name> <key>              # 清空指定 key
+```
+
+### memory 时间线格式
+
+`memory append` 自动附加时间戳和 git user.name，多人协作几乎不产生 git 冲突：
+
+```
+<!-- 2026-04-02T14:30:00+08:00 | wusongyuan -->
+用户偏好简洁的代码风格，不喜欢过度注释。
+
+<!-- 2026-04-03T09:15:00+08:00 | zhangsan -->
+项目已迁移到 MVVM 架构，旧的 MVP 代码逐步替换中。
+```
+
+修改 remote 仓库的 agent 记忆后，需手动同步给团队：
+
+```bash
+driving repo commit <repo> "update agent memory: <agent-name>"
+driving repo push <repo>
 ```
 
 ## update — 更新管理
@@ -78,46 +121,51 @@ driving update --url <url>           # 使用自定义 version.json URL
 
 ---
 
-## 参仓库目录结构
+## 仓库目录结构
 
 每个通过 `driving repo install` 安装的仓库，支持以下目录结构：
 
 ```
 ai-driving/
-  ├── <repo>/
+  └── <repo>/
       ├── frameworks/            # 框架文档
       │   ├── gitlist.json       # 框架列表配置
-      │   └── <framework>/       # 各框架文档目录
-      │       ├── FRAMEWORK.md   # 框架说明
-      │       └── references/    # 参考文档
+      │   └── <framework>/
+      │       ├── FRAMEWORK.md
+      │       └── references/
       ├── skills/                # 技能列表
       │   └── <skill>/
-      │       └── SKILL.md       # 技能说明（含 YAML frontmatter）
-      ├── rules/                 # 规则列表 
-      │   └── <rule>.md          # 规则文件（含 YAML frontmatter）
-      └── features/              # 需求功能
-          └── <feature>/
-              └── FEATURE.md     # 功能说明（含 YAML frontmatter）
+      │       └── SKILL.md       # 含 YAML frontmatter（name、description 必填）
+      ├── rules/                 # 规则列表
+      │   └── <rule>.md          # 含 YAML frontmatter（name 必填）
+      ├── features/              # 需求功能
+      │   └── <feature>/
+      │       └── FEATURE.md     # 含 YAML frontmatter（name 必填）
+      └── agents/                # Agent 定义
+          └── <agent>/
+              ├── AGENTS.md      # 指令/系统提示（必填）
+              ├── SOUL.md        # 人格与行为风格（可选）
+              └── memory/        # append-only 时间线记忆（可选）
+                  ├── facts.md   # 长期事实
+                  ├── context.md # 当前工作状态
+                  └── history/   # 历史归档（按日期）
 ```
 
-### 仓库配置示例
+### AGENTS.md frontmatter 字段
 
-```
-ai-driving/
-├── driving/               # 远程仓库（Git submodule）
-│   ├── frameworks/        # 框架文档（xstatic/ximage/xtoast 等）
-│   │   └── gitlist.json
-│   ├── skills/            # 通用技能（android-block-page/code-reviews 等）
-│   └── rules/             # 通用规则
-└── my-local/              # 本地仓库（项目私有配置）
-    ├── frameworks/
-    │   └── gitlist.json
-    ├── skills/            # 项目私有技能
-    ├── rules/             # 项目私有规则
-    └── features/          # 需求功能文档
+```markdown
+---
+name: android-reviewer          # 唯一标识（必填）
+description: Android 代码审查专家，专注于架构合规性和性能问题。  # 触发描述（必填）
+role: reviewer                  # 角色类型：reviewer / architect / assistant 等（可选）
+version: 1.0.0                  # 版本号（可选）
+skills:                         # 激活时自动加载的技能列表（可选）
+  - code-reviews
+  - android-standard-page
+---
 ```
 
-配置文件 `driving.config.json` 位于项目根目录，管理所有已安装仓库：
+### driving.config.json 结构
 
 ```json
 {
@@ -127,54 +175,41 @@ ai-driving/
       "name": "driving",
       "type": "remote",
       "url": "https://github.com/your-org/driving",
-      "path": "ai-driving/driving"
+      "path": "ai-driving/driving",
+      "skills": { "enabled": [], "disabled": [] },
+      "rules":  { "enabled": [], "disabled": [] },
+      "agents": { "enabled": [], "disabled": [] }
     },
     {
       "name": "my-local",
       "type": "local",
       "path": "ai-driving/my-local"
     }
-  ]
+  ],
+  "default_commit_message": "update by driving",
+  "update_version_url": ""
 }
 ```
 
-### gitlist.json配置
+`skills` / `rules` / `agents` 均支持白名单（`enabled` 非空）和黑名单（`disabled` 非空）两种模式。
 
-`project_name`、`url`、`branch` 这三个参数为 `__local__` 时，定位到本地项目源码路径，不需要拉取git仓库。
+### gitlist.json 配置
 
-```
+`project_name`、`url`、`branch` 均为 `__local__` 时，定位到本地项目源码路径，不需要拉取 git 仓库。
+
+```json
 [
   {
     "name": "框架名称",
     "description": "框架描述",
-    "project_name": "本地仓库名称",
+    "project_name": "仓库名称",
     "url": "远程仓库地址",
     "branch": "分支名（可选）",
     "module": "模块名",
-    "creator": "创建者（如果是AI，则填模型名称）",
-    "date": "创建日期（YYYY-MM-DD）",
-    "sources": [
-      "源码路径（包含module路径）"
-    ],
-    "extends": [
-      "框架名"
-    ]
-  },
-  {
-    "name": "框架名称",
-    "description": "框架描述",
-    "project_name": "__local__",
-    "url": "__local__",
-    "branch": "__local__",
-    "module": "模块名",
-    "creator": "创建者（如果是AI，则填模型名称）",
-    "date": "创建日期（YYYY-MM-DD）",
-    "sources": [
-      "本地源码路径（包含module路径）"
-    ],
-    "extends": [
-      "框架名"
-    ]
+    "creator": "创建者",
+    "date": "YYYY-MM-DD",
+    "sources": ["源码路径"],
+    "extends": ["依赖的其他框架名"]
   }
 ]
 ```
@@ -184,17 +219,39 @@ ai-driving/
 ## 快速上手
 
 ```bash
-# 1. 在项目中安装规范仓库
+# 1. 安装规范仓库
 driving repo install --url https://github.com/your-org/driving
 
-# 2. 查看可用框架并安装
+# 2. 在 AI 会话中加载上下文
+driving skill load
+driving rule load
+driving agent load
+
+# 3. 查看可用框架并安装
 driving framework list
 driving framework install ximage
 
-# 3. 查看技能列表
-driving skill list
+# 4. 使用 agent 记忆
+driving agent memory append android-reviewer context "正在审查 PR #42"
+driving agent memory get android-reviewer
 
-# 4. 在 AI 会话中加载上下文
-driving skill load
-driving rule load
+# 5. 同步记忆到团队
+driving repo commit driving "update agent memory: android-reviewer"
+driving repo push driving
 ```
+
+## 内置技能
+
+安装 `driving` 仓库后，以下技能可供 AI 使用：
+
+| 技能 | 说明 |
+|------|------|
+| `agent-dispatcher` | 激活和调度 agent，支持单 agent 激活和多 agent 协作 |
+| `driving-cli` | driving-cli 工具完整使用指南 |
+| `fwk-docx` | 框架文档管理 |
+| `code-reviews` | PR 代码审查 |
+| `android-dev-workflow` | Android 开发完整工作流 |
+| `android-block-page` | Block 化页面开发 |
+| `android-list-page` | 列表页面开发 |
+| `android-standard-page` | 普通页面开发 |
+| ... | 更多见 `driving skill list` |

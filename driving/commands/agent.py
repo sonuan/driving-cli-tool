@@ -443,19 +443,51 @@ def memory_get(agent_name: str, key: Optional[str]):
         raise click.Abort()
 
 
+def _get_git_author() -> str:
+    """从 git config 读取当前用户名，失败时返回 'unknown'。"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "config", "user.name"],
+            capture_output=True, text=True, timeout=3,
+        )
+        name = result.stdout.strip()
+        return name if name else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _make_entry(content: str) -> str:
+    """生成带时间戳和作者的 append-only 记录条目。
+
+    格式：
+        <!-- 2026-04-02T14:30:00+08:00 | author -->
+        内容
+    """
+    from datetime import datetime, timezone, timedelta
+    tz = timezone(timedelta(hours=8))
+    ts = datetime.now(tz).strftime("%Y-%m-%dT%H:%M:%S%z")
+    # +0800 → +08:00
+    if len(ts) == 24 and ts[-5] in ("+", "-"):
+        ts = ts[:-2] + ":" + ts[-2:]
+    author = _get_git_author()
+    return f"<!-- {ts} | {author} -->\n{content.rstrip()}\n"
+
+
 @agent_memory.command(name="set")
 @click.argument("agent_name")
 @click.argument("key")
 @click.argument("content")
-def memory_set(agent_name: str, key: str, content: str):
-    """写入/覆盖 agent 的记忆文件。
+@click.option("--force", is_flag=True, default=False, help="强制覆盖（跳过确认）")
+def memory_set(agent_name: str, key: str, content: str, force: bool):
+    """覆盖写入 agent 的记忆文件（会丢失历史，谨慎使用）。
 
-    key 对应 memory/<key>.md，content 为文件内容（覆盖写入）。
-    如需追加，请直接编辑文件。
+    通常应使用 append 追加带时间戳的条目。
+    set 适用于初始化或需要完全重置某个 key 的场景。
 
     示例：
-        driving agent memory set android-reviewer facts "用户偏好简洁的代码风格"
-        driving agent memory set android-reviewer context "正在审查 PR #42"
+        driving agent memory set android-reviewer facts "初始事实"
+        driving agent memory set android-reviewer context "重置上下文" --force
     """
     try:
         project_root = find_project_root()
@@ -467,10 +499,19 @@ def memory_set(agent_name: str, key: str, content: str):
             raise click.Abort()
 
         memory_dir = agent_dir / "memory"
-        memory_dir.mkdir(exist_ok=True)
-
         target = memory_dir / f"{key}.md"
-        target.write_text(content, encoding="utf-8")
+
+        # 已有内容时提示确认
+        if target.exists() and not force:
+            log_warning(f"memory/{key}.md 已有内容，覆盖将丢失历史记录。")
+            log_warning("建议使用 'driving agent memory append' 追加带时间戳的条目。")
+            if not click.confirm("确认覆盖？"):
+                log_info("已取消，使用 --force 跳过此提示")
+                return
+
+        memory_dir.mkdir(exist_ok=True)
+        entry = _make_entry(content)
+        target.write_text(entry, encoding="utf-8")
         log_success(f"已写入 {agent_name}/memory/{key}.md")
 
     except click.Abort:
@@ -485,12 +526,17 @@ def memory_set(agent_name: str, key: str, content: str):
 @click.argument("key")
 @click.argument("content")
 def memory_append(agent_name: str, key: str, content: str):
-    """追加内容到 agent 的记忆文件。
+    """追加带时间戳和作者的记录到 agent 记忆文件（推荐写入方式）。
 
-    在 memory/<key>.md 末尾追加一行内容。
+    每条记录自动附加当前时间和 git user.name，格式：
+        <!-- 2026-04-02T14:30:00+08:00 | author -->
+        内容
+
+    多人协作时追加操作几乎不产生 git 冲突。
 
     示例：
         driving agent memory append android-reviewer facts "用户不喜欢过度注释"
+        driving agent memory append android-reviewer context "正在审查 PR #42"
     """
     try:
         project_root = find_project_root()
@@ -507,7 +553,8 @@ def memory_append(agent_name: str, key: str, content: str):
         target = memory_dir / f"{key}.md"
         existing = target.read_text(encoding="utf-8") if target.exists() else ""
         separator = "\n" if existing and not existing.endswith("\n") else ""
-        target.write_text(existing + separator + content + "\n", encoding="utf-8")
+        entry = _make_entry(content)
+        target.write_text(existing + separator + entry, encoding="utf-8")
         log_success(f"已追加到 {agent_name}/memory/{key}.md")
 
     except click.Abort:
