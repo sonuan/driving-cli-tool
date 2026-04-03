@@ -24,9 +24,9 @@ driving repo install --url <url>     # 安装远程仓库（Git submodule）
 driving repo install --local <path>  # 安装本地仓库（软链接）
 driving repo uninstall <name>        # 卸载仓库
 driving repo list                    # 查看已安装仓库列表
-driving repo pull [name]             # 从远程拉取更新
-driving repo commit [name] [message] # 提交修改
-driving repo push [name]             # 推送到远程
+driving repo pull <name>             # 从远程拉取更新
+driving repo commit <name> <message> # 提交修改
+driving repo push <name>             # 推送到远程
 ```
 
 ## framework — 框架文档管理
@@ -72,7 +72,7 @@ driving feature list --detail                 # 输出完整字段
 每个 agent 存放在仓库的 `agents/<name>/` 目录，包含：
 - `AGENTS.md`（必填）：YAML frontmatter + agent 指令/系统提示
 - `SOUL.md`（可选）：人格、价值观、沟通风格
-- `memory/`（可选）：append-only 时间线记忆，随 git 同步，团队共享
+- `MEMORY.md`（可选）：最佳实践知识沉淀，随 git 同步，团队共享
 
 ```bash
 driving agent list                        # 列出所有 agent（按仓库分组）
@@ -81,13 +81,11 @@ driving agent list --edit                 # 交互模式，勾选启用/禁用 a
 driving agent load                        # 输出已启用 agent 元数据（供 AI 注入上下文）
 
 # 记忆管理
-driving agent memory get <name>                      # 读取全部记忆（JSON）
-driving agent memory get <name> <key>                # 读取指定 key（facts/context/...）
-driving agent memory append <name> <key> <content>   # 追加记录（自动附加时间戳和作者）
-driving agent memory set <name> <key> <content>      # 覆盖写入（谨慎，会提示确认）
-driving agent memory set <name> <key> <content> --force  # 强制覆盖
-driving agent memory clear <name>                    # 清空全部记忆
-driving agent memory clear <name> <key>              # 清空指定 key
+driving agent memory get <name>                  # 读取 MEMORY.md 内容
+driving agent memory append <name> <content>     # 追加知识条目
+driving agent memory set <name> <content>        # 覆盖写入（会提示确认）
+driving agent memory set <name> <content> --force  # 强制覆盖
+driving agent memory clear <name>                # 清空 MEMORY.md
 
 # 导出到外部 AI 工具（AGENTS.md 含对应字段时生成软链接，否则生成独立文件）
 driving agent export <name> --tool kiro              # 导出为 Kiro agent JSON
@@ -95,25 +93,6 @@ driving agent export <name> --tool claude-code       # 导出为 Claude Code sub
 driving agent export <name> --tool cursor            # 导出为 Cursor Rules
 driving agent export <name> --tool windsurf          # 导出为 Windsurf Rules
 driving agent export <name> --tool kiro --no-memory  # 不嵌入记忆（适合提交 git）
-```
-
-### memory 时间线格式
-
-`memory append` 自动附加时间戳和 git user.name，多人协作几乎不产生 git 冲突：
-
-```
-<!-- 2026-04-02T14:30:00+08:00 | wusongyuan -->
-用户偏好简洁的代码风格，不喜欢过度注释。
-
-<!-- 2026-04-03T09:15:00+08:00 | zhangsan -->
-项目已迁移到 MVVM 架构，旧的 MVP 代码逐步替换中。
-```
-
-修改 remote 仓库的 agent 记忆后，需手动同步给团队：
-
-```bash
-driving repo commit <repo> "update agent memory: <agent-name>"
-driving repo push <repo>
 ```
 
 ## update — 更新管理
@@ -152,10 +131,7 @@ ai-driving/
           └── <agent>/
               ├── AGENTS.md      # 指令/系统提示（必填）
               ├── SOUL.md        # 人格与行为风格（可选）
-              └── memory/        # append-only 时间线记忆（可选）
-                  ├── facts.md   # 长期事实
-                  ├── context.md # 当前工作状态
-                  └── history/   # 历史归档（按日期）
+              └── MEMORY.md      # 最佳实践知识沉淀（可选）
 ```
 
 ### AGENTS.md frontmatter 字段
@@ -242,7 +218,7 @@ driving framework list
 driving framework install ximage
 
 # 4. 使用 agent 记忆
-driving agent memory append android-reviewer context "正在审查 PR #42"
+driving agent memory append android-reviewer "- 偏好简洁的代码风格，不喜欢过度注释"
 driving agent memory get android-reviewer
 
 # 5. 同步记忆到团队

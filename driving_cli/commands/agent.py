@@ -4,10 +4,7 @@
 每个 agent 存放在仓库的 agents/<name>/ 目录下，包含：
   - AGENTS.md   agent 指令/系统提示（必填，含 YAML frontmatter）
   - SOUL.md     agent 人格与行为风格（可选）
-  - memory/     持久化记忆目录（可选）
-      ├── facts.md    长期事实记忆
-      ├── context.md  当前工作状态
-      └── history/    历史对话摘要（按日期归档）
+  - MEMORY.md   最佳实践知识沉淀（可选，团队共享，随 git 同步）
 """
 
 import json as json_module
@@ -136,8 +133,7 @@ def scan_agents_from_dir(repo_name: str, agents_dir: Path, quiet: bool = False) 
 
         # 检测可选文件
         has_soul = (agent_dir / "SOUL.md").exists()
-        memory_dir = agent_dir / "memory"
-        has_memory = memory_dir.exists() and any(memory_dir.iterdir())
+        has_memory = (agent_dir / "MEMORY.md").exists()
 
         # skills 字段支持列表或逗号分隔字符串
         raw_skills = meta.get("skills") or []
@@ -375,7 +371,7 @@ def agent_load():
 
 @agent_group.group(name="memory")
 def agent_memory():
-    """管理 agent 的持久化记忆（memory/ 目录）。"""
+    """管理 agent 的最佳实践知识沉淀（MEMORY.md）。"""
     pass
 
 
@@ -391,17 +387,11 @@ def _resolve_agent_dir(config_manager: ConfigManager, agent_name: str) -> Option
 
 @agent_memory.command(name="get")
 @click.argument("agent_name")
-@click.argument("key", required=False, default=None)
-def memory_get(agent_name: str, key: Optional[str]):
-    """读取 agent 的记忆内容。
-
-    不指定 key 时输出所有记忆文件的内容（JSON）。
-    指定 key 时只输出对应文件（facts / context / history）。
+def memory_get(agent_name: str):
+    """读取 agent 的 MEMORY.md 内容。
 
     示例：
         driving agent memory get android-reviewer
-        driving agent memory get android-reviewer facts
-        driving agent memory get android-reviewer context
     """
     try:
         project_root = find_project_root()
@@ -412,29 +402,12 @@ def memory_get(agent_name: str, key: Optional[str]):
             log_error(f"未找到 agent '{agent_name}'")
             raise click.Abort()
 
-        memory_dir = agent_dir / "memory"
-        if not memory_dir.exists():
-            click.echo("" if key else "{}")
+        memory_file = agent_dir / "MEMORY.md"
+        if not memory_file.exists():
+            click.echo("")
             return
 
-        if key:
-            # 读取指定文件
-            target = memory_dir / f"{key}.md"
-            if not target.exists():
-                click.echo("")
-                return
-            click.echo(target.read_text(encoding="utf-8"))
-        else:
-            # 读取所有 .md 文件（不含 history/）
-            result: Dict[str, str] = {}
-            for f in sorted(memory_dir.iterdir()):
-                if f.is_file() and f.suffix == ".md":
-                    result[f.stem] = f.read_text(encoding="utf-8")
-            # history/ 目录：列出文件名列表
-            history_dir = memory_dir / "history"
-            if history_dir.exists():
-                result["history"] = sorted(p.name for p in history_dir.iterdir() if p.is_file())
-            click.echo(json_module.dumps(result, ensure_ascii=False, indent=2))
+        click.echo(memory_file.read_text(encoding="utf-8"))
 
     except click.Abort:
         raise
@@ -443,51 +416,16 @@ def memory_get(agent_name: str, key: Optional[str]):
         raise click.Abort()
 
 
-def _get_git_author() -> str:
-    """从 git config 读取当前用户名，失败时返回 'unknown'。"""
-    import subprocess
-    try:
-        result = subprocess.run(
-            ["git", "config", "user.name"],
-            capture_output=True, text=True, timeout=3,
-        )
-        name = result.stdout.strip()
-        return name if name else "unknown"
-    except Exception:
-        return "unknown"
-
-
-def _make_entry(content: str) -> str:
-    """生成带时间戳和作者的 append-only 记录条目。
-
-    格式：
-        <!-- 2026-04-02T14:30:00+08:00 | author -->
-        内容
-    """
-    from datetime import datetime, timezone, timedelta
-    tz = timezone(timedelta(hours=8))
-    ts = datetime.now(tz).strftime("%Y-%m-%dT%H:%M:%S%z")
-    # +0800 → +08:00
-    if len(ts) == 24 and ts[-5] in ("+", "-"):
-        ts = ts[:-2] + ":" + ts[-2:]
-    author = _get_git_author()
-    return f"<!-- {ts} | {author} -->\n{content.rstrip()}\n"
-
-
 @agent_memory.command(name="set")
 @click.argument("agent_name")
-@click.argument("key")
 @click.argument("content")
 @click.option("--force", is_flag=True, default=False, help="强制覆盖（跳过确认）")
-def memory_set(agent_name: str, key: str, content: str, force: bool):
-    """覆盖写入 agent 的记忆文件（会丢失历史，谨慎使用）。
-
-    通常应使用 append 追加带时间戳的条目。
-    set 适用于初始化或需要完全重置某个 key 的场景。
+def memory_set(agent_name: str, content: str, force: bool):
+    """覆盖写入 agent 的 MEMORY.md（适合初始化或完全重置）。
 
     示例：
-        driving agent memory set android-reviewer facts "初始事实"
-        driving agent memory set android-reviewer context "重置上下文" --force
+        driving agent memory set android-reviewer "## 审查偏好\n\n- 不喜欢过度注释"
+        driving agent memory set android-reviewer "内容" --force
     """
     try:
         project_root = find_project_root()
@@ -498,21 +436,17 @@ def memory_set(agent_name: str, key: str, content: str, force: bool):
             log_error(f"未找到 agent '{agent_name}'")
             raise click.Abort()
 
-        memory_dir = agent_dir / "memory"
-        target = memory_dir / f"{key}.md"
+        memory_file = agent_dir / "MEMORY.md"
 
-        # 已有内容时提示确认
-        if target.exists() and not force:
-            log_warning(f"memory/{key}.md 已有内容，覆盖将丢失历史记录。")
-            log_warning("建议使用 'driving agent memory append' 追加带时间戳的条目。")
+        if memory_file.exists() and not force:
+            log_warning("MEMORY.md 已有内容，覆盖将丢失现有知识。")
+            log_warning("建议使用 'driving agent memory append' 追加新条目。")
             if not click.confirm("确认覆盖？"):
                 log_info("已取消，使用 --force 跳过此提示")
                 return
 
-        memory_dir.mkdir(exist_ok=True)
-        entry = _make_entry(content)
-        target.write_text(entry, encoding="utf-8")
-        log_success(f"已写入 {agent_name}/memory/{key}.md")
+        memory_file.write_text(content.rstrip() + "\n", encoding="utf-8")
+        log_success(f"已写入 {agent_name}/MEMORY.md")
 
     except click.Abort:
         raise
@@ -523,20 +457,13 @@ def memory_set(agent_name: str, key: str, content: str, force: bool):
 
 @agent_memory.command(name="append")
 @click.argument("agent_name")
-@click.argument("key")
 @click.argument("content")
-def memory_append(agent_name: str, key: str, content: str):
-    """追加带时间戳和作者的记录到 agent 记忆文件（推荐写入方式）。
-
-    每条记录自动附加当前时间和 git user.name，格式：
-        <!-- 2026-04-02T14:30:00+08:00 | author -->
-        内容
-
-    多人协作时追加操作几乎不产生 git 冲突。
+def memory_append(agent_name: str, content: str):
+    """追加知识条目到 agent 的 MEMORY.md（推荐写入方式）。
 
     示例：
-        driving agent memory append android-reviewer facts "用户不喜欢过度注释"
-        driving agent memory append android-reviewer context "正在审查 PR #42"
+        driving agent memory append android-reviewer "- 不喜欢过度注释"
+        driving agent memory append android-reviewer "## 有效策略\\n\\n- 先指出架构问题"
     """
     try:
         project_root = find_project_root()
@@ -547,15 +474,11 @@ def memory_append(agent_name: str, key: str, content: str):
             log_error(f"未找到 agent '{agent_name}'")
             raise click.Abort()
 
-        memory_dir = agent_dir / "memory"
-        memory_dir.mkdir(exist_ok=True)
-
-        target = memory_dir / f"{key}.md"
-        existing = target.read_text(encoding="utf-8") if target.exists() else ""
-        separator = "\n" if existing and not existing.endswith("\n") else ""
-        entry = _make_entry(content)
-        target.write_text(existing + separator + entry, encoding="utf-8")
-        log_success(f"已追加到 {agent_name}/memory/{key}.md")
+        memory_file = agent_dir / "MEMORY.md"
+        existing = memory_file.read_text(encoding="utf-8") if memory_file.exists() else ""
+        separator = "" if not existing or existing.endswith("\n\n") else "\n"
+        memory_file.write_text(existing + separator + content.rstrip() + "\n", encoding="utf-8")
+        log_success(f"已追加到 {agent_name}/MEMORY.md")
 
     except click.Abort:
         raise
@@ -566,19 +489,14 @@ def memory_append(agent_name: str, key: str, content: str):
 
 @agent_memory.command(name="clear")
 @click.argument("agent_name")
-@click.argument("key", required=False, default=None)
 @click.option("--yes", "-y", is_flag=True, default=False, help="跳过确认提示")
-def memory_clear(agent_name: str, key: Optional[str], yes: bool):
-    """清空 agent 的记忆。
-
-    指定 key 时只清空对应文件，不指定时清空整个 memory/ 目录。
+def memory_clear(agent_name: str, yes: bool):
+    """清空 agent 的 MEMORY.md。
 
     示例：
-        driving agent memory clear android-reviewer context
+        driving agent memory clear android-reviewer
         driving agent memory clear android-reviewer -y
     """
-    import shutil
-
     try:
         project_root = find_project_root()
         config_manager = ConfigManager(project_root)
@@ -588,25 +506,16 @@ def memory_clear(agent_name: str, key: Optional[str], yes: bool):
             log_error(f"未找到 agent '{agent_name}'")
             raise click.Abort()
 
-        memory_dir = agent_dir / "memory"
-        if not memory_dir.exists():
-            log_info("memory/ 目录不存在，无需清空")
+        memory_file = agent_dir / "MEMORY.md"
+        if not memory_file.exists():
+            log_info("MEMORY.md 不存在，无需清空")
             return
 
-        if key:
-            target = memory_dir / f"{key}.md"
-            if not target.exists():
-                log_info(f"文件 memory/{key}.md 不存在")
-                return
-            if not yes and not click.confirm(f"确认清空 {agent_name}/memory/{key}.md？"):
-                return
-            target.unlink()
-            log_success(f"已删除 {agent_name}/memory/{key}.md")
-        else:
-            if not yes and not click.confirm(f"确认清空 {agent_name} 的全部记忆？"):
-                return
-            shutil.rmtree(memory_dir)
-            log_success(f"已清空 {agent_name}/memory/")
+        if not yes and not click.confirm(f"确认清空 {agent_name}/MEMORY.md？"):
+            return
+
+        memory_file.unlink()
+        log_success(f"已删除 {agent_name}/MEMORY.md")
 
     except click.Abort:
         raise
@@ -629,8 +538,7 @@ def _read_agent_full(agent_dir: Path) -> Dict:
       - meta: AGENTS.md frontmatter 字段
       - instructions: AGENTS.md 正文（frontmatter 之后）
       - soul: SOUL.md 全文（如有）
-      - memory_facts: memory/facts.md 内容（如有）
-      - memory_context: memory/context.md 内容（如有）
+      - memory: MEMORY.md 内容（如有）
     """
     agents_md = agent_dir / "AGENTS.md"
 
@@ -650,31 +558,22 @@ def _read_agent_full(agent_dir: Path) -> Dict:
     soul_md = agent_dir / "SOUL.md"
     soul = soul_md.read_text(encoding="utf-8").strip() if soul_md.exists() else ""
 
-    # memory
-    memory_dir = agent_dir / "memory"
-    facts = ""
-    context_mem = ""
-    if memory_dir.exists():
-        facts_file = memory_dir / "facts.md"
-        context_file = memory_dir / "context.md"
-        if facts_file.exists():
-            facts = facts_file.read_text(encoding="utf-8").strip()
-        if context_file.exists():
-            context_mem = context_file.read_text(encoding="utf-8").strip()
+    # MEMORY.md
+    memory_file = agent_dir / "MEMORY.md"
+    memory = memory_file.read_text(encoding="utf-8").strip() if memory_file.exists() else ""
 
     return {
         "meta": meta,
         "instructions": instructions,
         "soul": soul,
-        "memory_facts": facts,
-        "memory_context": context_mem,
+        "memory": memory,
     }
 
 
 def _build_prompt(data: Dict, include_memory: bool = True) -> str:
     """将 driving agent 内容组装成完整 prompt 字符串。
 
-    顺序：指令 → 人格 → 记忆（facts → context）
+    顺序：指令 → 人格 → 最佳实践记忆
     """
     parts = []
 
@@ -692,11 +591,8 @@ def _build_prompt(data: Dict, include_memory: bool = True) -> str:
         if soul_text:
             parts.append(soul_text)
 
-    if include_memory:
-        if data["memory_facts"]:
-            parts.append("## 背景知识（长期记忆）\n\n" + data["memory_facts"])
-        if data["memory_context"]:
-            parts.append("## 当前工作状态\n\n" + data["memory_context"])
+    if include_memory and data["memory"]:
+        parts.append("## 最佳实践\n\n" + data["memory"])
 
     return "\n\n---\n\n".join(parts)
 
@@ -779,7 +675,7 @@ def _export_claude_code(agent_name: str, data: Dict, agent_dir: Path,
     out_file = out_dir / f"{agent_name}.md"
 
     # 有记忆需要嵌入时，必须生成独立文件（软链接无法追加内容）
-    if include_memory and (data["memory_facts"] or data["memory_context"]):
+    if include_memory and data["memory"]:
         if out_file.is_symlink():
             out_file.unlink()
         return _export_claude_code_full(agent_name, data, agent_dir, out_file)
@@ -965,7 +861,7 @@ def agent_export(agent_name: str, tool: str, output: Optional[str], no_memory: b
             log_info("独立文件模式：AGENTS.md 更新后需重新运行 export 同步")
 
         # Kiro 通过 agentSpawn hook 动态注入记忆，不需要 warning
-        if tool.lower() != "kiro" and not no_memory and (data["memory_facts"] or data["memory_context"]):
+        if tool.lower() != "kiro" and not no_memory and data["memory"]:
             log_warning("配置中包含当前记忆内容，建议使用 --no-memory 生成提交到 git 的静态版本")
 
     except click.Abort:
