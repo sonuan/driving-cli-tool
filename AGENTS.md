@@ -4,10 +4,11 @@
 
 **每次新会话的第一步，必须先执行以下命令获取当前可用技能列表和规则列表，否则不得回答任何问题：**
 
-```bash
-python3 -m driving.cli skill load
-python3 -m driving.cli rule load
-```
+    ```bash
+    driving skill load
+
+    driving rule load
+    ```
 
 - `skill load` 输出的 JSON 数组即为本项目当前启用的技能，每个 `path` 字段指向技能的完整路径
 - `rule load` 输出的 JSON 数组即为本项目当前启用的规则，每个 `path` 字段指向规则文件路径
@@ -21,13 +22,12 @@ python3 -m driving.cli rule load
 
 ## Rules 使用规则
 
-收到用户请求后，将规则列表中所有规则的 `path` 对应文件内容加载到上下文：
-- 规则文件包含项目规范，应在回答前完整读取
-- 若规则与当前请求直接相关，优先遵循规则内容
+收到用户请求后，对比规则列表中每个规则的 `description`：
+- 若请求与某规则相关，必须先读取该规则路径下的文件内容，再作答
+- 可同时匹配多个规则，按需依次加载
+- 若无法判断相关性，默认加载所有规则
 
-## `driving-cli` 命令行工具
 
-- 使用 `python3` 运行
 
 ## 沟通指南
 
