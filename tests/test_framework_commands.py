@@ -10,14 +10,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from driving.cli import cli
-from driving.commands.framework import (
+from driving_cli.cli import cli
+from driving_cli.commands.framework import (
     _load_all_frameworks_with_repo,
     _resolve_framework_name,
     framework_group,
 )
-from driving.models.config import DrivingConfig, RepoConfig
-from driving.utils.config_manager import ConfigManager
+from driving_cli.models.config import DrivingConfig, RepoConfig
+from driving_cli.utils.config_manager import ConfigManager
 
 
 # ==================== Fixtures ====================

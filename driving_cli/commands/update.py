@@ -9,9 +9,9 @@ from typing import Any, Dict, Optional
 
 import click
 
-from driving import __version__
-from driving.utils.config_manager import ConfigManager, find_project_root
-from driving.utils.logger import log_error, log_info, log_success, log_warning
+from driving_cli import __version__
+from driving_cli.utils.config_manager import ConfigManager, find_project_root
+from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
 
 # 默认更新检查 URL
 _DEFAULT_UPDATE_VERSION_URL = (

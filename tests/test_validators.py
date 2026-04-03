@@ -4,7 +4,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from driving.utils.validators import (
+from driving_cli.utils.validators import (
     infer_repo_name_from_url,
     validate_git_url,
     validate_repo_name,

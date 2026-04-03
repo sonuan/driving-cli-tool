@@ -20,10 +20,10 @@ fi
 
 # 格式化代码
 echo "✨ 使用 black 格式化代码..."
-python3 -m black driving tests
+python3 -m black driving_cli tests
 
 echo "📦 使用 isort 排序导入..."
-python3 -m isort driving tests
+python3 -m isort driving_cli tests
 
 # 检查结果
 echo "🔍 检查格式化结果..."

@@ -2,8 +2,8 @@
 
 import click
 
-from driving import __version__
-from driving.commands import agent, feature, framework, ide, repo, rule, skill, update
+from driving_cli import __version__
+from driving_cli.commands import agent, feature, framework, ide, repo, rule, skill, update
 
 
 @click.group()

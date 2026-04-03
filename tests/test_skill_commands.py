@@ -15,8 +15,8 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
-from driving.cli import cli
-from driving.commands.skill import (
+from driving_cli.cli import cli
+from driving_cli.commands.skill import (
     generate_available_skills_content,
     merge_skills_from_all_repos,
     parse_skill_yaml,
@@ -24,7 +24,7 @@ from driving.commands.skill import (
     scan_skills_from_dir,
     update_agents_md,
 )
-from driving.utils.config_manager import ConfigManager
+from driving_cli.utils.config_manager import ConfigManager
 
 
 # ==================== Fixtures ====================

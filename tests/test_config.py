@@ -8,7 +8,7 @@
 
 import pytest
 
-from driving.commands.ide import SENSITIVE_KEYWORDS
+from driving_cli.commands.ide import SENSITIVE_KEYWORDS
 
 
 class TestSensitiveKeywords:

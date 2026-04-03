@@ -5,7 +5,7 @@
 
 import pytest
 
-from driving.models.config import DrivingConfig, RepoConfig
+from driving_cli.models.config import DrivingConfig, RepoConfig
 
 
 class TestRepoConfig:

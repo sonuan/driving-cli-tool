@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 import git
-from driving.utils.git_helper import find_git_root
+from driving_cli.utils.git_helper import find_git_root
 
 
 class TestFindGitRoot:

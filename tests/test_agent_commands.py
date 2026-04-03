@@ -16,14 +16,14 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
-from driving.cli import cli
-from driving.commands.agent import (
+from driving_cli.cli import cli
+from driving_cli.commands.agent import (
     _merge_agents,
     _parse_frontmatter,
     scan_agents_from_dir,
 )
-from driving.models.config import RepoConfig
-from driving.utils.config_manager import ConfigManager
+from driving_cli.models.config import RepoConfig
+from driving_cli.utils.config_manager import ConfigManager
 
 
 # ==================== Helpers ====================

@@ -23,8 +23,8 @@ from click.testing import CliRunner
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from driving.cli import cli
-from driving.commands.feature import (
+from driving_cli.cli import cli
+from driving_cli.commands.feature import (
     ALL_FIELDS,
     SUMMARY_FIELDS,
     filter_features,

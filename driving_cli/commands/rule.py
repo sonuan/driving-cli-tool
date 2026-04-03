@@ -10,9 +10,9 @@ from typing import Dict, List, Optional, Tuple
 
 import click
 
-from driving.models.config import RepoConfig
-from driving.utils.config_manager import ConfigManager, find_project_root
-from driving.utils.logger import log_error, log_info, log_success, log_warning
+from driving_cli.models.config import RepoConfig
+from driving_cli.utils.config_manager import ConfigManager, find_project_root
+from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
 
 # 尝试导入 yaml，如果失败则使用简单解析器
 try:

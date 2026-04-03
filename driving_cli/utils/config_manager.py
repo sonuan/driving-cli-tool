@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from driving.models.config import DrivingConfig, RepoConfig
+from driving_cli.models.config import DrivingConfig, RepoConfig
 
 # 配置文件名称
 CONFIG_FILE_NAME = "driving.config.json"

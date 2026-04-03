@@ -3,7 +3,7 @@
 import json
 import pytest
 from pathlib import Path
-from driving.models.framework import Framework
+from driving_cli.models.framework import Framework
 
 
 class TestFrameworkModel:

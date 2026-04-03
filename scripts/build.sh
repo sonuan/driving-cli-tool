@@ -116,7 +116,7 @@ else
 fi
 
 # 检查是否在正确的目录
-if [ ! -f "pyproject.toml" ] || [ ! -d "driving" ]; then
+if [ ! -f "pyproject.toml" ] || [ ! -d "driving_cli" ]; then
     print_error "请在 driving-cli-tool 项目根目录中运行此脚本"
     exit 1
 fi
@@ -162,13 +162,13 @@ if [ -n "$VERSION_URL" ]; then
     print_info "将默认更新地址设置为: ${VERSION_URL}"
     
     # 备份原始文件
-    cp driving/commands/update.py driving/commands/update.py.bak
+    cp driving_cli/commands/update.py driving_cli/commands/update.py.bak
     
     # 使用 Python 替换默认值
     python3 << PYEOF
 import re
 
-with open('driving/commands/update.py', 'r', encoding='utf-8') as f:
+with open('driving_cli/commands/update.py', 'r', encoding='utf-8') as f:
     content = f.read()
 
 # 替换 _DEFAULT_UPDATE_VERSION_URL 的默认值
@@ -181,7 +181,7 @@ if new_content == content:
     pattern2 = r'(_DEFAULT_UPDATE_VERSION_URL\s*=\s*)"[^"]*"'
     new_content = re.sub(pattern2, r'\g<1>"${VERSION_URL}"', content)
 
-with open('driving/commands/update.py', 'w', encoding='utf-8') as f:
+with open('driving_cli/commands/update.py', 'w', encoding='utf-8') as f:
     f.write(new_content)
 
 print("默认更新地址已替换")
@@ -203,14 +203,14 @@ python3 -m PyInstaller \
     --console \
     --clean \
     --distpath ${DIST_DIR} \
-    driving/cli.py
+    driving_cli/cli.py
 
 BUILD_RESULT=$?
 
 # 恢复原始配置文件（如果有备份）
-if [ -f "driving/commands/update.py.bak" ]; then
+if [ -f "driving_cli/commands/update.py.bak" ]; then
     print_info "恢复原始配置文件..."
-    mv driving/commands/update.py.bak driving/commands/update.py
+    mv driving_cli/commands/update.py.bak driving_cli/commands/update.py
 fi
 
 if [ $BUILD_RESULT -ne 0 ]; then
@@ -250,7 +250,7 @@ print_step "8. 生成 version.json..."
 # 使用 Python 提取版本号
 VERSION=$(python3 << 'PYEOF'
 import re
-with open('driving/__init__.py', 'r') as f:
+with open('driving_cli/__init__.py', 'r') as f:
     content = f.read()
     match = re.search(r"__version__\s*=\s*['\"]([^'\"]+)['\"]", content)
     if match:

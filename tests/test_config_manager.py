@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from driving.models.config import DrivingConfig, RepoConfig
-from driving.utils.config_manager import (
+from driving_cli.models.config import DrivingConfig, RepoConfig
+from driving_cli.utils.config_manager import (
     AI_DRIVING_DIR_NAME,
     CONFIG_FILE_NAME,
     ConfigManager,

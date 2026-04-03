@@ -16,9 +16,9 @@ from typing import Dict, List, Optional, Tuple
 
 import click
 
-from driving.models.config import RepoConfig
-from driving.utils.config_manager import ConfigManager, find_project_root
-from driving.utils.logger import log_error, log_info, log_success, log_warning
+from driving_cli.models.config import RepoConfig
+from driving_cli.utils.config_manager import ConfigManager, find_project_root
+from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
 
 try:
     import yaml
@@ -749,7 +749,7 @@ def _export_kiro(agent_name: str, data: Dict, agent_dir: Path,
     # agentSpawn hook：自动注入记忆（Kiro 始终通过 hook 动态注入，不嵌入记忆内容）
     config["hooks"] = {
         "agentSpawn": [
-            {"command": f"python3 -m driving.cli agent memory get {agent_name}"}
+            {"command": f"python3 -m driving_cli.cli agent memory get {agent_name}"}
         ]
     }
 

@@ -12,9 +12,9 @@ import git
 from rich.console import Console
 from rich.table import Table
 
-from driving.utils.config_manager import ConfigManager, find_project_root
-from driving.utils.git_helper import clone_repository, find_git_root, is_local_framework
-from driving.utils.logger import log_error, log_info, log_success
+from driving_cli.utils.config_manager import ConfigManager, find_project_root
+from driving_cli.utils.git_helper import clone_repository, find_git_root, is_local_framework
+from driving_cli.utils.logger import log_error, log_info, log_success
 
 
 def _get_config_manager() -> ConfigManager:

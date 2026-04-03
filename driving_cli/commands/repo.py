@@ -10,11 +10,11 @@ from typing import Optional
 import click
 import git
 
-from driving.models.config import RepoConfig
-from driving.utils.config_manager import ConfigManager, find_project_root
-from driving.utils.git_helper import find_git_root
-from driving.utils.logger import log_error, log_info, log_success, log_warning
-from driving.utils.validators import (
+from driving_cli.models.config import RepoConfig
+from driving_cli.utils.config_manager import ConfigManager, find_project_root
+from driving_cli.utils.git_helper import find_git_root
+from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
+from driving_cli.utils.validators import (
     infer_repo_name_from_url,
     validate_git_url,
     validate_repo_name,

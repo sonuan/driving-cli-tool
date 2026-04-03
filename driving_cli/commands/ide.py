@@ -9,9 +9,9 @@ from typing import Any, Dict, Set, Tuple
 import click
 import git
 
-from driving.utils.config_manager import ConfigManager, find_project_root
-from driving.utils.git_helper import find_git_root
-from driving.utils.logger import log_error, log_info, log_success, log_warning
+from driving_cli.utils.config_manager import ConfigManager, find_project_root
+from driving_cli.utils.git_helper import find_git_root
+from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
 
 # 敏感字段关键词列表（用于 IDE 配置中的敏感信息检测）
 SENSITIVE_KEYWORDS = [
