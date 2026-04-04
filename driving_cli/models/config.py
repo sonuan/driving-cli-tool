@@ -17,6 +17,7 @@ class RepoConfig:
     url: Optional[str] = None  # Git URL（remote 类型必填）
     local_path: Optional[str] = None  # 本地原始路径（local 类型可选，有值时创建软链接）
     description: Optional[str] = None  # 仓库描述，用于 AI 关键词匹配
+    version: Optional[str] = None  # 最后一次 pull 后的 commit hash
     skills: Optional[dict] = None  # 技能过滤配置，格式：{"enabled": [...], "disabled": [...]}
     rules: Optional[dict] = None  # 规则过滤配置，格式：{"enabled": [...], "disabled": [...]}
     agents: Optional[dict] = None  # agent 过滤配置，格式：{"enabled": [...], "disabled": [...]}
@@ -32,6 +33,8 @@ class RepoConfig:
         }
         if self.description is not None:
             d["description"] = self.description
+        if self.version is not None:
+            d["version"] = self.version
         # 只在有值时写入，保持 config.json 简洁
         if self.skills is not None:
             d["skills"] = self.skills
@@ -55,6 +58,7 @@ class RepoConfig:
             url=data.get("url"),
             local_path=data.get("local_path"),
             description=data.get("description"),
+            version=data.get("version"),
             skills=data.get("skills"),
             rules=data.get("rules"),
             agents=data.get("agents"),

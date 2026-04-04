@@ -2,17 +2,19 @@
 
 ## ⚠️ 强制前置步骤
 
-**每次新会话的第一步，必须先执行以下命令获取当前可用技能列表和规则列表，否则不得回答任何问题：**
+**每次新会话的第一步，必须按顺序执行以下流程，否则不得回答任何问题：**
 
-    ```bash
-    driving skill load
+```bash
+driving check --json
+```
 
-    driving rule load
-    ```
+- 若输出中 `updatable` 非空，必须中断后续步骤，告知用户哪些仓库有可用更新并询问是否更新；用户确认后执行 `driving repo pull <name>` 逐个更新
 
-- `skill load` 输出的 JSON 数组即为本项目当前启用的技能，每个 `path` 字段指向技能的完整路径
-- `rule load` 输出的 JSON 数组即为本项目当前启用的规则，每个 `path` 字段指向规则文件路径
-- 若命令执行失败，立即告知用户并停止，不得凭记忆假设列表内容
+```bash
+driving skill load
+
+driving rule load
+```
 
 ## Skills 使用规则
 
