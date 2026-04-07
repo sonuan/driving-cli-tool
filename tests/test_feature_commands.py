@@ -408,7 +408,7 @@ def project_with_features(tmp_path):
 
 class TestFeatureListCommand:
     def test_list输出JSON数组(self, runner, project_with_features):
-        with patch("driving.commands.feature.find_project_root", return_value=project_with_features):
+        with patch("driving_cli.commands.feature.find_project_root", return_value=project_with_features):
             result = runner.invoke(cli, ["feature", "list"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -416,7 +416,7 @@ class TestFeatureListCommand:
         assert len(data) == 2
 
     def test_list默认输出精简字段(self, runner, project_with_features):
-        with patch("driving.commands.feature.find_project_root", return_value=project_with_features):
+        with patch("driving_cli.commands.feature.find_project_root", return_value=project_with_features):
             result = runner.invoke(cli, ["feature", "list"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -424,7 +424,7 @@ class TestFeatureListCommand:
             assert set(item.keys()) == SUMMARY_FIELDS
 
     def test_list_detail输出完整字段(self, runner, project_with_features):
-        with patch("driving.commands.feature.find_project_root", return_value=project_with_features):
+        with patch("driving_cli.commands.feature.find_project_root", return_value=project_with_features):
             result = runner.invoke(cli, ["feature", "list", "--detail"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -433,7 +433,7 @@ class TestFeatureListCommand:
                 assert field in item
 
     def test_list按name字母顺序排序(self, runner, project_with_features):
-        with patch("driving.commands.feature.find_project_root", return_value=project_with_features):
+        with patch("driving_cli.commands.feature.find_project_root", return_value=project_with_features):
             result = runner.invoke(cli, ["feature", "list"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -441,7 +441,7 @@ class TestFeatureListCommand:
         assert names == sorted(names)
 
     def test_list_keywords过滤(self, runner, project_with_features):
-        with patch("driving.commands.feature.find_project_root", return_value=project_with_features):
+        with patch("driving_cli.commands.feature.find_project_root", return_value=project_with_features):
             result = runner.invoke(cli, ["feature", "list", "--keywords", "game"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -449,7 +449,7 @@ class TestFeatureListCommand:
         assert data[0]["name"] == "game-home"
 
     def test_list_repo过滤(self, runner, project_with_features):
-        with patch("driving.commands.feature.find_project_root", return_value=project_with_features):
+        with patch("driving_cli.commands.feature.find_project_root", return_value=project_with_features):
             result = runner.invoke(cli, ["feature", "list", "--repo", "my-local"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -458,7 +458,7 @@ class TestFeatureListCommand:
             assert item["repo"] == "my-local"
 
     def test_list_repo不存在时报错(self, runner, project_with_features):
-        with patch("driving.commands.feature.find_project_root", return_value=project_with_features):
+        with patch("driving_cli.commands.feature.find_project_root", return_value=project_with_features):
             result = runner.invoke(cli, ["feature", "list", "--repo", "nonexistent"])
         assert result.exit_code != 0
 
@@ -466,7 +466,7 @@ class TestFeatureListCommand:
         _make_config(tmp_path, [
             {"name": "empty-repo", "type": "local", "path": "ai-driving/empty-repo", "local_path": None},
         ])
-        with patch("driving.commands.feature.find_project_root", return_value=tmp_path):
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
             result = runner.invoke(cli, ["feature", "list"])
         assert result.exit_code == 0
         assert json.loads(result.output) == []
@@ -477,7 +477,7 @@ class TestFeatureListCommand:
         assert "list" in result.output
 
     def test_list_多关键词OR关系(self, runner, project_with_features):
-        with patch("driving.commands.feature.find_project_root", return_value=project_with_features):
+        with patch("driving_cli.commands.feature.find_project_root", return_value=project_with_features):
             result = runner.invoke(cli, ["feature", "list", "--keywords", "game", "--keywords", "profile"])
         assert result.exit_code == 0
         data = json.loads(result.output)

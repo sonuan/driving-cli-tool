@@ -396,7 +396,7 @@ class TestSkillSyncCommand:
 
     def test_sync成功更新AGENTS_md(self, runner, project_with_two_repos):
         """skill sync 应成功扫描并更新 AGENTS.md"""
-        with patch("driving.commands.skill.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["skill", "sync"])
         assert result.exit_code == 0
         agents_md = project_with_two_repos / "AGENTS.md"
@@ -408,7 +408,7 @@ class TestSkillSyncCommand:
 
     def test_sync同名技能只保留先配置仓库(self, runner, project_with_two_repos):
         """code-review 在 main 和 local-docs 都有，应只保留 main 的版本"""
-        with patch("driving.commands.skill.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["skill", "sync"])
         assert result.exit_code == 0
         agents_md = project_with_two_repos / "AGENTS.md"
@@ -420,7 +420,7 @@ class TestSkillSyncCommand:
 
     def test_sync_location字段为完整路径(self, runner, project_with_two_repos):
         """location 字段应为 ai-driving/<repo-name>/skills/<skill-name>/ 格式"""
-        with patch("driving.commands.skill.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["skill", "sync"])
         assert result.exit_code == 0
         agents_md = project_with_two_repos / "AGENTS.md"
@@ -438,7 +438,7 @@ class TestSkillSyncCommand:
             "update_version_url": "",
         }
         (tmp_path / "driving.config.json").write_text(json.dumps(config))
-        with patch("driving.commands.skill.find_project_root", return_value=tmp_path):
+        with patch("driving_cli.commands.skill.find_project_root", return_value=tmp_path):
             result = runner.invoke(cli, ["skill", "sync"])
         assert result.exit_code != 0
 

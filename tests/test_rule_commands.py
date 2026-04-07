@@ -269,7 +269,7 @@ def runner():
 def project_with_rules(tmp_path):
     """创建包含规则文件的测试项目"""
     _make_config(tmp_path, [
-        {"name": "my-local", "type": "local", "path": "ai-driving/my-local", "local_path": None},
+        {"name": "my-local", "type": "local", "path": "ai-driving/my-local", "local_path": None, "tags": ["base"]},
     ])
     rules_dir = tmp_path / "ai-driving" / "my-local" / "rules"
     _make_rule_md(rules_dir / "rule-a.md", "rule-a", "规则 A 描述", "规则 A 正文")
@@ -279,7 +279,7 @@ def project_with_rules(tmp_path):
 
 class TestRuleLoadCommand:
     def test_load输出JSON数组(self, runner, project_with_rules):
-        with patch("driving.commands.rule.find_project_root", return_value=project_with_rules):
+        with patch("driving_cli.commands.rule.find_project_root", return_value=project_with_rules):
             result = runner.invoke(cli, ["rule", "load"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -287,7 +287,7 @@ class TestRuleLoadCommand:
         assert len(data) == 2
 
     def test_load输出包含必需字段(self, runner, project_with_rules):
-        with patch("driving.commands.rule.find_project_root", return_value=project_with_rules):
+        with patch("driving_cli.commands.rule.find_project_root", return_value=project_with_rules):
             result = runner.invoke(cli, ["rule", "load"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -298,7 +298,7 @@ class TestRuleLoadCommand:
             assert "content" not in item  # rule load 不返回正文
 
     def test_load_location格式正确(self, runner, project_with_rules):
-        with patch("driving.commands.rule.find_project_root", return_value=project_with_rules):
+        with patch("driving_cli.commands.rule.find_project_root", return_value=project_with_rules):
             result = runner.invoke(cli, ["rule", "load"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -310,7 +310,7 @@ class TestRuleLoadCommand:
         _make_config(tmp_path, [
             {"name": "empty-repo", "type": "local", "path": "ai-driving/empty-repo", "local_path": None},
         ])
-        with patch("driving.commands.rule.find_project_root", return_value=tmp_path):
+        with patch("driving_cli.commands.rule.find_project_root", return_value=tmp_path):
             result = runner.invoke(cli, ["rule", "load"])
         assert result.exit_code == 0
         assert json.loads(result.output) == []
@@ -320,6 +320,7 @@ class TestRuleLoadCommand:
             {
                 "name": "my-local", "type": "local",
                 "path": "ai-driving/my-local", "local_path": None,
+                "tags": ["base"],
                 "rules": {"enabled": [], "disabled": ["rule-b"]},
             },
         ])
@@ -327,7 +328,7 @@ class TestRuleLoadCommand:
         _make_rule_md(rules_dir / "rule-a.md", "rule-a", "A", "正文 A")
         _make_rule_md(rules_dir / "rule-b.md", "rule-b", "B", "正文 B")
 
-        with patch("driving.commands.rule.find_project_root", return_value=tmp_path):
+        with patch("driving_cli.commands.rule.find_project_root", return_value=tmp_path):
             result = runner.invoke(cli, ["rule", "load"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -338,20 +339,20 @@ class TestRuleLoadCommand:
 
 class TestRuleListCommand:
     def test_list显示规则列表(self, runner, project_with_rules):
-        with patch("driving.commands.rule.find_project_root", return_value=project_with_rules):
+        with patch("driving_cli.commands.rule.find_project_root", return_value=project_with_rules):
             result = runner.invoke(cli, ["rule", "list"])
         assert result.exit_code == 0
         assert "rule-a" in result.output
         assert "rule-b" in result.output
 
     def test_list显示启用标记(self, runner, project_with_rules):
-        with patch("driving.commands.rule.find_project_root", return_value=project_with_rules):
+        with patch("driving_cli.commands.rule.find_project_root", return_value=project_with_rules):
             result = runner.invoke(cli, ["rule", "list"])
         assert result.exit_code == 0
         assert "✓" in result.output
 
     def test_list_repo过滤不存在的仓库报错(self, runner, project_with_rules):
-        with patch("driving.commands.rule.find_project_root", return_value=project_with_rules):
+        with patch("driving_cli.commands.rule.find_project_root", return_value=project_with_rules):
             result = runner.invoke(cli, ["rule", "list", "--repo", "nonexistent"])
         assert result.exit_code != 0
 

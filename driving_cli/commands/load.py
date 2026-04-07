@@ -1,7 +1,6 @@
 """load 命令 - 一次性输出所有上下文数据，供 AI 会话注入"""
 
 import json
-import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -24,32 +23,12 @@ def _build_repos(project_root: Path, config_manager: ConfigManager) -> list:
     repos = config_manager.get_all_repos()
     result = []
     for repo in repos:
-        repo_dir = project_root / repo.path
-        if repo.type == "remote":
-            is_init = repo_dir.exists() and any(repo_dir.iterdir())
-            status = "initialized" if is_init else "uninitialized"
-        else:
-            status = "exists" if (repo_dir.exists() or repo_dir.is_symlink()) else "missing"
-
         entry = {
             "name": repo.name,
             "type": repo.type,
             "description": repo.description or "",
             "path": repo.path,
-            "status": status,
         }
-        if repo.type == "remote":
-            entry["url"] = repo.url
-            if repo_dir.exists() and any(repo_dir.iterdir()):
-                try:
-                    entry["version"] = subprocess.check_output(
-                        ["git", "rev-parse", "--short", "HEAD"],
-                        cwd=str(repo_dir), stderr=subprocess.DEVNULL, text=True,
-                    ).strip()
-                except Exception:
-                    entry["version"] = "unknown"
-            else:
-                entry["version"] = None
         result.append(entry)
     return result
 

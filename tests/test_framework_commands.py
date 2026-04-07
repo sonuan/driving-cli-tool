@@ -260,7 +260,7 @@ class TestFrameworkList:
 
     def test_列表包含所有框架(self, runner, project_with_two_repos):
         """framework list 应显示所有仓库的框架"""
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "list"])
         assert result.exit_code == 0
         assert "xstatic" in result.output
@@ -268,7 +268,7 @@ class TestFrameworkList:
 
     def test_列表包含repo列(self, runner, project_with_two_repos):
         """framework list 应显示 repo 列（仓库名称）"""
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "list"])
         assert result.exit_code == 0
         assert "main" in result.output
@@ -276,7 +276,7 @@ class TestFrameworkList:
 
     def test_json格式输出包含repo字段(self, runner, project_with_two_repos):
         """--json 输出中每个框架应包含 repo 字段"""
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "list", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -286,21 +286,21 @@ class TestFrameworkList:
 
     def test_指定框架名过滤(self, runner, project_with_two_repos):
         """指定框架名时只显示该框架"""
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "list", "xstatic"])
         assert result.exit_code == 0
         assert "xstatic" in result.output
 
     def test_同名框架冲突时退出(self, runner, project_with_two_repos):
         """ximage 在两个仓库中都有，应提示冲突"""
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "list", "ximage"])
         # 应该以非零退出码退出（Abort）
         assert result.exit_code != 0
 
     def test_json格式输出不含内部字段(self, runner, project_with_two_repos):
         """--json 输出中不应包含 _repo_name 等内部字段"""
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "list", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -316,23 +316,23 @@ class TestFrameworkInstall:
 
     def test_安装不存在的框架报错(self, runner, project_with_two_repos):
         """安装不存在的框架应报错"""
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "install", "nonexistent"])
         assert result.exit_code != 0
 
     def test_同名冲突时提示使用repo格式(self, runner, project_with_two_repos):
         """同名框架冲突时应提示使用 repo/name 格式"""
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "install", "ximage"])
         assert result.exit_code != 0
         # 应包含冲突提示
         assert "ximage" in result.output
 
-    @patch("driving.commands.framework.clone_repository")
+    @patch("driving_cli.commands.framework.clone_repository")
     def test_使用repo斜杠格式安装(self, mock_clone, runner, project_with_two_repos):
         """使用 repo/name 格式应安装到对应仓库的 submodules 目录"""
         mock_clone.return_value = None
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "install", "main/xstatic"])
         # clone_repository 应被调用，目标路径在 main 仓库的 submodules 下
         if mock_clone.called:
@@ -359,7 +359,7 @@ class TestFrameworkInstall:
         })
         (main_fw_dir / "gitlist.json").write_text(json.dumps(gitlist))
 
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "install", "local-fw"])
         assert result.exit_code == 0
         assert "跳过" in result.output
@@ -373,7 +373,7 @@ class TestFrameworkSources:
 
     def test_sources路径基于对应仓库submodules(self, runner, project_with_two_repos):
         """sources 路径应包含对应仓库名称和 submodules"""
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "sources", "xstatic"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -382,7 +382,7 @@ class TestFrameworkSources:
 
     def test_sources使用repo斜杠格式(self, runner, project_with_two_repos):
         """使用 repo/name 格式时路径应基于指定仓库"""
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "sources", "local-docs/ximage"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -391,7 +391,7 @@ class TestFrameworkSources:
 
     def test_sources输出不含内部字段(self, runner, project_with_two_repos):
         """sources 输出不应包含 _repo_name 等内部字段"""
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "sources", "xstatic"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -399,7 +399,7 @@ class TestFrameworkSources:
 
     def test_sources同名冲突时报错(self, runner, project_with_two_repos):
         """同名框架冲突时应报错"""
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "sources", "ximage"])
         assert result.exit_code != 0
 
@@ -412,19 +412,19 @@ class TestFrameworkCheckoutPull:
 
     def test_checkout未安装框架报错(self, runner, project_with_two_repos):
         """checkout 未安装的框架应报错"""
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "checkout", "xstatic", "develop"])
         assert result.exit_code != 0
 
     def test_pull未安装框架报错(self, runner, project_with_two_repos):
         """pull 未安装的框架应报错"""
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "pull", "xstatic"])
         assert result.exit_code != 0
 
     def test_checkout不存在框架报错(self, runner, project_with_two_repos):
         """checkout 不存在的框架应报错"""
-        with patch("driving.commands.framework.find_project_root", return_value=project_with_two_repos):
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "checkout", "nonexistent", "main"])
         assert result.exit_code != 0
 

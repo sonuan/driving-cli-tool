@@ -48,11 +48,11 @@ def runner():
 
 class TestRepoList:
     def test_list_empty(self, runner, tmp_project):
-        """空配置时提示尚未安装任何仓库"""
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        """空配置时输出空数组"""
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["list"])
         assert result.exit_code == 0
-        assert "尚未安装任何仓库" in result.output
+        assert json.loads(result.output) == []
 
     def test_list_with_remote_repo(self, runner, tmp_project, config_mgr):
         """有远程仓库时正确展示"""
@@ -64,12 +64,11 @@ class TestRepoList:
         )
         config_mgr.add_repo(repo_cfg)
 
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["list"])
         assert result.exit_code == 0
-        assert "main" in result.output
-        assert "remote" in result.output
-        assert "https://github.com/org/repo.git" in result.output
+        data = json.loads(result.output)
+        assert any(r["name"] == "main" and r["type"] == "remote" for r in data)
 
     def test_list_with_local_repo(self, runner, tmp_project, config_mgr):
         """有本地仓库时正确展示"""
@@ -82,7 +81,7 @@ class TestRepoList:
         )
         config_mgr.add_repo(repo_cfg)
 
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["list"])
         assert result.exit_code == 0
         assert "local-docs" in result.output
@@ -96,11 +95,13 @@ class TestRepoList:
         config_mgr.add_repo(RepoConfig(name="local-repo", type="local",
                                         url=None, path="ai-driving/local-repo"))
 
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["list"])
         assert result.exit_code == 0
-        assert "远程仓库" in result.output
-        assert "本地仓库" in result.output
+        data = json.loads(result.output)
+        types = {r["name"]: r["type"] for r in data}
+        assert types["remote-repo"] == "remote"
+        assert types["local-repo"] == "local"
 
 
 # ==================== repo install 测试 ====================
@@ -108,21 +109,21 @@ class TestRepoList:
 class TestRepoInstall:
     def test_install_no_args_no_config(self, runner, tmp_project):
         """无参数且配置为空时提示无远程仓库"""
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["install"])
         assert result.exit_code == 0
         assert "没有远程仓库" in result.output
 
     def test_install_invalid_url(self, runner, tmp_project):
         """非法 URL 应报错"""
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["install", "--url", "not-a-url"])
         assert result.exit_code != 0
         assert "URL 格式不合法" in result.output
 
     def test_install_invalid_repo_name(self, runner, tmp_project):
         """非法仓库名称应报错"""
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, [
                 "install", "--url", "https://github.com/org/repo.git",
                 "--name", "invalid name!"
@@ -135,7 +136,7 @@ class TestRepoInstall:
         config_mgr.add_repo(RepoConfig(name="main", type="remote",
                                         url="https://github.com/org/r.git",
                                         path="ai-driving/main"))
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, [
                 "install", "--url", "https://github.com/org/other.git", "--name", "main"
             ])
@@ -144,7 +145,7 @@ class TestRepoInstall:
 
     def test_install_local_nonexistent_path(self, runner, tmp_project):
         """本地路径不存在时应报错"""
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, [
                 "install", "--local", "/nonexistent/path/xyz", "--name", "mylocal"
             ])
@@ -153,7 +154,7 @@ class TestRepoInstall:
 
     def test_install_local_no_path_creates_directory(self, runner, tmp_project):
         """--local 无路径时创建普通目录并写入配置"""
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, [
                 "install", "--local", "--name", "mylocal"
             ])
@@ -172,7 +173,7 @@ class TestRepoInstall:
         src_dir = tmp_path / "my-source"
         src_dir.mkdir()
 
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, [
                 "install", "--local", str(src_dir), "--name", "linked-repo"
             ])
@@ -195,9 +196,9 @@ class TestRepoInstall:
         ))
 
         mock_git_repo = MagicMock()
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project), \
-             patch("driving.commands.repo.find_git_root", return_value=tmp_project), \
-             patch("driving.commands.repo.git.Repo", return_value=mock_git_repo):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.git.Repo", return_value=mock_git_repo):
             result = runner.invoke(repo_group, ["install"])
 
         assert result.exit_code == 0
@@ -210,7 +211,7 @@ class TestRepoInstall:
 class TestRepoUninstall:
     def test_uninstall_nonexistent(self, runner, tmp_project):
         """卸载不存在的仓库应报错"""
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["uninstall", "nonexistent"])
         assert result.exit_code != 0
         assert "不存在" in result.output
@@ -229,7 +230,7 @@ class TestRepoUninstall:
             local_path=str(src_dir),
         ))
 
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["uninstall", "linked"])
 
         assert result.exit_code == 0
@@ -248,7 +249,7 @@ class TestRepoUninstall:
             url=None, path="ai-driving/mylocal",
         ))
 
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["uninstall", "mylocal"])
 
         assert result.exit_code == 0
@@ -263,7 +264,7 @@ class TestRepoUninstall:
         ))
         assert config_mgr.get_repo("to-remove") is not None
 
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["uninstall", "to-remove"])
 
         assert config_mgr.get_repo("to-remove") is None
@@ -288,7 +289,7 @@ class TestRepoGitOps:
     def test_pull_skips_local_repo(self, runner, tmp_project, config_mgr):
         """pull 对 local 仓库跳过并给出提示"""
         self._make_local_repo(config_mgr)
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["pull", "local-docs"])
         assert result.exit_code == 0
         assert "跳过" in result.output
@@ -297,7 +298,7 @@ class TestRepoGitOps:
     def test_push_skips_local_repo(self, runner, tmp_project, config_mgr):
         """push 对 local 仓库跳过并给出提示"""
         self._make_local_repo(config_mgr)
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["push", "local-docs"])
         assert result.exit_code == 0
         assert "跳过" in result.output
@@ -306,7 +307,7 @@ class TestRepoGitOps:
     def test_commit_skips_local_repo(self, runner, tmp_project, config_mgr):
         """commit 对 local 仓库跳过并给出提示"""
         self._make_local_repo(config_mgr)
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["commit", "local-docs"])
         assert result.exit_code == 0
         assert "跳过" in result.output
@@ -314,14 +315,14 @@ class TestRepoGitOps:
 
     def test_pull_nonexistent_repo(self, runner, tmp_project):
         """pull 指定不存在的仓库应报错"""
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["pull", "nonexistent"])
         assert result.exit_code != 0
         assert "不存在" in result.output
 
     def test_push_nonexistent_repo(self, runner, tmp_project):
         """push 指定不存在的仓库应报错"""
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["push", "nonexistent"])
         assert result.exit_code != 0
         assert "不存在" in result.output
@@ -331,7 +332,7 @@ class TestRepoGitOps:
         self._make_local_repo(config_mgr, "local1")
         self._make_local_repo(config_mgr, "local2")
 
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["pull"])
         assert result.exit_code == 0
         assert result.output.count("跳过") == 2
@@ -340,7 +341,7 @@ class TestRepoGitOps:
         """commit 第一个参数不是仓库名时视为提交信息"""
         self._make_local_repo(config_mgr, "local-docs")
 
-        with patch("driving.commands.repo.find_project_root", return_value=tmp_project):
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
             result = runner.invoke(repo_group, ["commit", "my commit message"])
         # local 仓库跳过，不报错
         assert result.exit_code == 0

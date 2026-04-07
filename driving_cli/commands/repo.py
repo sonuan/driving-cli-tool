@@ -329,11 +329,9 @@ def _install_local(config_mgr: ConfigManager, project_root: Path, local_path: st
 # ==================== repo list ====================
 
 @repo_group.command(name="list")
-@click.option("--check", is_flag=True, default=False, help="联网检查每个 remote 仓库是否有可用更新，输出 hasNewVersion 字段")
-def repo_list(check: bool):
+def repo_list():
     """查看已安装的仓库列表（JSON 格式输出）"""
     import json as _json
-    import subprocess as _sp
     project_root = find_project_root()
     config_mgr = ConfigManager(project_root)
 
@@ -345,66 +343,12 @@ def repo_list(check: bool):
 
     result = []
     for repo in repos:
-        repo_dir = project_root / repo.path
-        if repo.type == "remote":
-            is_init = repo_dir.exists() and any(repo_dir.iterdir())
-            status = "initialized" if is_init else "uninitialized"
-        else:
-            status = "exists" if (repo_dir.exists() or repo_dir.is_symlink()) else "missing"
-
         entry = {
             "name": repo.name,
             "type": repo.type,
             "description": repo.description or "",
             "path": repo.path,
-            "status": status,
         }
-        if repo.type == "remote":
-            entry["url"] = repo.url
-            # 读取仓库当前版本（commit hash）
-            if is_init:
-                try:
-                    version = _sp.check_output(
-                        ["git", "rev-parse", "--short", "HEAD"],
-                        cwd=str(repo_dir),
-                        stderr=_sp.DEVNULL,
-                        text=True,
-                    ).strip()
-                    entry["version"] = version
-                except Exception:
-                    entry["version"] = "unknown"
-                # --check: 联网对比远端
-                if check:
-                    try:
-                        _sp.run(
-                            ["git", "fetch", "--quiet"],
-                            cwd=str(repo_dir),
-                            stderr=_sp.DEVNULL,
-                            timeout=10,
-                        )
-                        local = _sp.check_output(
-                            ["git", "rev-parse", "HEAD"],
-                            cwd=str(repo_dir), stderr=_sp.DEVNULL, text=True,
-                        ).strip()
-                        remote = None
-                        for ref in ("@{u}", "origin/HEAD", "origin/main", "origin/master"):
-                            try:
-                                remote = _sp.check_output(
-                                    ["git", "rev-parse", ref],
-                                    cwd=str(repo_dir), stderr=_sp.DEVNULL, text=True,
-                                ).strip()
-                                break
-                            except Exception:
-                                continue
-                        entry["hasNewVersion"] = (local != remote) if remote else None
-                    except Exception:
-                        entry["hasNewVersion"] = None
-            else:
-                entry["version"] = None
-                if check:
-                    entry["hasNewVersion"] = None
-        elif repo.local_path:
-            entry["local_path"] = repo.local_path
         result.append(entry)
     print(_json.dumps(result, ensure_ascii=False, indent=2))
 
@@ -513,10 +457,10 @@ def pull(repo_name: Optional[str]):
         if repo_cfg.type == "local":
             log_warning(f"仓库 '{repo_cfg.name}' 是本地仓库，跳过 pull 操作")
             continue
-        _git_pull(repo_cfg, project_root, config_mgr)
+        _git_pull(repo_cfg, project_root)
 
 
-def _git_pull(repo_cfg: RepoConfig, project_root: Path, config_mgr: ConfigManager = None):
+def _git_pull(repo_cfg: RepoConfig, project_root: Path):
     """对指定远程仓库执行 git pull"""
     repo_dir = project_root / repo_cfg.path
     if not repo_dir.exists():
@@ -549,18 +493,6 @@ def _git_pull(repo_cfg: RepoConfig, project_root: Path, config_mgr: ConfigManage
         current_branch = repo.active_branch.name
         repo.remotes.origin.pull(current_branch)
         log_success(f"仓库 '{repo_cfg.name}' 拉取成功")
-        # 写入最新 commit hash 到 config
-        if config_mgr is not None:
-            try:
-                import subprocess as _sp
-                new_version = _sp.check_output(
-                    ['git', 'rev-parse', '--short', 'HEAD'],
-                    cwd=str(repo_dir), stderr=_sp.DEVNULL, text=True,
-                ).strip()
-                repo_cfg.version = new_version
-                config_mgr.update_repo(repo_cfg)
-            except Exception:
-                pass
     except git.exc.GitCommandError as e:
         log_error(f"仓库 '{repo_cfg.name}' 拉取失败: {e}")
     except Exception as e:

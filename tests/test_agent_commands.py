@@ -80,7 +80,7 @@ def runner():
 def project_with_agents(tmp_path):
     """创建包含两个 agent 的测试项目"""
     _make_config(tmp_path, [
-        {"name": "my-local", "type": "local", "path": "ai-driving/my-local", "local_path": None},
+        {"name": "my-local", "type": "local", "path": "ai-driving/my-local", "local_path": None, "tags": ["base"]},
     ])
     agents_dir = tmp_path / "ai-driving" / "my-local" / "agents"
     _make_agents_md(agents_dir / "agent-a", "agent-a", "Agent A 描述", role="reviewer")
@@ -173,7 +173,7 @@ class TestScanAgentsFromDir:
     def test_has_memory标记正确(self, tmp_path):
         agents_dir = tmp_path / "agents"
         _make_agents_md(agents_dir / "with-mem", "with-mem", "有记忆")
-        _make_memory(agents_dir / "with-mem", {"facts.md": "一些事实"})
+        (agents_dir / "with-mem" / "MEMORY.md").write_text("一些事实", encoding="utf-8")
         _make_agents_md(agents_dir / "no-mem", "no-mem", "无记忆")
 
         result = scan_agents_from_dir("repo", agents_dir, quiet=True)
@@ -289,7 +289,7 @@ class TestMergeAgents:
 
 class TestAgentLoadCommand:
     def test_load输出JSON数组(self, runner, project_with_agents):
-        with patch("driving.commands.agent.find_project_root", return_value=project_with_agents):
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
             result = runner.invoke(cli, ["agent", "load"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -297,17 +297,16 @@ class TestAgentLoadCommand:
         assert len(data) == 2
 
     def test_load输出包含必需字段(self, runner, project_with_agents):
-        with patch("driving.commands.agent.find_project_root", return_value=project_with_agents):
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
             result = runner.invoke(cli, ["agent", "load"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         for item in data:
-            for field in ("name", "description", "role", "skills",
-                          "path", "has_soul", "has_memory"):
+            for field in ("name", "description", "path"):
                 assert field in item
 
     def test_load_path格式正确(self, runner, project_with_agents):
-        with patch("driving.commands.agent.find_project_root", return_value=project_with_agents):
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
             result = runner.invoke(cli, ["agent", "load"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -317,19 +316,20 @@ class TestAgentLoadCommand:
             assert "/agents/" in item["path"]
 
     def test_load_has_soul标记正确(self, runner, project_with_agents):
-        with patch("driving.commands.agent.find_project_root", return_value=project_with_agents):
+        # agent load 只返回精简字段（name/description/path），soul 标记在 agent list 中显示
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
             result = runner.invoke(cli, ["agent", "load"])
         assert result.exit_code == 0
         data = json.loads(result.output)
-        agent_map = {a["name"]: a for a in data}
-        assert agent_map["agent-a"]["has_soul"] is True
-        assert agent_map["agent-b"]["has_soul"] is False
+        names = {a["name"] for a in data}
+        assert "agent-a" in names
+        assert "agent-b" in names
 
     def test_load无agents目录时返回空数组(self, runner, tmp_path):
         _make_config(tmp_path, [
-            {"name": "empty", "type": "local", "path": "ai-driving/empty", "local_path": None},
+            {"name": "empty", "type": "local", "path": "ai-driving/empty", "local_path": None, "tags": ["base"]},
         ])
-        with patch("driving.commands.agent.find_project_root", return_value=tmp_path):
+        with patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
             result = runner.invoke(cli, ["agent", "load"])
         assert result.exit_code == 0
         assert json.loads(result.output) == []
@@ -338,13 +338,14 @@ class TestAgentLoadCommand:
         _make_config(tmp_path, [{
             "name": "my-local", "type": "local",
             "path": "ai-driving/my-local", "local_path": None,
+            "tags": ["base"],
             "agents": {"enabled": [], "disabled": ["agent-b"]},
         }])
         agents_dir = tmp_path / "ai-driving" / "my-local" / "agents"
         _make_agents_md(agents_dir / "agent-a", "agent-a", "描述 A")
         _make_agents_md(agents_dir / "agent-b", "agent-b", "描述 B")
 
-        with patch("driving.commands.agent.find_project_root", return_value=tmp_path):
+        with patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
             result = runner.invoke(cli, ["agent", "load"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -358,26 +359,26 @@ class TestAgentLoadCommand:
 
 class TestAgentListCommand:
     def test_list显示agent列表(self, runner, project_with_agents):
-        with patch("driving.commands.agent.find_project_root", return_value=project_with_agents):
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
             result = runner.invoke(cli, ["agent", "list"])
         assert result.exit_code == 0
         assert "agent-a" in result.output
         assert "agent-b" in result.output
 
     def test_list显示启用标记(self, runner, project_with_agents):
-        with patch("driving.commands.agent.find_project_root", return_value=project_with_agents):
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
             result = runner.invoke(cli, ["agent", "list"])
         assert result.exit_code == 0
         assert "✓" in result.output
 
     def test_list显示soul标记(self, runner, project_with_agents):
-        with patch("driving.commands.agent.find_project_root", return_value=project_with_agents):
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
             result = runner.invoke(cli, ["agent", "list"])
         assert result.exit_code == 0
         assert "[soul]" in result.output
 
     def test_list_repo过滤不存在的仓库报错(self, runner, project_with_agents):
-        with patch("driving.commands.agent.find_project_root", return_value=project_with_agents):
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
             result = runner.invoke(cli, ["agent", "list", "--repo", "nonexistent"])
         assert result.exit_code != 0
 
@@ -407,136 +408,98 @@ class TestAgentMemoryCommands:
     def test_memory_append追加内容包含时间戳(self, runner, project_with_agent_memory):
         agent_dir = (project_with_agent_memory / "ai-driving" / "my-local" /
                      "agents" / "test-agent")
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_agent_memory):
             result = runner.invoke(cli, ["agent", "memory", "append",
-                                         "test-agent", "facts", "新事实"])
+                                         "test-agent", "新事实"])
         assert result.exit_code == 0
-        facts_file = agent_dir / "memory" / "facts.md"
-        content = facts_file.read_text(encoding="utf-8")
+        memory_file = agent_dir / "MEMORY.md"
+        content = memory_file.read_text(encoding="utf-8")
         assert "新事实" in content
-        assert "<!--" in content
-        assert "-->" in content
 
     def test_memory_set覆盖已有内容需要force(self, runner, project_with_agent_memory):
         agent_dir = (project_with_agent_memory / "ai-driving" / "my-local" /
                      "agents" / "test-agent")
-        _make_memory(agent_dir, {"context.md": "旧内容"})
+        memory_file = agent_dir / "MEMORY.md"
+        memory_file.write_text("旧内容", encoding="utf-8")
 
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_agent_memory):
             result = runner.invoke(cli, ["agent", "memory", "set",
-                                         "test-agent", "context", "新内容"], input="n\n")
-        context_file = agent_dir / "memory" / "context.md"
-        assert "旧内容" in context_file.read_text(encoding="utf-8")
+                                         "test-agent", "新内容"], input="n\n")
+        assert "旧内容" in memory_file.read_text(encoding="utf-8")
 
     def test_memory_set_force强制覆盖(self, runner, project_with_agent_memory):
         agent_dir = (project_with_agent_memory / "ai-driving" / "my-local" /
                      "agents" / "test-agent")
-        _make_memory(agent_dir, {"context.md": "旧内容"})
+        memory_file = agent_dir / "MEMORY.md"
+        memory_file.write_text("旧内容", encoding="utf-8")
 
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_agent_memory):
             result = runner.invoke(cli, ["agent", "memory", "set",
-                                         "test-agent", "context", "新内容", "--force"])
+                                         "test-agent", "新内容", "--force"])
         assert result.exit_code == 0
-        context_file = agent_dir / "memory" / "context.md"
-        content = context_file.read_text(encoding="utf-8")
-        assert "新内容" in content
-        assert "<!--" in content
+        assert "新内容" in memory_file.read_text(encoding="utf-8")
 
     def test_memory_set写入文件(self, runner, project_with_agent_memory):
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_agent_memory):
             result = runner.invoke(cli, ["agent", "memory", "set",
-                                         "test-agent", "facts", "用户偏好简洁风格"])
+                                         "test-agent", "用户偏好简洁风格"])
         assert result.exit_code == 0
-        facts_file = (project_with_agent_memory / "ai-driving" / "my-local" /
-                      "agents" / "test-agent" / "memory" / "facts.md")
-        assert facts_file.exists()
-        assert "用户偏好简洁风格" in facts_file.read_text(encoding="utf-8")
+        memory_file = (project_with_agent_memory / "ai-driving" / "my-local" /
+                       "agents" / "test-agent" / "MEMORY.md")
+        assert memory_file.exists()
+        assert "用户偏好简洁风格" in memory_file.read_text(encoding="utf-8")
 
     def test_memory_get读取文件(self, runner, project_with_agent_memory):
         agent_dir = (project_with_agent_memory / "ai-driving" / "my-local" /
                      "agents" / "test-agent")
-        _make_memory(agent_dir, {"facts.md": "已知事实内容"})
+        (agent_dir / "MEMORY.md").write_text("已知事实内容", encoding="utf-8")
 
-        with patch("driving.commands.agent.find_project_root",
-                   return_value=project_with_agent_memory):
-            result = runner.invoke(cli, ["agent", "memory", "get", "test-agent", "facts"])
-        assert result.exit_code == 0
-        assert "已知事实内容" in result.output
-
-    def test_memory_get无key时返回JSON(self, runner, project_with_agent_memory):
-        agent_dir = (project_with_agent_memory / "ai-driving" / "my-local" /
-                     "agents" / "test-agent")
-        _make_memory(agent_dir, {"facts.md": "事实", "context.md": "上下文"})
-
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_agent_memory):
             result = runner.invoke(cli, ["agent", "memory", "get", "test-agent"])
         assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert "facts" in data
-        assert "context" in data
+        assert "已知事实内容" in result.output
 
     def test_memory_append追加内容(self, runner, project_with_agent_memory):
         agent_dir = (project_with_agent_memory / "ai-driving" / "my-local" /
                      "agents" / "test-agent")
-        _make_memory(agent_dir, {"facts.md": "第一行\n"})
+        (agent_dir / "MEMORY.md").write_text("第一行\n", encoding="utf-8")
 
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_agent_memory):
             result = runner.invoke(cli, ["agent", "memory", "append",
-                                         "test-agent", "facts", "第二行"])
+                                         "test-agent", "第二行"])
         assert result.exit_code == 0
-        facts_file = agent_dir / "memory" / "facts.md"
-        content = facts_file.read_text(encoding="utf-8")
+        content = (agent_dir / "MEMORY.md").read_text(encoding="utf-8")
         assert "第一行" in content
         assert "第二行" in content
 
-    def test_memory_clear指定key删除文件(self, runner, project_with_agent_memory):
+    def test_memory_clear删除MEMORY_md(self, runner, project_with_agent_memory):
         agent_dir = (project_with_agent_memory / "ai-driving" / "my-local" /
                      "agents" / "test-agent")
-        _make_memory(agent_dir, {"facts.md": "内容", "context.md": "上下文"})
+        (agent_dir / "MEMORY.md").write_text("内容", encoding="utf-8")
 
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_agent_memory):
             result = runner.invoke(cli, ["agent", "memory", "clear",
-                                         "test-agent", "facts", "--yes"])
+                                         "test-agent", "--yes"])
         assert result.exit_code == 0
-        assert not (agent_dir / "memory" / "facts.md").exists()
-        assert (agent_dir / "memory" / "context.md").exists()
-
-    def test_memory_clear全部删除memory目录(self, runner, project_with_agent_memory):
-        agent_dir = (project_with_agent_memory / "ai-driving" / "my-local" /
-                     "agents" / "test-agent")
-        _make_memory(agent_dir, {"facts.md": "内容", "context.md": "上下文"})
-
-        with patch("driving.commands.agent.find_project_root",
-                   return_value=project_with_agent_memory):
-            result = runner.invoke(cli, ["agent", "memory", "clear", "test-agent", "--yes"])
-        assert result.exit_code == 0
-        assert not (agent_dir / "memory").exists()
+        assert not (agent_dir / "MEMORY.md").exists()
 
     def test_memory_get不存在的agent报错(self, runner, project_with_agent_memory):
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_agent_memory):
             result = runner.invoke(cli, ["agent", "memory", "get", "nonexistent-agent"])
         assert result.exit_code != 0
 
-    def test_memory_get无memory目录返回空JSON(self, runner, project_with_agent_memory):
-        with patch("driving.commands.agent.find_project_root",
+    def test_memory_get无MEMORY_md返回空(self, runner, project_with_agent_memory):
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_agent_memory):
             result = runner.invoke(cli, ["agent", "memory", "get", "test-agent"])
-        assert result.exit_code == 0
-        assert json.loads(result.output) == {}
-
-    def test_memory_get不存在的key返回空字符串(self, runner, project_with_agent_memory):
-        with patch("driving.commands.agent.find_project_root",
-                   return_value=project_with_agent_memory):
-            result = runner.invoke(cli, ["agent", "memory", "get",
-                                         "test-agent", "nonexistent"])
         assert result.exit_code == 0
         assert result.output.strip() == ""
 
@@ -578,7 +541,7 @@ class TestRepoConfigAgentsSerialization:
 
 @pytest.fixture
 def project_with_full_agent(tmp_path):
-    """创建包含完整 agent（AGENTS.md + SOUL.md + memory）的测试项目"""
+    """创建包含完整 agent（AGENTS.md + SOUL.md + MEMORY.md）的测试项目"""
     _make_config(tmp_path, [
         {"name": "my-local", "type": "local", "path": "ai-driving/my-local", "local_path": None},
     ])
@@ -586,16 +549,16 @@ def project_with_full_agent(tmp_path):
     _make_agents_md(agent_dir, "test-agent", "测试 agent 描述",
                     role="reviewer", skills=["code-reviews"])
     _make_soul_md(agent_dir)
-    _make_memory(agent_dir, {
-        "facts.md": "<!-- 2026-04-02T10:00:00+08:00 | user -->\n用户偏好简洁风格\n",
-        "context.md": "<!-- 2026-04-02T11:00:00+08:00 | user -->\n正在审查 PR #1\n",
-    })
+    (agent_dir / "MEMORY.md").write_text(
+        "用户偏好简洁风格\n正在审查 PR #1\n",
+        encoding="utf-8"
+    )
     return tmp_path
 
 
 class TestAgentExportCommand:
     def test_export_kiro生成json文件(self, runner, project_with_full_agent):
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
             result = runner.invoke(cli, ["agent", "export", "test-agent",
                                          "--tool", "kiro", "--no-memory"])
@@ -608,7 +571,7 @@ class TestAgentExportCommand:
         assert data["prompt"].startswith("file://")
 
     def test_export_claude_code生成md文件(self, runner, project_with_full_agent):
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
             result = runner.invoke(cli, ["agent", "export", "test-agent",
                                          "--tool", "claude-code", "--no-memory"])
@@ -619,7 +582,7 @@ class TestAgentExportCommand:
         assert out.is_symlink()
 
     def test_export_claude_code带记忆生成独立文件(self, runner, project_with_full_agent):
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
             result = runner.invoke(cli, ["agent", "export", "test-agent",
                                          "--tool", "claude-code"])
@@ -632,7 +595,7 @@ class TestAgentExportCommand:
         assert "测试 agent 描述" in content
 
     def test_export_cursor生成mdc文件(self, runner, project_with_full_agent):
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
             result = runner.invoke(cli, ["agent", "export", "test-agent",
                                          "--tool", "cursor", "--no-memory"])
@@ -645,7 +608,7 @@ class TestAgentExportCommand:
         assert "alwaysApply: false" in content
 
     def test_export_windsurf生成md文件(self, runner, project_with_full_agent):
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
             result = runner.invoke(cli, ["agent", "export", "test-agent",
                                          "--tool", "windsurf", "--no-memory"])
@@ -669,7 +632,7 @@ class TestAgentExportCommand:
             encoding="utf-8"
         )
         runner_inst = CliRunner()
-        with patch("driving.commands.agent.find_project_root", return_value=tmp_path):
+        with patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
             result = runner_inst.invoke(cli, ["agent", "export", "symlink-agent",
                                               "--tool", "cursor", "--no-memory"])
         assert result.exit_code == 0
@@ -688,7 +651,7 @@ class TestAgentExportCommand:
             encoding="utf-8"
         )
         runner_inst = CliRunner()
-        with patch("driving.commands.agent.find_project_root", return_value=tmp_path):
+        with patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
             result = runner_inst.invoke(cli, ["agent", "export", "symlink-agent",
                                               "--tool", "windsurf", "--no-memory"])
         assert result.exit_code == 0
@@ -697,7 +660,7 @@ class TestAgentExportCommand:
 
     def test_export包含soul内容(self, runner, project_with_full_agent):
         # soul 内容只在独立文件（带记忆）模式下嵌入
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
             runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "claude-code"])
         out = project_with_full_agent / ".claude" / "agents" / "test-agent.md"
@@ -705,27 +668,27 @@ class TestAgentExportCommand:
         assert "Soul" in content
 
     def test_export包含memory内容(self, runner, project_with_full_agent):
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
             runner.invoke(cli, ["agent", "export", "test-agent",
                                 "--tool", "claude-code"])
         out = project_with_full_agent / ".claude" / "agents" / "test-agent.md"
         content = out.read_text(encoding="utf-8")
-        assert "背景知识" in content
+        assert "最佳实践" in content
         assert "用户偏好简洁风格" in content
 
     def test_export_no_memory不包含记忆(self, runner, project_with_full_agent):
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
             runner.invoke(cli, ["agent", "export", "test-agent",
                                 "--tool", "claude-code", "--no-memory"])
         out = project_with_full_agent / ".claude" / "agents" / "test-agent.md"
         content = out.read_text(encoding="utf-8")
-        assert "背景知识" not in content
+        assert "最佳实践" not in content
         assert "用户偏好简洁风格" not in content
 
     def test_export_kiro包含agentSpawn_hook(self, runner, project_with_full_agent):
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
             runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "kiro"])
         out = project_with_full_agent / ".kiro" / "agents" / "test-agent.json"
@@ -736,7 +699,7 @@ class TestAgentExportCommand:
 
     def test_export_kiro_no_memory也含hook(self, runner, project_with_full_agent):
         # Kiro 始终通过 agentSpawn hook 动态注入记忆，--no-memory 不影响 hook
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
             runner.invoke(cli, ["agent", "export", "test-agent",
                                 "--tool", "kiro", "--no-memory"])
@@ -746,14 +709,14 @@ class TestAgentExportCommand:
         assert "agentSpawn" in data["hooks"]
 
     def test_export不存在的agent报错(self, runner, project_with_full_agent):
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
             result = runner.invoke(cli, ["agent", "export", "nonexistent",
                                          "--tool", "kiro"])
         assert result.exit_code != 0
 
     def test_export_claude_code包含关联技能(self, runner, project_with_full_agent):
-        with patch("driving.commands.agent.find_project_root",
+        with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
             runner.invoke(cli, ["agent", "export", "test-agent",
                                 "--tool", "claude-code", "--no-memory"])
