@@ -13,7 +13,8 @@ driving load
 - `user_prompt` 非空 → 作为用户约束执行
 - `skills` → 当前所有可用技能列表，每项包含 `name`、`description`、`path`
 - `rules` → 当前所有可用规则列表，每项包含 `name`、`description`、`path`
-- `repos` → 当前所有已安装AI工程基建的仓库列表，包含仓库名、类型、状态等信息
+- `repos` → 当前所有已安装AI工程基建的仓库列表，包含 `name`、`description`、`path`
+- `agents` → 当前所有子代理列表，包含 `name`、`description`、`path`
 
 未完成以上步骤前，不得响应任何用户请求。
 
@@ -24,17 +25,25 @@ driving load
 
 ## Skills 使用规则
 
-收到用户请求后，对比 `skills` 技能列表中每个技能的 `description`：
-- 若请求与某技能相关，必须先读取该技能路径下的 `SKILL.md`，再作答
-- 可同时匹配多个技能，按需依次加载
+1. 收到用户请求后，对比 `skills` 技能列表中每个技能的 `description`：
+    - 若请求与某技能相关，必须先读取该技能路径下的 `SKILL.md`，再作答
+    - 可同时匹配多个技能，按需依次加载
+2. 调用 `driving skill load <skill-name>` 命令行进行动态加载指定技能
 
 ## Rules 使用规则
 
-收到用户请求后，对比 `rules` 规则列表中每个规则的 `description`：
-- 若请求与某规则相关，必须先读取该规则路径下的文件内容，再作答
-- 可同时匹配多个规则，按需依次加载
-- 若无法判断相关性，默认加载所有规则
+1. 收到用户请求后，对比 `rules` 规则列表中每个规则的 `description`：
+    - 若请求与某规则相关，必须先读取该规则路径下的文件内容，再作答
+    - 可同时匹配多个规则，按需依次加载
+    - 若无法判断相关性，默认加载所有规则
+2. 调用 `driving rule load <rule-name>` 命令行进行动态加载指定规则
 
+## Agents 使用规则
+
+1. 收到用户请求后，对比 `agents` 子代理列表中每个代理的 `description`：
+    - 若请求与某子代理相关，调用子代理启动任务
+    - 可同时匹配多个子代理，按需依次加载
+2. 调用 `driving agent load <agent-name>` 命令行进行动态加载指定子代理
 
 
 ## 沟通指南
