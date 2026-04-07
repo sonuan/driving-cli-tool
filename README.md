@@ -86,7 +86,8 @@ driving feature list --detail                 # 输出完整字段
 driving agent list                        # 列出所有 agent（按仓库分组）
 driving agent list --repo <name>          # 只显示指定仓库的 agent
 driving agent list --edit                 # 交互模式，勾选启用/禁用 agent
-driving agent load                        # 输出已启用 agent 元数据（供 AI 注入上下文）
+driving agent load                        # 只加载 tags=base 的仓库 agent（供 AI 注入上下文）
+driving agent load <keywords...>          # 精确匹配 repo.name 或 agent.name（取并集）
 
 # 记忆管理
 driving agent memory get <name>                  # 读取 MEMORY.md 内容
@@ -225,7 +226,9 @@ driving skill load                    # 只加载 tags=base 的仓库
 driving skill load f-message          # 精确匹配 repo.name=f-message
 driving skill load f-message f-qucall # 精确匹配多个 repo.name，取并集
 driving rule load f-message
-driving agent load
+driving agent load                    # 只加载 tags=base 的仓库
+driving agent load android            # 精确匹配 repo.name=android
+driving agent load android-reviewer  # 精确匹配 agent.name=android-reviewer
 
 # 3. 查看可用框架并安装
 driving framework list
