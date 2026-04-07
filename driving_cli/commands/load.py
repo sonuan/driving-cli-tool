@@ -16,7 +16,7 @@ from driving_cli.utils.config_manager import ConfigManager, find_project_root
 
 
 class SystemPrompt:
-    HAS_UPDATE = "以下仓库存在新版本：{repos}，请询问用户是否更新，确认前不得继续。"
+    HAS_UPDATE = "以下仓库存在新版本：{repos}，请询问用户是否更新，确认前不得继续。当用户确认更新则需要使用 driving repo pull <repo-name> 进行更新"
     DEFAULT = ""
 
 
