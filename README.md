@@ -41,6 +41,12 @@ driving framework pull <name>                 # 更新框架仓库
 driving framework sources <name>              # 获取框架源码路径列表
 ```
 
+## load — 一次性加载所有上下文
+
+```bash
+driving load    # 输出 skills、rules、repos、system_prompt、user_prompt，供 AI 会话注入
+```
+
 ## skill — 技能管理
 
 ```bash

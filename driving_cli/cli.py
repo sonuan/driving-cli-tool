@@ -3,7 +3,7 @@
 import click
 
 from driving_cli import __version__
-from driving_cli.commands import agent, check, feature, framework, ide, repo, rule, skill, update
+from driving_cli.commands import agent, check, feature, framework, ide, load, repo, rule, skill, update
 
 
 @click.group()
@@ -42,6 +42,9 @@ cli.add_command(update.update)
 
 # 注册 check 命令
 cli.add_command(check.check)
+
+# 注册 load 命令
+cli.add_command(load.load)
 
 
 

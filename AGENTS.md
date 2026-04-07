@@ -2,19 +2,20 @@
 
 ## ⚠️ 强制前置步骤
 
-**每次新会话的第一步，必须按顺序执行以下流程，否则不得回答任何问题：**
+**每次新会话的第一步，必须执行以下命令，否则不得回答任何问题：**
 
 ```bash
-driving check --json
+driving load
 ```
 
-- 若输出中 `updatable` 非空，必须中断后续步骤，告知用户哪些仓库有可用更新并询问是否更新；用户确认后执行 `driving repo pull <name>` 逐个更新
+解析返回的 JSON：
+- `system_prompt` 非空 → 作为系统指令执行
+- `user_prompt` 非空 → 作为用户约束执行
+- `skills` → 当前所有可用技能列表，每项包含 `name`、`description`、`path`
+- `rules` → 当前所有可用规则列表，每项包含 `name`、`description`、`path`
+- `repos` → 当前所有已安装仓库列表，包含仓库名、类型、状态等信息
 
-```bash
-driving skill load
-
-driving rule load
-```
+未完成以上步骤前，不得响应任何用户请求。
 
 ## Skills 使用规则
 

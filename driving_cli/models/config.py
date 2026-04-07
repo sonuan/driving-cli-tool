@@ -77,6 +77,7 @@ class DrivingConfig:
     repos: List[RepoConfig]  # 已安装的仓库列表
     default_commit_message: str  # 默认提交信息
     update_version_url: str  # 更新检查 URL
+    user_prompt: str = ""  # 用户提示词，注入到 driving load 输出的 user_prompt 字段
 
     def to_dict(self) -> dict:
         """序列化为字典（JSON 兼容格式）
@@ -84,12 +85,15 @@ class DrivingConfig:
         Returns:
             dict: 包含所有字段的字典，repos 列表中每个元素也已序列化
         """
-        return {
+        d = {
             "version": self.version,
             "repos": [repo.to_dict() for repo in self.repos],
             "default_commit_message": self.default_commit_message,
             "update_version_url": self.update_version_url,
         }
+        if self.user_prompt:
+            d["user_prompt"] = self.user_prompt
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "DrivingConfig":
@@ -121,4 +125,5 @@ class DrivingConfig:
             repos=repos,
             default_commit_message=str(data["default_commit_message"]),
             update_version_url=str(data["update_version_url"]),
+            user_prompt=str(data.get("user_prompt", "")),
         )
