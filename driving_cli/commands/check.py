@@ -23,6 +23,27 @@ def _get_repo_version(repo_dir: Path) -> str:
         return "unknown"
 
 
+def _compare_local_remote(repo_dir: Path) -> Optional[bool]:
+    """纯本地对比 HEAD 与上次 fetch 的远端引用，不联网"""
+    try:
+        local = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(repo_dir), stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+        for ref in ("@{u}", "origin/HEAD", "origin/main", "origin/master"):
+            try:
+                remote = subprocess.check_output(
+                    ["git", "rev-parse", ref],
+                    cwd=str(repo_dir), stderr=subprocess.DEVNULL, text=True,
+                ).strip()
+                return local != remote
+            except Exception:
+                continue
+        return None
+    except Exception:
+        return None
+
+
 def _has_new_version(repo_dir: Path) -> Optional[bool]:
     """fetch 后对比本地与远端，返回 True/False/None（None 表示网络失败）"""
     try:
@@ -30,26 +51,9 @@ def _has_new_version(repo_dir: Path) -> Optional[bool]:
             ["git", "fetch", "--quiet"],
             cwd=str(repo_dir), stderr=subprocess.DEVNULL, timeout=10,
         )
-        local = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=str(repo_dir), stderr=subprocess.DEVNULL, text=True,
-        ).strip()
-        # 优先用 @{u}，detached HEAD 时 fallback 到 origin/HEAD、origin/main、origin/master
-        remote = None
-        for ref in ("@{u}", "origin/HEAD", "origin/main", "origin/master"):
-            try:
-                remote = subprocess.check_output(
-                    ["git", "rev-parse", ref],
-                    cwd=str(repo_dir), stderr=subprocess.DEVNULL, text=True,
-                ).strip()
-                break
-            except Exception:
-                continue
-        if remote is None:
-            return None
-        return local != remote
     except Exception:
         return None
+    return _compare_local_remote(repo_dir)
 
 
 @click.command("check")
@@ -68,13 +72,18 @@ def check(as_json: bool):
         _check_interactive()
 
 
-def _collect_updatable():
-    """收集可更新仓库列表，返回 (project_root, updatable, warnings)"""
+def _collect_updatable(fetch: bool = True):
+    """收集可更新仓库列表，返回 (project_root, updatable, warnings)
+
+    fetch=True 时先 git fetch 再对比（check 命令用），
+    fetch=False 时纯本地对比（load 命令用）。
+    """
     project_root = find_project_root()
     config_mgr = ConfigManager(project_root)
     repos = config_mgr.get_all_repos()
     remote_repos = [r for r in repos if r.type == "remote"]
 
+    compare = _has_new_version if fetch else _compare_local_remote
     updatable = []
     warnings = []
     for repo in remote_repos:
@@ -83,11 +92,11 @@ def _collect_updatable():
         if not is_init:
             warnings.append(f"仓库 '{repo.name}' 未初始化，跳过")
             continue
-        result = _has_new_version(repo_dir)
+        result = compare(repo_dir)
         if result is True:
             updatable.append(repo)
         elif result is None:
-            warnings.append(f"仓库 '{repo.name}' 网络检查失败，跳过")
+            warnings.append(f"仓库 '{repo.name}' 检查失败，跳过")
 
     return project_root, updatable, warnings
 

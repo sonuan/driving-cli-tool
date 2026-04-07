@@ -110,7 +110,7 @@ def _build_repos(project_root: Path, config_manager: ConfigManager) -> list:
 
 def _build_system_prompt() -> str:
     try:
-        _, updatable, _ = _collect_updatable()
+        _, updatable, _ = _collect_updatable(fetch=False)
     except Exception:
         return SystemPrompt.DEFAULT
 
