@@ -434,6 +434,65 @@ def skill_sync():
         raise click.Abort()
 
 
+def collect_skills(keywords: tuple = ()) -> list:
+    """收集可用技能列表，供 skill load 和 driving load 复用。
+
+    不传关键词时，只加载 tags 含 "base" 的仓库的技能。
+    传入关键词时，按 repo.name 或 skill.name 精确匹配（取并集）。
+    """
+    project_root = find_project_root()
+    config_manager = ConfigManager(project_root)
+
+    skills_dirs = config_manager.get_all_skills_dirs()
+    if not skills_dirs:
+        return []
+
+    repo_configs = config_manager.get_all_repos()
+    repo_config_map = {r.name: r for r in repo_configs}
+
+    all_skills_by_repo: dict = {}
+    for repo_name, skills_dir in skills_dirs:
+        rc = repo_config_map.get(repo_name)
+        repo_skills = scan_skills_from_dir(repo_name, skills_dir, quiet=True)
+        if rc is not None and rc.skills is not None:
+            enabled = rc.skills.get("enabled") or []
+            disabled = rc.skills.get("disabled") or []
+            if enabled:
+                repo_skills = [s for s in repo_skills if s["name"] in enabled]
+            elif disabled:
+                repo_skills = [s for s in repo_skills if s["name"] not in disabled]
+        all_skills_by_repo[repo_name] = repo_skills
+
+    result: list = []
+    seen: set = set()
+
+    def _add(skills: list):
+        for s in skills:
+            if s["path"] not in seen:
+                seen.add(s["path"])
+                result.append(s)
+
+    if not keywords:
+        for repo_name, repo_skills in all_skills_by_repo.items():
+            rc = repo_config_map.get(repo_name)
+            tags = rc.tags if rc and rc.tags else []
+            if "base" in tags:
+                _add(repo_skills)
+    else:
+        kw_set = set(keywords)
+        for repo_name, repo_skills in all_skills_by_repo.items():
+            if repo_name in kw_set:
+                _add(repo_skills)
+                continue
+            matched = [s for s in repo_skills if s["name"] in kw_set]
+            _add(matched)
+
+    return [
+        {"name": s["name"], "description": s["description"], "path": s["path"]}
+        for s in sorted(result, key=lambda x: x["name"])
+    ]
+
+
 @skill_group.command(name="load")
 @click.argument("keywords", nargs=-1, required=False)
 def skill_load(keywords: tuple):
@@ -452,68 +511,8 @@ def skill_load(keywords: tuple):
     import json as json_module
 
     try:
-        project_root = find_project_root()
-        config_manager = ConfigManager(project_root)
-
-        skills_dirs = config_manager.get_all_skills_dirs()
-        if not skills_dirs:
-            click.echo("[]")
-            return
-
-        repo_configs = config_manager.get_all_repos()
-        repo_config_map = {r.name: r for r in repo_configs}
-
-        # 扫描所有仓库的全量技能（quiet 模式，遵守 enabled/disabled 配置）
-        all_skills_by_repo: dict = {}
-        for repo_name, skills_dir in skills_dirs:
-            rc = repo_config_map.get(repo_name)
-            repo_skills = scan_skills_from_dir(repo_name, skills_dir, quiet=True)
-            # 应用仓库的 enabled/disabled 过滤
-            if rc is not None and rc.skills is not None:
-                enabled = rc.skills.get("enabled") or []
-                disabled = rc.skills.get("disabled") or []
-                if enabled:
-                    repo_skills = [s for s in repo_skills if s["name"] in enabled]
-                elif disabled:
-                    repo_skills = [s for s in repo_skills if s["name"] not in disabled]
-            all_skills_by_repo[repo_name] = repo_skills
-
-        result_skills: list = []
-        seen_paths: set = set()
-
-        def _add_skills(skills: list):
-            for s in skills:
-                if s["path"] not in seen_paths:
-                    seen_paths.add(s["path"])
-                    result_skills.append(s)
-
-        if not keywords:
-            # 无关键词：只加载 tag=base 的仓库
-            for repo_name, repo_skills in all_skills_by_repo.items():
-                rc = repo_config_map.get(repo_name)
-                tags = rc.tags if rc and rc.tags else []
-                if "base" in tags:
-                    _add_skills(repo_skills)
-        else:
-            # 有关键词：忽略 tags，只按 repo.name 或 skill.name 精确匹配
-            kw_set = set(keywords)
-
-            for repo_name, repo_skills in all_skills_by_repo.items():
-                # repo.name 匹配任意关键词 → 整个仓库的 skills 全部加载
-                if repo_name in kw_set:
-                    _add_skills(repo_skills)
-                    continue
-
-                # skill.name 匹配任意关键词 → 只加载匹配的 skill
-                matched = [s for s in repo_skills if s["name"] in kw_set]
-                _add_skills(matched)
-
-        output = [
-            {"name": s["name"], "description": s["description"], "path": s["path"]}
-            for s in sorted(result_skills, key=lambda x: x["name"])
-        ]
+        output = collect_skills(keywords)
         click.echo(json_module.dumps(output, ensure_ascii=False, indent=2))
-
     except Exception as e:
         log_error(f"加载技能列表失败: {e}")
         raise click.Abort()

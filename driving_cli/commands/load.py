@@ -8,70 +8,16 @@ from typing import Optional
 import click
 
 from driving_cli import __version__
+from driving_cli.commands.agent import collect_agents
 from driving_cli.commands.check import _collect_updatable
-from driving_cli.commands.rule import filter_rules_by_config, scan_rules_from_dir
-from driving_cli.commands.skill import scan_skills_from_dir
+from driving_cli.commands.rule import collect_rules
+from driving_cli.commands.skill import collect_skills
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 
 
 class SystemPrompt:
     HAS_UPDATE = "以下仓库存在新版本：{repos}，请询问用户是否更新，确认前不得继续。"
     DEFAULT = ""
-
-
-def _build_skills(project_root: Path, config_manager: ConfigManager) -> list:
-    skills_dirs = config_manager.get_all_skills_dirs()
-    if not skills_dirs:
-        return []
-
-    repo_configs = config_manager.get_all_repos()
-    repo_config_map = {r.name: r for r in repo_configs}
-
-    result = []
-    seen = set()
-    for repo_name, skills_dir in skills_dirs:
-        rc = repo_config_map.get(repo_name)
-        tags = rc.tags if rc and rc.tags else []
-        if "base" not in tags:
-            continue
-        repo_skills = scan_skills_from_dir(repo_name, skills_dir, quiet=True)
-        if rc and rc.skills:
-            enabled = rc.skills.get("enabled") or []
-            disabled = rc.skills.get("disabled") or []
-            if enabled:
-                repo_skills = [s for s in repo_skills if s["name"] in enabled]
-            elif disabled:
-                repo_skills = [s for s in repo_skills if s["name"] not in disabled]
-        for s in repo_skills:
-            if s["path"] not in seen:
-                seen.add(s["path"])
-                result.append({"name": s["name"], "description": s["description"], "path": s["path"]})
-    return sorted(result, key=lambda x: x["name"])
-
-
-def _build_rules(project_root: Path, config_manager: ConfigManager) -> list:
-    rules_dirs = config_manager.get_all_rules_dirs()
-    if not rules_dirs:
-        return []
-
-    repo_configs = config_manager.get_all_repos()
-    repo_config_map = {r.name: r for r in repo_configs}
-
-    result = []
-    seen = set()
-    for repo_name, rules_dir in rules_dirs:
-        rc = repo_config_map.get(repo_name)
-        tags = rc.tags if rc and rc.tags else []
-        if "base" not in tags:
-            continue
-        repo_rules = scan_rules_from_dir(repo_name, rules_dir, quiet=True, header_only=True)
-        if rc:
-            repo_rules = filter_rules_by_config(repo_rules, rc)
-        for r in repo_rules:
-            if r["path"] not in seen:
-                seen.add(r["path"])
-                result.append({"name": r["name"], "description": r["description"], "path": r["path"]})
-    return result
 
 
 def _build_repos(project_root: Path, config_manager: ConfigManager) -> list:
@@ -121,11 +67,17 @@ def _build_system_prompt() -> str:
 
 
 @click.command("load")
-def load():
-    """一次性输出所有上下文数据（skills、rules、repos、prompts），供 AI 会话注入
+@click.argument("keywords", nargs=-1, required=False)
+def load(keywords: tuple):
+    """一次性输出所有上下文数据（skills、rules、agents、repos、prompts），供 AI 会话注入
+
+    不传参数时加载 tags=base 的仓库内容。
+    传入 repo-name 时只加载匹配仓库的 skills/rules/agents。
 
     示例：
         driving load
+        driving load f-message
+        driving load f-message f-qucall
     """
     try:
         project_root = find_project_root()
@@ -134,8 +86,9 @@ def load():
 
         result = {
             "cli_version": __version__,
-            "skills": _build_skills(project_root, config_manager),
-            "rules": _build_rules(project_root, config_manager),
+            "skills": collect_skills(keywords),
+            "rules": collect_rules(keywords),
+            "agents": collect_agents(keywords),
             "repos": _build_repos(project_root, config_manager),
             "system_prompt": _build_system_prompt(),
             "user_prompt": config.user_prompt,

@@ -237,6 +237,56 @@ def rule_group():
     pass
 
 
+def collect_rules(keywords: tuple = ()) -> list:
+    """收集可用规则列表，供 rule load 和 driving load 复用。"""
+    project_root = find_project_root()
+    config_manager = ConfigManager(project_root)
+
+    rules_dirs = config_manager.get_all_rules_dirs()
+    if not rules_dirs:
+        return []
+
+    repo_configs = config_manager.get_all_repos()
+    repo_config_map = {r.name: r for r in repo_configs}
+
+    all_rules_by_repo: dict = {}
+    for repo_name, rules_dir in rules_dirs:
+        rc = repo_config_map.get(repo_name)
+        repo_rules = scan_rules_from_dir(repo_name, rules_dir, quiet=True, header_only=True)
+        if rc is not None:
+            repo_rules = filter_rules_by_config(repo_rules, rc)
+        all_rules_by_repo[repo_name] = repo_rules
+
+    result: list = []
+    seen: set = set()
+
+    def _add(rules: list):
+        for r in rules:
+            if r["path"] not in seen:
+                seen.add(r["path"])
+                result.append(r)
+
+    if not keywords:
+        for repo_name, repo_rules in all_rules_by_repo.items():
+            rc = repo_config_map.get(repo_name)
+            tags = rc.tags if rc and rc.tags else []
+            if "base" in tags:
+                _add(repo_rules)
+    else:
+        kw_set = set(keywords)
+        for repo_name, repo_rules in all_rules_by_repo.items():
+            if repo_name in kw_set:
+                _add(repo_rules)
+                continue
+            matched = [r for r in repo_rules if r["name"] in kw_set]
+            _add(matched)
+
+    return [
+        {"name": r["name"], "description": r["description"], "path": r["path"]}
+        for r in result
+    ]
+
+
 @rule_group.command(name="load")
 @click.argument("keywords", nargs=-1, required=False)
 def rule_load(keywords: tuple):
@@ -253,62 +303,8 @@ def rule_load(keywords: tuple):
         driving rule load code-style
     """
     try:
-        project_root = find_project_root()
-        config_manager = ConfigManager(project_root)
-
-        rules_dirs = config_manager.get_all_rules_dirs()
-        if not rules_dirs:
-            click.echo("[]")
-            return
-
-        repo_configs = config_manager.get_all_repos()
-        repo_config_map = {r.name: r for r in repo_configs}
-
-        # 扫描所有仓库的全量规则（quiet 模式，遵守 enabled/disabled 配置）
-        all_rules_by_repo: dict = {}
-        for repo_name, rules_dir in rules_dirs:
-            rc = repo_config_map.get(repo_name)
-            repo_rules = scan_rules_from_dir(repo_name, rules_dir, quiet=True, header_only=True)
-            if rc is not None:
-                repo_rules = filter_rules_by_config(repo_rules, rc)
-            all_rules_by_repo[repo_name] = repo_rules
-
-        result_rules: list = []
-        seen_paths: set = set()
-
-        def _add_rules(rules: list):
-            for r in rules:
-                if r["path"] not in seen_paths:
-                    seen_paths.add(r["path"])
-                    result_rules.append(r)
-
-        if not keywords:
-            # 无关键词：只加载 tag=base 的仓库
-            for repo_name, repo_rules in all_rules_by_repo.items():
-                rc = repo_config_map.get(repo_name)
-                tags = rc.tags if rc and rc.tags else []
-                if "base" in tags:
-                    _add_rules(repo_rules)
-        else:
-            # 有关键词：忽略 tags，只按 repo.name 或 rule.name 精确匹配
-            kw_set = set(keywords)
-
-            for repo_name, repo_rules in all_rules_by_repo.items():
-                # repo.name 匹配任意关键词 → 整个仓库的 rules 全部加载
-                if repo_name in kw_set:
-                    _add_rules(repo_rules)
-                    continue
-
-                # rule.name 匹配任意关键词 → 只加载匹配的 rule
-                matched = [r for r in repo_rules if r["name"] in kw_set]
-                _add_rules(matched)
-
-        output = [
-            {"name": r["name"], "description": r["description"], "path": r["path"]}
-            for r in result_rules
-        ]
+        output = collect_rules(keywords)
         click.echo(json_module.dumps(output, ensure_ascii=False, indent=2))
-
     except Exception as e:
         log_error(f"加载规则列表失败: {e}")
         raise click.Abort()

@@ -44,7 +44,9 @@ driving framework sources <name>              # 获取框架源码路径列表
 ## load — 一次性加载所有上下文
 
 ```bash
-driving load    # 输出 skills、rules、repos、system_prompt、user_prompt，供 AI 会话注入
+driving load                         # 输出 skills、rules、agents、repos 等，供 AI 会话注入
+driving load <repo-name>             # 只加载指定仓库的 skills/rules/agents（repos 始终全量）
+driving load <repo-name> <repo-name> # 同时加载多个仓库
 ```
 
 ## skill — 技能管理

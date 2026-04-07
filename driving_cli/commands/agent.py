@@ -338,12 +338,62 @@ def agent_list(repo_name: Optional[str], edit: bool):
 
 # ── agent load ───────────────────────────────────────────────────────────────
 
+def collect_agents(keywords: tuple = ()) -> list:
+    """收集可用 agent 列表，供 agent load 和 driving load 复用。"""
+    project_root = find_project_root()
+    config_manager = ConfigManager(project_root)
+
+    agents_dirs = config_manager.get_all_agents_dirs()
+    if not agents_dirs:
+        return []
+
+    repo_configs = config_manager.get_all_repos()
+    repo_config_map = {r.name: r for r in repo_configs}
+
+    all_agents_by_repo: Dict[str, List[Dict]] = {}
+    for repo_name, agents_dir in agents_dirs:
+        rc = repo_config_map.get(repo_name)
+        repo_agents = scan_agents_from_dir(repo_name, agents_dir, quiet=True)
+        if rc is not None and rc.agents is not None:
+            repo_agents = _filter_agents(repo_agents, rc)
+        all_agents_by_repo[repo_name] = repo_agents
+
+    result: List[Dict] = []
+    seen: set = set()
+
+    def _add(agents: List[Dict]):
+        for a in agents:
+            if a["name"] not in seen:
+                seen.add(a["name"])
+                result.append(a)
+
+    if not keywords:
+        for repo_name, repo_agents in all_agents_by_repo.items():
+            rc = repo_config_map.get(repo_name)
+            tags = rc.tags if rc and rc.tags else []
+            if "base" in tags:
+                _add(repo_agents)
+    else:
+        kw_set = set(keywords)
+        for repo_name, repo_agents in all_agents_by_repo.items():
+            if repo_name in kw_set:
+                _add(repo_agents)
+                continue
+            matched = [a for a in repo_agents if a["name"] in kw_set]
+            _add(matched)
+
+    return [
+        {"name": a["name"], "description": a["description"], "path": a["path"]}
+        for a in sorted(result, key=lambda x: x["name"])
+    ]
+
+
 @agent_group.command(name="load")
 @click.argument("keywords", nargs=-1, required=False)
 def agent_load(keywords: tuple):
     """输出已启用 agent 的元数据列表（JSON），供 AI 会话注入上下文。
 
-    输出字段：name、description、path、version
+    输出字段：name、description、path
 
     不传关键词时，只加载 tags 含 "base" 的仓库的 agent。
     传入关键词时，在 base 仓库基础上，额外匹配 repo.name 或 agent.name 的 agent（取并集）。
@@ -355,63 +405,8 @@ def agent_load(keywords: tuple):
         driving agent load android ios
     """
     try:
-        project_root = find_project_root()
-        config_manager = ConfigManager(project_root)
-
-        agents_dirs = config_manager.get_all_agents_dirs()
-        if not agents_dirs:
-            click.echo("[]")
-            return
-
-        repo_configs = config_manager.get_all_repos()
-        repo_config_map = {r.name: r for r in repo_configs}
-
-        # 扫描所有仓库的全量 agent（quiet 模式，遵守 enabled/disabled 配置）
-        all_agents_by_repo: Dict[str, List[Dict]] = {}
-        for repo_name, agents_dir in agents_dirs:
-            rc = repo_config_map.get(repo_name)
-            repo_agents = scan_agents_from_dir(repo_name, agents_dir, quiet=True)
-            if rc is not None and rc.agents is not None:
-                repo_agents = _filter_agents(repo_agents, rc)
-            all_agents_by_repo[repo_name] = repo_agents
-
-        result_agents: List[Dict] = []
-        seen_names: set = set()
-
-        def _add_agents(agents: List[Dict]):
-            for a in agents:
-                if a["name"] not in seen_names:
-                    seen_names.add(a["name"])
-                    result_agents.append(a)
-
-        if not keywords:
-            # 无关键词：只加载 tags 含 "base" 的仓库
-            for repo_name, repo_agents in all_agents_by_repo.items():
-                rc = repo_config_map.get(repo_name)
-                tags = rc.tags if rc and rc.tags else []
-                if "base" in tags:
-                    _add_agents(repo_agents)
-        else:
-            # 有关键词：按 repo.name 或 agent.name 精确匹配
-            kw_set = set(keywords)
-            for repo_name, repo_agents in all_agents_by_repo.items():
-                if repo_name in kw_set:
-                    _add_agents(repo_agents)
-                    continue
-                matched = [a for a in repo_agents if a["name"] in kw_set]
-                _add_agents(matched)
-
-        output = [
-            {
-                "name": a["name"],
-                "description": a["description"],
-                "path": a["path"],
-                "version": a["version"],
-            }
-            for a in sorted(result_agents, key=lambda x: x["name"])
-        ]
+        output = collect_agents(keywords)
         click.echo(json_module.dumps(output, ensure_ascii=False, indent=2))
-
     except Exception as e:
         log_error(f"加载 agent 列表失败: {e}")
         raise click.Abort()
