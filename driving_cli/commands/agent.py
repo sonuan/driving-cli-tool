@@ -576,265 +576,91 @@ def memory_clear(agent_name: str, yes: bool):
 SUPPORTED_TOOLS = ["kiro", "claude-code", "cursor", "windsurf"]
 
 
-def _read_agent_full(agent_dir: Path) -> Dict:
-    """读取 agent 目录的完整内容，返回结构化字典。
-
-    包含：
-      - meta: AGENTS.md frontmatter 字段
-      - instructions: AGENTS.md 正文（frontmatter 之后）
-      - soul: SOUL.md 全文（如有）
-      - memory: MEMORY.md 内容（如有）
-    """
-    agents_md = agent_dir / "AGENTS.md"
-
-    # 读取 AGENTS.md，分离 frontmatter 和正文
-    content = agents_md.read_text(encoding="utf-8")
-    lines = content.split("\n")
-    end_idx = None
-    for i, line in enumerate(lines[1:], 1):
-        if line.strip() == "---":
-            end_idx = i
-            break
-
-    meta = _parse_frontmatter(agents_md) or {}
-    instructions = "\n".join(lines[end_idx + 1:]).strip() if end_idx else content.strip()
-
-    # SOUL.md
-    soul_md = agent_dir / "SOUL.md"
-    soul = soul_md.read_text(encoding="utf-8").strip() if soul_md.exists() else ""
-
-    # MEMORY.md
-    memory_file = agent_dir / "MEMORY.md"
-    memory = memory_file.read_text(encoding="utf-8").strip() if memory_file.exists() else ""
-
-    return {
-        "meta": meta,
-        "instructions": instructions,
-        "soul": soul,
-        "memory": memory,
-    }
-
-
-def _build_prompt(data: Dict, include_memory: bool = True) -> str:
-    """将 driving agent 内容组装成完整 prompt 字符串。
-
-    顺序：指令 → 人格 → 最佳实践记忆
-    """
-    parts = []
-
-    if data["instructions"]:
-        parts.append(data["instructions"])
-
-    if data["soul"]:
-        # 去掉 SOUL.md 的 frontmatter
-        soul_text = data["soul"]
-        if soul_text.startswith("---"):
-            soul_lines = soul_text.split("\n")
-            end = next((i for i, l in enumerate(soul_lines[1:], 1) if l.strip() == "---"), None)
-            if end:
-                soul_text = "\n".join(soul_lines[end + 1:]).strip()
-        if soul_text:
-            parts.append(soul_text)
-
-    if include_memory and data["memory"]:
-        parts.append("## 最佳实践\n\n" + data["memory"])
-
-    return "\n\n---\n\n".join(parts)
-
 
 def _export_kiro(agent_name: str, data: Dict, agent_dir: Path,
-                 output_dir: Path, include_memory: bool) -> Path:
-    """生成 Kiro custom agent JSON 配置文件。
+                 output_dir: Path) -> Path:
+    """生成 Kiro custom agent 软链接。
 
-    输出：<output_dir>/.kiro/agents/<name>.json
-    prompt 用 file:// 引用 AGENTS.md，SOUL.md 作为 resource，
-    memory 通过 agentSpawn hook 注入。
+    AGENTS.md frontmatter 需包含 tools 字段，Kiro 才能正确识别。
+    参考：https://kiro.dev/docs/chat/subagents/
     """
-    # 计算从 .kiro/agents/ 到 agent_dir 的相对路径
-    kiro_agents_dir = output_dir / ".kiro" / "agents"
-    try:
-        rel_agents_md = "file://" + str(
-            (agent_dir / "AGENTS.md").relative_to(output_dir)
-        )
-    except ValueError:
-        rel_agents_md = "file://" + str((agent_dir / "AGENTS.md").resolve())
-
-    resources = []
-    soul_md = agent_dir / "SOUL.md"
-    if soul_md.exists():
-        try:
-            rel_soul = "file://" + str(soul_md.relative_to(output_dir))
-        except ValueError:
-            rel_soul = "file://" + str(soul_md.resolve())
-        resources.append(rel_soul)
-
-    # 关联技能
     meta = data["meta"]
-    skills = meta.get("skills") or []
-    if isinstance(skills, list) and skills:
-        resources.append("skill://ai-driving/**/skills/**/SKILL.md")
+    if "tools" not in meta:
+        raise click.ClickException(
+            f"AGENTS.md 缺少 tools 字段，无法导出到 kiro。\n"
+            f"请在 {agent_dir}/AGENTS.md frontmatter 中添加：tools: [\"read\", \"shell\"]"
+        )
 
-    config: Dict = {
-        "name": agent_name,
-        "description": str(meta.get("description", "")),
-        "prompt": rel_agents_md,
-        "tools": ["read", "shell"],
-        "allowedTools": ["read"],
-        "toolsSettings": {
-            "shell": {"autoAllowReadonly": True}
-        },
-    }
-    if resources:
-        config["resources"] = resources
-
-    # agentSpawn hook：自动注入记忆（Kiro 始终通过 hook 动态注入，不嵌入记忆内容）
-    config["hooks"] = {
-        "agentSpawn": [
-            {"command": f"python3 -m driving_cli.cli agent memory get {agent_name}"}
-        ]
-    }
-
-    welcome = f"{meta.get('description', agent_name)} 已就绪。"
-    config["welcomeMessage"] = welcome
-
+    kiro_agents_dir = output_dir / ".kiro" / "agents"
     kiro_agents_dir.mkdir(parents=True, exist_ok=True)
-    out_file = kiro_agents_dir / f"{agent_name}.json"
-    out_file.write_text(
-        json_module.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    out_file = kiro_agents_dir / f"{agent_name}.md"
+
+    agents_md = agent_dir / "AGENTS.md"
+    if out_file.exists() or out_file.is_symlink():
+        out_file.unlink()
+    out_file.symlink_to(agents_md.resolve())
     return out_file
 
 
 def _export_claude_code(agent_name: str, data: Dict, agent_dir: Path,
-                        output_dir: Path, include_memory: bool) -> Path:
-    """生成 Claude Code sub-agent 配置。
-
-    优先创建软链接指向 AGENTS.md（保持单一来源）。
-    当需要嵌入记忆（include_memory=True）或软链接创建失败时，
-    降级为生成包含完整内容的独立 md 文件。
-
-    输出：<output_dir>/.claude/agents/<name>.md
-    """
+                        output_dir: Path) -> Path:
+    """生成 Claude Code sub-agent 软链接。输出：<output_dir>/.claude/agents/<name>.md"""
     out_dir = output_dir / ".claude" / "agents"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{agent_name}.md"
 
-    # 有记忆需要嵌入时，必须生成独立文件（软链接无法追加内容）
-    if include_memory and data["memory"]:
-        if out_file.is_symlink():
-            out_file.unlink()
-        return _export_claude_code_full(agent_name, data, agent_dir, out_file)
-
-    # 优先尝试软链接：指向 AGENTS.md 原文，保持单一来源
     agents_md = agent_dir / "AGENTS.md"
-    try:
-        if out_file.exists() or out_file.is_symlink():
-            out_file.unlink()
-        out_file.symlink_to(agents_md.resolve())
-        return out_file
-    except OSError:
-        # 软链接失败（跨设备等情况），降级为独立文件
-        return _export_claude_code_full(agent_name, data, agent_dir, out_file)
-
-
-def _export_claude_code_full(agent_name: str, data: Dict, agent_dir: Path,
-                              out_file: Path) -> Path:
-    """生成包含完整内容的 Claude Code sub-agent md 文件（软链接降级方案）。"""
-    meta = data["meta"]
-    prompt = _build_prompt(data, include_memory=True)
-
-    skills = meta.get("skills") or []
-    skills_note = ""
-    if isinstance(skills, list) and skills:
-        skills_note = "\n\n> 关联技能：" + "、".join(skills)
-
-    frontmatter_lines = [
-        "---",
-        f"name: {agent_name}",
-        f"description: {meta.get('description', '')}",
-    ]
-    if meta.get("tools"):
-        frontmatter_lines.append(f"tools: {meta['tools']}")
-    frontmatter_lines.append("---")
-
-    content = "\n".join(frontmatter_lines) + "\n\n" + prompt + skills_note + "\n"
-    out_file.write_text(content, encoding="utf-8")
+    if out_file.exists() or out_file.is_symlink():
+        out_file.unlink()
+    out_file.symlink_to(agents_md.resolve())
     return out_file
 
 
 def _export_cursor(agent_name: str, data: Dict, agent_dir: Path,
-                   output_dir: Path, include_memory: bool) -> Path:
-    """生成 Cursor Rules 配置文件。
-
-    AGENTS.md 包含 alwaysApply 字段时，创建软链接（单一来源）。
-    否则生成独立 .mdc 文件。
+                   output_dir: Path) -> Path:
+    """生成 Cursor Rules 软链接。AGENTS.md 需含 alwaysApply 字段。
 
     输出：<output_dir>/.cursor/rules/<name>.mdc
     """
+    meta = data["meta"]
+    if "alwaysApply" not in meta:
+        raise click.ClickException(
+            f"AGENTS.md 缺少 alwaysApply 字段，无法导出到 cursor。\n"
+            f"请在 {agent_dir}/AGENTS.md frontmatter 中添加：alwaysApply: false"
+        )
+
     out_dir = output_dir / ".cursor" / "rules"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{agent_name}.mdc"
 
-    # AGENTS.md 包含 alwaysApply 字段时，可以直接软链接
-    meta = data["meta"]
-    if "alwaysApply" in meta:
-        agents_md = agent_dir / "AGENTS.md"
-        try:
-            if out_file.exists() or out_file.is_symlink():
-                out_file.unlink()
-            out_file.symlink_to(agents_md.resolve())
-            return out_file
-        except OSError:
-            pass  # 降级为独立文件
-
-    # 降级：生成独立 .mdc 文件
-    prompt = _build_prompt(data, include_memory=include_memory)
-    content = (
-        "---\n"
-        f"description: {meta.get('description', '')}\n"
-        "alwaysApply: false\n"
-        "---\n\n"
-        + prompt + "\n"
-    )
-    out_file.write_text(content, encoding="utf-8")
+    agents_md = agent_dir / "AGENTS.md"
+    if out_file.exists() or out_file.is_symlink():
+        out_file.unlink()
+    out_file.symlink_to(agents_md.resolve())
     return out_file
 
 
 def _export_windsurf(agent_name: str, data: Dict, agent_dir: Path,
-                     output_dir: Path, include_memory: bool) -> Path:
-    """生成 Windsurf Rules 配置文件。
-
-    AGENTS.md 包含 trigger 字段时，创建软链接（单一来源）。
-    否则生成独立 .md 文件。
+                     output_dir: Path) -> Path:
+    """生成 Windsurf Rules 软链接。AGENTS.md 需含 trigger 字段。
 
     输出：<output_dir>/.windsurf/rules/<name>.md
     """
+    meta = data["meta"]
+    if "trigger" not in meta:
+        raise click.ClickException(
+            f"AGENTS.md 缺少 trigger 字段，无法导出到 windsurf。\n"
+            f"请在 {agent_dir}/AGENTS.md frontmatter 中添加：trigger: manual"
+        )
+
     out_dir = output_dir / ".windsurf" / "rules"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{agent_name}.md"
 
-    # AGENTS.md 包含 trigger 字段时，可以直接软链接
-    meta = data["meta"]
-    if "trigger" in meta:
-        agents_md = agent_dir / "AGENTS.md"
-        try:
-            if out_file.exists() or out_file.is_symlink():
-                out_file.unlink()
-            out_file.symlink_to(agents_md.resolve())
-            return out_file
-        except OSError:
-            pass  # 降级为独立文件
-
-    # 降级：生成独立 .md 文件
-    prompt = _build_prompt(data, include_memory=include_memory)
-    content = (
-        "---\n"
-        f"trigger: manual\n"
-        f"description: {meta.get('description', '')}\n"
-        "---\n\n"
-        + prompt + "\n"
-    )
-    out_file.write_text(content, encoding="utf-8")
+    agents_md = agent_dir / "AGENTS.md"
+    if out_file.exists() or out_file.is_symlink():
+        out_file.unlink()
+    out_file.symlink_to(agents_md.resolve())
     return out_file
 
 
@@ -843,6 +669,15 @@ _EXPORTERS = {
     "claude-code": _export_claude_code,
     "cursor": _export_cursor,
     "windsurf": _export_windsurf,
+}
+
+
+# 各工具对应的输出文件路径（相对于 output_dir）
+_TOOL_OUTPUT_PATHS = {
+    "kiro":        lambda name: Path(".kiro") / "agents" / f"{name}.md",
+    "claude-code": lambda name: Path(".claude") / "agents" / f"{name}.md",
+    "cursor":      lambda name: Path(".cursor") / "rules" / f"{name}.mdc",
+    "windsurf":    lambda name: Path(".windsurf") / "rules" / f"{name}.md",
 }
 
 
@@ -860,20 +695,21 @@ _EXPORTERS = {
     help="输出根目录（默认为项目根目录）",
 )
 @click.option(
-    "--no-memory",
+    "--force", "-f",
     is_flag=True,
     default=False,
-    help="不将当前记忆内容嵌入配置（适合提交到 git 的静态配置）",
+    help="强制重建软链接（默认：文件已存在则跳过）",
 )
-def agent_export(agent_name: str, tool: str, output: Optional[str], no_memory: bool):
-    """将 driving agent 导出为指定 AI 工具的配置文件。
+def agent_export(agent_name: str, tool: str, output: Optional[str], force: bool):
+    """将 driving agent 导出为指定 AI 工具的软链接配置。
 
+    文件已存在时默认跳过，使用 --force 强制重建。
     支持的工具：kiro、claude-code、cursor、windsurf
 
     示例：
         driving agent export android-reviewer --tool kiro
         driving agent export android-reviewer --tool claude-code
-        driving agent export android-reviewer --tool cursor --no-memory
+        driving agent export android-reviewer --tool kiro --force
         driving agent export android-reviewer --tool kiro --output /path/to/project
     """
     try:
@@ -887,27 +723,25 @@ def agent_export(agent_name: str, tool: str, output: Optional[str], no_memory: b
 
         output_dir = Path(output).resolve() if output else project_root
 
+        # 文件已存在且非强制模式 → 跳过
+        out_path = output_dir / _TOOL_OUTPUT_PATHS[tool.lower()](agent_name)
+        if not force and (out_path.exists() or out_path.is_symlink()):
+            log_info(f"已存在：{out_path.relative_to(output_dir)}（使用 --force 强制重建）")
+            return
+
         log_info(f"正在导出 agent '{agent_name}' → {tool} ...")
 
-        data = _read_agent_full(agent_dir)
+        data = _parse_frontmatter(agent_dir / "AGENTS.md") or {}
         exporter = _EXPORTERS[tool.lower()]
         out_file = exporter(
             agent_name=agent_name,
-            data=data,
+            data={"meta": data},
             agent_dir=agent_dir,
             output_dir=output_dir,
-            include_memory=not no_memory,
         )
 
         log_success(f"已生成：{out_file.relative_to(output_dir)}")
-        if out_file.is_symlink():
-            log_info("软链接模式：AGENTS.md 更新后自动生效，无需重新导出")
-        elif tool.lower() in ("cursor", "windsurf"):
-            log_info("独立文件模式：AGENTS.md 更新后需重新运行 export 同步")
-
-        # Kiro 通过 agentSpawn hook 动态注入记忆，不需要 warning
-        if tool.lower() != "kiro" and not no_memory and data["memory"]:
-            log_warning("配置中包含当前记忆内容，建议使用 --no-memory 生成提交到 git 的静态版本")
+        log_info("软链接模式：AGENTS.md 更新后自动生效，无需重新导出")
 
     except click.Abort:
         raise
