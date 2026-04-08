@@ -556,72 +556,45 @@ def project_with_full_agent(tmp_path):
     return tmp_path
 
 
-class TestAgentExportCommand:
-    def test_export_kiro生成json文件(self, runner, project_with_full_agent):
-        with patch("driving_cli.commands.agent.find_project_root",
-                   return_value=project_with_full_agent):
-            result = runner.invoke(cli, ["agent", "export", "test-agent",
-                                         "--tool", "kiro", "--no-memory"])
-        assert result.exit_code == 0
-        out = project_with_full_agent / ".kiro" / "agents" / "test-agent.json"
-        assert out.exists()
-        data = json.loads(out.read_text(encoding="utf-8"))
-        assert data["name"] == "test-agent"
-        assert "prompt" in data
-        assert data["prompt"].startswith("file://")
+def _add_frontmatter_field(agent_dir: Path, field: str, value: str) -> None:
+    """向 AGENTS.md frontmatter 追加字段"""
+    agents_md = agent_dir / "AGENTS.md"
+    content = agents_md.read_text(encoding="utf-8")
+    agents_md.write_text(content.replace("---\n\n", f"{field}: {value}\n---\n\n"), encoding="utf-8")
 
-    def test_export_claude_code生成md文件(self, runner, project_with_full_agent):
+
+class TestAgentExportCommand:
+    def test_export_kiro生成软链接(self, runner, project_with_full_agent):
+        agent_dir = project_with_full_agent / "ai-driving" / "my-local" / "agents" / "test-agent"
+        _add_frontmatter_field(agent_dir, "tools", '["read", "shell"]')
         with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
-            result = runner.invoke(cli, ["agent", "export", "test-agent",
-                                         "--tool", "claude-code", "--no-memory"])
+            result = runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "kiro"])
         assert result.exit_code == 0
-        out = project_with_full_agent / ".claude" / "agents" / "test-agent.md"
-        assert out.exists()
-        # --no-memory 时应为软链接
+        out = project_with_full_agent / ".kiro" / "agents" / "test-agent.md"
         assert out.is_symlink()
 
-    def test_export_claude_code带记忆生成独立文件(self, runner, project_with_full_agent):
+    def test_export_kiro缺少tools字段报错(self, runner, project_with_full_agent):
         with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
-            result = runner.invoke(cli, ["agent", "export", "test-agent",
-                                         "--tool", "claude-code"])
+            result = runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "kiro"])
+        assert result.exit_code != 0
+
+    def test_export_claude_code生成软链接(self, runner, project_with_full_agent):
+        with patch("driving_cli.commands.agent.find_project_root",
+                   return_value=project_with_full_agent):
+            result = runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "claude-code"])
         assert result.exit_code == 0
         out = project_with_full_agent / ".claude" / "agents" / "test-agent.md"
-        assert out.exists()
-        # 有记忆时应为独立文件，不是软链接
-        assert not out.is_symlink()
-        content = out.read_text(encoding="utf-8")
-        assert "测试 agent 描述" in content
+        assert out.is_symlink()
 
-    def test_export_cursor生成mdc文件(self, runner, project_with_full_agent):
+    def test_export_cursor缺少alwaysApply字段报错(self, runner, project_with_full_agent):
         with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
-            result = runner.invoke(cli, ["agent", "export", "test-agent",
-                                         "--tool", "cursor", "--no-memory"])
-        assert result.exit_code == 0
-        out = project_with_full_agent / ".cursor" / "rules" / "test-agent.mdc"
-        assert out.exists()
-        # test-agent 的 AGENTS.md 没有 alwaysApply 字段，降级为独立文件
-        assert not out.is_symlink()
-        content = out.read_text(encoding="utf-8")
-        assert "alwaysApply: false" in content
+            result = runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "cursor"])
+        assert result.exit_code != 0
 
-    def test_export_windsurf生成md文件(self, runner, project_with_full_agent):
-        with patch("driving_cli.commands.agent.find_project_root",
-                   return_value=project_with_full_agent):
-            result = runner.invoke(cli, ["agent", "export", "test-agent",
-                                         "--tool", "windsurf", "--no-memory"])
-        assert result.exit_code == 0
-        out = project_with_full_agent / ".windsurf" / "rules" / "test-agent.md"
-        assert out.exists()
-        # test-agent 的 AGENTS.md 没有 trigger 字段，降级为独立文件
-        assert not out.is_symlink()
-        content = out.read_text(encoding="utf-8")
-        assert "trigger: manual" in content
-
-    def test_export_cursor含alwaysApply字段时生成软链接(self, runner, tmp_path):
-        """AGENTS.md 含 alwaysApply 字段时，cursor export 生成软链接"""
+    def test_export_cursor含alwaysApply字段生成软链接(self, runner, tmp_path):
         _make_config(tmp_path, [
             {"name": "my-local", "type": "local", "path": "ai-driving/my-local", "local_path": None},
         ])
@@ -631,16 +604,19 @@ class TestAgentExportCommand:
             "---\nname: symlink-agent\ndescription: 测试\nalwaysApply: false\n---\n\n内容\n",
             encoding="utf-8"
         )
-        runner_inst = CliRunner()
         with patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
-            result = runner_inst.invoke(cli, ["agent", "export", "symlink-agent",
-                                              "--tool", "cursor", "--no-memory"])
+            result = runner.invoke(cli, ["agent", "export", "symlink-agent", "--tool", "cursor"])
         assert result.exit_code == 0
         out = tmp_path / ".cursor" / "rules" / "symlink-agent.mdc"
         assert out.is_symlink()
 
-    def test_export_windsurf含trigger字段时生成软链接(self, runner, tmp_path):
-        """AGENTS.md 含 trigger 字段时，windsurf export 生成软链接"""
+    def test_export_windsurf缺少trigger字段报错(self, runner, project_with_full_agent):
+        with patch("driving_cli.commands.agent.find_project_root",
+                   return_value=project_with_full_agent):
+            result = runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "windsurf"])
+        assert result.exit_code != 0
+
+    def test_export_windsurf含trigger字段生成软链接(self, runner, tmp_path):
         _make_config(tmp_path, [
             {"name": "my-local", "type": "local", "path": "ai-driving/my-local", "local_path": None},
         ])
@@ -650,76 +626,33 @@ class TestAgentExportCommand:
             "---\nname: symlink-agent\ndescription: 测试\ntrigger: manual\n---\n\n内容\n",
             encoding="utf-8"
         )
-        runner_inst = CliRunner()
         with patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
-            result = runner_inst.invoke(cli, ["agent", "export", "symlink-agent",
-                                              "--tool", "windsurf", "--no-memory"])
+            result = runner.invoke(cli, ["agent", "export", "symlink-agent", "--tool", "windsurf"])
         assert result.exit_code == 0
         out = tmp_path / ".windsurf" / "rules" / "symlink-agent.md"
         assert out.is_symlink()
 
-    def test_export包含soul内容(self, runner, project_with_full_agent):
-        # soul 内容只在独立文件（带记忆）模式下嵌入
+    def test_export已存在时跳过(self, runner, project_with_full_agent):
         with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
             runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "claude-code"])
-        out = project_with_full_agent / ".claude" / "agents" / "test-agent.md"
-        content = out.read_text(encoding="utf-8")
-        assert "Soul" in content
+            # 第二次调用应跳过
+            result = runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "claude-code"])
+        assert result.exit_code == 0
+        assert "已存在" in result.output
 
-    def test_export包含memory内容(self, runner, project_with_full_agent):
-        with patch("driving_cli.commands.agent.find_project_root",
-                   return_value=project_with_full_agent):
-            runner.invoke(cli, ["agent", "export", "test-agent",
-                                "--tool", "claude-code"])
-        out = project_with_full_agent / ".claude" / "agents" / "test-agent.md"
-        content = out.read_text(encoding="utf-8")
-        assert "最佳实践" in content
-        assert "用户偏好简洁风格" in content
-
-    def test_export_no_memory不包含记忆(self, runner, project_with_full_agent):
-        with patch("driving_cli.commands.agent.find_project_root",
-                   return_value=project_with_full_agent):
-            runner.invoke(cli, ["agent", "export", "test-agent",
-                                "--tool", "claude-code", "--no-memory"])
-        out = project_with_full_agent / ".claude" / "agents" / "test-agent.md"
-        content = out.read_text(encoding="utf-8")
-        assert "最佳实践" not in content
-        assert "用户偏好简洁风格" not in content
-
-    def test_export_kiro包含agentSpawn_hook(self, runner, project_with_full_agent):
+    def test_export_force强制重建(self, runner, project_with_full_agent):
+        agent_dir = project_with_full_agent / "ai-driving" / "my-local" / "agents" / "test-agent"
+        _add_frontmatter_field(agent_dir, "tools", '["read", "shell"]')
         with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
             runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "kiro"])
-        out = project_with_full_agent / ".kiro" / "agents" / "test-agent.json"
-        data = json.loads(out.read_text(encoding="utf-8"))
-        assert "hooks" in data
-        assert "agentSpawn" in data["hooks"]
-        assert any("memory get" in h["command"] for h in data["hooks"]["agentSpawn"])
-
-    def test_export_kiro_no_memory也含hook(self, runner, project_with_full_agent):
-        # Kiro 始终通过 agentSpawn hook 动态注入记忆，--no-memory 不影响 hook
-        with patch("driving_cli.commands.agent.find_project_root",
-                   return_value=project_with_full_agent):
-            runner.invoke(cli, ["agent", "export", "test-agent",
-                                "--tool", "kiro", "--no-memory"])
-        out = project_with_full_agent / ".kiro" / "agents" / "test-agent.json"
-        data = json.loads(out.read_text(encoding="utf-8"))
-        assert "hooks" in data
-        assert "agentSpawn" in data["hooks"]
+            result = runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "kiro", "--force"])
+        assert result.exit_code == 0
+        assert "已生成" in result.output
 
     def test_export不存在的agent报错(self, runner, project_with_full_agent):
         with patch("driving_cli.commands.agent.find_project_root",
                    return_value=project_with_full_agent):
-            result = runner.invoke(cli, ["agent", "export", "nonexistent",
-                                         "--tool", "kiro"])
+            result = runner.invoke(cli, ["agent", "export", "nonexistent", "--tool", "kiro"])
         assert result.exit_code != 0
-
-    def test_export_claude_code包含关联技能(self, runner, project_with_full_agent):
-        with patch("driving_cli.commands.agent.find_project_root",
-                   return_value=project_with_full_agent):
-            runner.invoke(cli, ["agent", "export", "test-agent",
-                                "--tool", "claude-code", "--no-memory"])
-        out = project_with_full_agent / ".claude" / "agents" / "test-agent.md"
-        content = out.read_text(encoding="utf-8")
-        assert "code-reviews" in content

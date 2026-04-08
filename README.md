@@ -98,12 +98,12 @@ driving agent memory set <name> <content>        # 覆盖写入（会提示确�
 driving agent memory set <name> <content> --force  # 强制覆盖
 driving agent memory clear <name>                # 清空 MEMORY.md
 
-# 导出到外部 AI 工具（AGENTS.md 含对应字段时生成软链接，否则生成独立文件）
-driving agent export <name> --tool kiro              # 导出为 Kiro agent JSON
-driving agent export <name> --tool claude-code       # 导出为 Claude Code sub-agent
-driving agent export <name> --tool cursor            # 导出为 Cursor Rules
-driving agent export <name> --tool windsurf          # 导出为 Windsurf Rules
-driving agent export <name> --tool kiro --no-memory  # 不嵌入记忆（适合提交 git）
+# 导出到外部 AI 工具（软链接模式，AGENTS.md 更新后自动生效；文件已存在时自动跳过）
+driving agent export <name> --tool kiro              # → .kiro/agents/<name>.md（需含 tools 字段）
+driving agent export <name> --tool claude-code       # → .claude/agents/<name>.md
+driving agent export <name> --tool cursor            # → .cursor/rules/<name>.mdc（需含 alwaysApply 字段）
+driving agent export <name> --tool windsurf          # → .windsurf/rules/<name>.md（需含 trigger 字段）
+driving agent export <name> --tool kiro --force      # 强制重建软链接
 ```
 
 ## update — 更新管理
@@ -156,9 +156,11 @@ version: 1.0.0                  # 版本号（可选）
 skills:                         # 激活时自动加载的技能列表（可选）
   - code-reviews
   - android-standard-page
-# 以下字段让 export 生成软链接，AGENTS.md 更新后各工具自动生效
-alwaysApply: false              # Cursor 所需（可选，不加则 export 生成独立文件）
-trigger: manual                 # Windsurf 所需（可选，不加则 export 生成独立文件）
+# export 到各工具时所需字段（缺少则 export 报错）
+tools: ["read", "shell"]        # Kiro 所需
+alwaysApply: false              # Cursor 所需
+trigger: manual                 # Windsurf 所需
+# claude-code 无需额外字段
 ---
 ```
 
