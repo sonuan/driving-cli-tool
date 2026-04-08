@@ -1,10 +1,12 @@
 {
-  "version": "1.0.6",
-  "build_date": "2026-04-08T11:23:48+08:00",
+  "version": "1.0.7",
+  "build_date": "2026-04-08T11:53:36+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
+      "feat：新增repo load <keyword> 代替原来的repo list",
+      "v1.0.6 新增driving load命令，聚合skill load和rule load，支持repo更新提醒",
       "feat：load命令先删除agents的返回值，目前没有太大用处",
       "feat: 更新测试用例和README.md",
       "feat：优化kiro子agent也通过软链接接入，参考：https://kiro.dev/docs/chat/subagents/",
@@ -12,8 +14,6 @@
       "feat：优化SystemPrompt。",
       "feat：优化 driving load 支持关键字。",
       "feat：AGENTS.md 添加 agents的使用规则",
-      "feat：优化driving agent load的返回字段，支持tags包含base的机制，支持agent load <keywords>",
-      "feat：优化 version check。 load 阶段直接本地对比，repo check 阶段先 fetch，在 check",
-      "feat: AGENTS.md添加Repos使用规则"
+      "feat：优化driving agent load的返回字段，支持tags包含base的机制，支持agent load <keywords>"
   ]
 }
