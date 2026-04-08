@@ -1,19 +1,19 @@
 {
-  "version": "1.0.5",
-  "build_date": "2026-04-03T16:41:17+08:00",
+  "version": "1.0.6",
+  "build_date": "2026-04-08T11:23:48+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
-      "feat：agent简化memory记忆",
-      "feat：优化AGENTS.md的渐进式加载",
-      "feat: AGENTS.md 优化强制前置描述，避免每次发消息都加载",
-      "feat: driving重命名为driving_cli",
-      "feat: 增加子agent导出配置的能力，提供给技能创建子agent",
-      "feat：agent 管理记忆添加时间和提交者信息",
-      "feat：新增driving agent命令组，管理多agent",
-      "readme.md 添加gitlist.json配置说明",
-      "v1.0.4 cli重构，支持多仓管理",
-      "feat：git管理，排除非必要的变更提交"
+      "feat：load命令先删除agents的返回值，目前没有太大用处",
+      "feat: 更新测试用例和README.md",
+      "feat：优化kiro子agent也通过软链接接入，参考：https://kiro.dev/docs/chat/subagents/",
+      "feat：删除repo list中不必要的字段；更新测试用例；AGENTS.md新增维护",
+      "feat：优化SystemPrompt。",
+      "feat：优化 driving load 支持关键字。",
+      "feat：AGENTS.md 添加 agents的使用规则",
+      "feat：优化driving agent load的返回字段，支持tags包含base的机制，支持agent load <keywords>",
+      "feat：优化 version check。 load 阶段直接本地对比，repo check 阶段先 fetch，在 check",
+      "feat: AGENTS.md添加Repos使用规则"
   ]
 }
