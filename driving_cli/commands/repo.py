@@ -619,6 +619,56 @@ def _git_push(repo_cfg: RepoConfig, project_root: Path):
         log_error(f"仓库 '{repo_cfg.name}' 推送失败: {e}")
 
 
+# ==================== repo load ====================
+
+@repo_group.command(name="load")
+@click.argument("keywords", nargs=-1, required=False)
+def load(keywords: tuple):
+    """输出仓库列表（JSON 格式），支持按 repo-name 关键词过滤
+
+    不传参数时输出所有仓库；传入关键词时只输出匹配的仓库。
+
+    示例：
+        driving repo load
+        driving repo load my-repo
+        driving repo load repo-a repo-b
+    """
+    import json as _json
+    result = collect_repos(keywords)
+    print(_json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def collect_repos(keywords: tuple = ()) -> list:
+    """收集仓库列表，供 repo load 和 driving load 复用。
+
+    不传关键词时，返回所有仓库。
+    传入关键词时，按 repo.name 精确匹配（取并集）。
+    """
+    project_root = find_project_root()
+    config_mgr = ConfigManager(project_root)
+
+    try:
+        repos = config_mgr.get_all_repos()
+    except ValueError:
+        return []
+
+    if not keywords:
+        matched = repos
+    else:
+        kw_set = set(keywords)
+        matched = [r for r in repos if r.name in kw_set]
+
+    return [
+        {
+            "name": r.name,
+            "type": r.type,
+            "description": r.description or "",
+            "path": r.path,
+        }
+        for r in matched
+    ]
+
+
 # ==================== 辅助函数 ====================
 
 def _resolve_repos(config_mgr: ConfigManager, repo_name: Optional[str], operation: str):

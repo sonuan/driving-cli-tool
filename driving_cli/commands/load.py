@@ -2,12 +2,12 @@
 
 import json
 from pathlib import Path
-from typing import Optional
 
 import click
 
 from driving_cli import __version__
 from driving_cli.commands.agent import collect_agents
+from driving_cli.commands.repo import collect_repos
 from driving_cli.commands.check import _collect_updatable
 from driving_cli.commands.rule import collect_rules
 from driving_cli.commands.skill import collect_skills
@@ -17,20 +17,6 @@ from driving_cli.utils.config_manager import ConfigManager, find_project_root
 class SystemPrompt:
     HAS_UPDATE = "以下仓库存在新版本：{repos}，请询问用户是否更新，确认前不得继续。当用户确认更新则需要使用 driving repo pull <repo-name> 进行更新"
     DEFAULT = ""
-
-
-def _build_repos(project_root: Path, config_manager: ConfigManager) -> list:
-    repos = config_manager.get_all_repos()
-    result = []
-    for repo in repos:
-        entry = {
-            "name": repo.name,
-            "type": repo.type,
-            "description": repo.description or "",
-            "path": repo.path,
-        }
-        result.append(entry)
-    return result
 
 
 def _build_system_prompt() -> str:
@@ -67,7 +53,7 @@ def load(keywords: tuple):
             "cli_version": __version__,
             "skills": collect_skills(keywords),
             "rules": collect_rules(keywords),
-            "repos": _build_repos(project_root, config_manager),
+            "repos": collect_repos(keywords),
             "system_prompt": _build_system_prompt(),
             "user_prompt": config.user_prompt,
         }

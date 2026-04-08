@@ -24,6 +24,7 @@ driving repo install --url <url>     # 安装远程仓库（Git submodule）
 driving repo install --local <path>  # 安装本地仓库（软链接）
 driving repo uninstall <name>        # 卸载仓库
 driving repo list                    # 查看已安装仓库列表
+driving repo load [name...]          # 输出仓库列表（JSON，支持关键词过滤）
 driving repo pull <name>             # 从远程拉取更新
 driving repo commit <name> <message> # 提交修改
 driving repo push <name>             # 推送到远程

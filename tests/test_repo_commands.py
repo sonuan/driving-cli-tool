@@ -375,3 +375,105 @@ class TestResolveRepos:
         result = _resolve_repos(config_mgr, None, "pull")
         assert result is not None
         assert len(result) == 2
+
+
+# ==================== repo load / collect_repos 测试 ====================
+
+from driving_cli.commands.repo import collect_repos
+
+
+class TestCollectRepos:
+    def test_no_keywords_returns_all(self, tmp_project, config_mgr):
+        """不传关键词时返回所有仓库"""
+        config_mgr.add_repo(RepoConfig(name="r1", type="remote",
+                                        url="https://github.com/org/r1.git",
+                                        path="ai-driving/r1"))
+        config_mgr.add_repo(RepoConfig(name="r2", type="local",
+                                        url=None, path="ai-driving/r2"))
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = collect_repos(())
+        assert len(result) == 2
+        assert {r["name"] for r in result} == {"r1", "r2"}
+
+    def test_keyword_filters_by_name(self, tmp_project, config_mgr):
+        """传入关键词时只返回匹配的仓库"""
+        config_mgr.add_repo(RepoConfig(name="r1", type="remote",
+                                        url="https://github.com/org/r1.git",
+                                        path="ai-driving/r1"))
+        config_mgr.add_repo(RepoConfig(name="r2", type="local",
+                                        url=None, path="ai-driving/r2"))
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = collect_repos(("r1",))
+        assert len(result) == 1
+        assert result[0]["name"] == "r1"
+
+    def test_multiple_keywords(self, tmp_project, config_mgr):
+        """多个关键词取并集"""
+        for name in ("r1", "r2", "r3"):
+            config_mgr.add_repo(RepoConfig(name=name, type="local",
+                                            url=None, path=f"ai-driving/{name}"))
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = collect_repos(("r1", "r3"))
+        assert {r["name"] for r in result} == {"r1", "r3"}
+
+    def test_unknown_keyword_returns_empty(self, tmp_project, config_mgr):
+        """关键词不匹配任何仓库时返回空列表"""
+        config_mgr.add_repo(RepoConfig(name="r1", type="local",
+                                        url=None, path="ai-driving/r1"))
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = collect_repos(("nonexistent",))
+        assert result == []
+
+    def test_result_fields(self, tmp_project, config_mgr):
+        """返回结果包含 name、type、description、path 字段"""
+        config_mgr.add_repo(RepoConfig(name="r1", type="remote",
+                                        url="https://github.com/org/r1.git",
+                                        path="ai-driving/r1",
+                                        description="test desc"))
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = collect_repos(())
+        assert result[0] == {
+            "name": "r1",
+            "type": "remote",
+            "description": "test desc",
+            "path": "ai-driving/r1",
+        }
+
+    def test_empty_config_returns_empty(self, tmp_project):
+        """配置为空时返回空列表"""
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = collect_repos(())
+        assert result == []
+
+
+class TestRepoLoad:
+    def test_load_all(self, runner, tmp_project, config_mgr):
+        """不传参数时输出所有仓库"""
+        config_mgr.add_repo(RepoConfig(name="r1", type="local",
+                                        url=None, path="ai-driving/r1"))
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = runner.invoke(repo_group, ["load"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["name"] == "r1"
+
+    def test_load_with_keyword(self, runner, tmp_project, config_mgr):
+        """传入关键词时只输出匹配仓库"""
+        config_mgr.add_repo(RepoConfig(name="r1", type="local",
+                                        url=None, path="ai-driving/r1"))
+        config_mgr.add_repo(RepoConfig(name="r2", type="local",
+                                        url=None, path="ai-driving/r2"))
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = runner.invoke(repo_group, ["load", "r1"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["name"] == "r1"
+
+    def test_load_empty(self, runner, tmp_project):
+        """无仓库时输出空数组"""
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = runner.invoke(repo_group, ["load"])
+        assert result.exit_code == 0
+        assert json.loads(result.output) == []
