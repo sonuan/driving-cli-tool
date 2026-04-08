@@ -48,10 +48,10 @@ def _build_system_prompt() -> str:
 @click.command("load")
 @click.argument("keywords", nargs=-1, required=False)
 def load(keywords: tuple):
-    """一次性输出所有上下文数据（skills、rules、agents、repos、prompts），供 AI 会话注入
+    """一次性输出所有上下文数据（skills、rules、repos、prompts），供 AI 会话注入
 
     不传参数时加载 tags=base 的仓库内容。
-    传入 repo-name 时只加载匹配仓库的 skills/rules/agents。
+    传入 repo-name 时只加载匹配仓库的 skills/rules。
 
     示例：
         driving load
@@ -67,7 +67,6 @@ def load(keywords: tuple):
             "cli_version": __version__,
             "skills": collect_skills(keywords),
             "rules": collect_rules(keywords),
-            "agents": collect_agents(keywords),
             "repos": _build_repos(project_root, config_manager),
             "system_prompt": _build_system_prompt(),
             "user_prompt": config.user_prompt,
