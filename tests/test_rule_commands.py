@@ -336,6 +336,46 @@ class TestRuleLoadCommand:
         assert "rule-a" in names
         assert "rule-b" not in names
 
+    def test_带关键词时忽略enabled白名单(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {
+                "name": "my-local", "type": "local",
+                "path": "ai-driving/my-local", "local_path": None,
+                "tags": ["base"],
+                "rules": {"enabled": ["rule-a"], "disabled": []},
+            },
+        ])
+        rules_dir = tmp_path / "ai-driving" / "my-local" / "rules"
+        _make_rule_md(rules_dir / "rule-a.md", "rule-a", "A", "正文 A")
+        _make_rule_md(rules_dir / "rule-b.md", "rule-b", "B", "正文 B")
+
+        with patch("driving_cli.commands.rule.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["rule", "load", "rule-b"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        names = {r["name"] for r in data}
+        assert "rule-b" in names
+
+    def test_带关键词时忽略disabled黑名单(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {
+                "name": "my-local", "type": "local",
+                "path": "ai-driving/my-local", "local_path": None,
+                "tags": ["base"],
+                "rules": {"enabled": [], "disabled": ["rule-b"]},
+            },
+        ])
+        rules_dir = tmp_path / "ai-driving" / "my-local" / "rules"
+        _make_rule_md(rules_dir / "rule-a.md", "rule-a", "A", "正文 A")
+        _make_rule_md(rules_dir / "rule-b.md", "rule-b", "B", "正文 B")
+
+        with patch("driving_cli.commands.rule.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["rule", "load", "rule-b"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        names = {r["name"] for r in data}
+        assert "rule-b" in names
+
 
 class TestRuleListCommand:
     def test_list显示规则列表(self, runner, project_with_rules):

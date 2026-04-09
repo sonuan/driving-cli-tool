@@ -17,6 +17,7 @@ from click.testing import CliRunner
 
 from driving_cli.cli import cli
 from driving_cli.commands.skill import (
+    collect_skills,
     generate_available_skills_content,
     merge_skills_from_all_repos,
     parse_skill_yaml,
@@ -447,6 +448,72 @@ class TestSkillSyncCommand:
         result = runner.invoke(cli, ["skill", "--help"])
         assert result.exit_code == 0
         assert "sync" in result.output
+
+
+# ==================== collect_skills 测试 ====================
+
+
+class TestCollectSkills:
+    """测试 collect_skills 的 enabled/disabled 过滤行为"""
+
+    def _make_config(self, tmp_path, skills_cfg):
+        config = {
+            "version": "2",
+            "repos": [
+                {
+                    "name": "main",
+                    "type": "remote",
+                    "url": "https://example.com/main",
+                    "path": "ai-driving/main",
+                    "local_path": None,
+                    "tags": ["base"],
+                    "skills": skills_cfg,
+                }
+            ],
+            "default_commit_message": "",
+            "update_version_url": "",
+        }
+        (tmp_path / "driving.config.json").write_text(
+            json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        skills_dir = tmp_path / "ai-driving" / "main" / "skills"
+        _make_skill_md(skills_dir / "skill-a", "skill-a", "技能 A")
+        _make_skill_md(skills_dir / "skill-b", "skill-b", "技能 B")
+        _make_skill_md(skills_dir / "skill-c", "skill-c", "技能 C")
+        return tmp_path
+
+    def test_无关键词时enabled白名单生效(self, tmp_path):
+        """不传关键词时，enabled 白名单应过滤技能"""
+        project = self._make_config(tmp_path, {"enabled": ["skill-a"], "disabled": []})
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            result = collect_skills()
+        assert len(result) == 1
+        assert result[0]["name"] == "skill-a"
+
+    def test_无关键词时disabled黑名单生效(self, tmp_path):
+        """不传关键词时，disabled 黑名单应排除技能"""
+        project = self._make_config(tmp_path, {"enabled": [], "disabled": ["skill-b"]})
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            result = collect_skills()
+        names = {s["name"] for s in result}
+        assert "skill-b" not in names
+        assert {"skill-a", "skill-c"} == names
+
+    def test_带关键词时忽略enabled白名单(self, tmp_path):
+        """传入 skill.name 关键词时，即使不在 enabled 白名单中也应能加载"""
+        project = self._make_config(tmp_path, {"enabled": ["skill-a"], "disabled": []})
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            result = collect_skills(keywords=("skill-b",))
+        assert len(result) == 1
+        assert result[0]["name"] == "skill-b"
+
+    def test_带关键词时忽略disabled黑名单(self, tmp_path):
+        """传入 skill.name 关键词时，即使在 disabled 黑名单中也应能加载"""
+        project = self._make_config(tmp_path, {"enabled": [], "disabled": ["skill-c"]})
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            result = collect_skills(keywords=("skill-c",))
+        assert len(result) == 1
+        assert result[0]["name"] == "skill-c"
 
 
 # ==================== 属性测试（Property 10） ====================

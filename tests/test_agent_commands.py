@@ -353,6 +353,42 @@ class TestAgentLoadCommand:
         assert "agent-a" in names
         assert "agent-b" not in names
 
+    def test_带关键词时忽略enabled白名单(self, runner, tmp_path):
+        _make_config(tmp_path, [{
+            "name": "my-local", "type": "local",
+            "path": "ai-driving/my-local", "local_path": None,
+            "tags": ["base"],
+            "agents": {"enabled": ["agent-a"], "disabled": []},
+        }])
+        agents_dir = tmp_path / "ai-driving" / "my-local" / "agents"
+        _make_agents_md(agents_dir / "agent-a", "agent-a", "描述 A")
+        _make_agents_md(agents_dir / "agent-b", "agent-b", "描述 B")
+
+        with patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["agent", "load", "agent-b"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        names = {a["name"] for a in data}
+        assert "agent-b" in names
+
+    def test_带关键词时忽略disabled黑名单(self, runner, tmp_path):
+        _make_config(tmp_path, [{
+            "name": "my-local", "type": "local",
+            "path": "ai-driving/my-local", "local_path": None,
+            "tags": ["base"],
+            "agents": {"enabled": [], "disabled": ["agent-b"]},
+        }])
+        agents_dir = tmp_path / "ai-driving" / "my-local" / "agents"
+        _make_agents_md(agents_dir / "agent-a", "agent-a", "描述 A")
+        _make_agents_md(agents_dir / "agent-b", "agent-b", "描述 B")
+
+        with patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["agent", "load", "agent-b"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        names = {a["name"] for a in data}
+        assert "agent-b" in names
+
 
 # ==================== agent list 命令 ====================
 

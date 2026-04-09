@@ -454,7 +454,8 @@ def collect_skills(keywords: tuple = ()) -> list:
     for repo_name, skills_dir in skills_dirs:
         rc = repo_config_map.get(repo_name)
         repo_skills = scan_skills_from_dir(repo_name, skills_dir, quiet=True)
-        if rc is not None and rc.skills is not None:
+        # 传入具体 skill.name 关键词时，忽略 enabled/disabled 开关，允许按名称直接加载未开启的技能
+        if not keywords and rc is not None and rc.skills is not None:
             enabled = rc.skills.get("enabled") or []
             disabled = rc.skills.get("disabled") or []
             if enabled:

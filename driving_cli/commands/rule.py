@@ -253,7 +253,8 @@ def collect_rules(keywords: tuple = ()) -> list:
     for repo_name, rules_dir in rules_dirs:
         rc = repo_config_map.get(repo_name)
         repo_rules = scan_rules_from_dir(repo_name, rules_dir, quiet=True, header_only=True)
-        if rc is not None:
+        # 传入具体 rule.name 关键词时，忽略 enabled/disabled 开关，允许按名称直接加载未开启的规则
+        if not keywords and rc is not None:
             repo_rules = filter_rules_by_config(repo_rules, rc)
         all_rules_by_repo[repo_name] = repo_rules
 

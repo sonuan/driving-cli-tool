@@ -354,7 +354,8 @@ def collect_agents(keywords: tuple = ()) -> list:
     for repo_name, agents_dir in agents_dirs:
         rc = repo_config_map.get(repo_name)
         repo_agents = scan_agents_from_dir(repo_name, agents_dir, quiet=True)
-        if rc is not None and rc.agents is not None:
+        # 传入具体 agent.name 关键词时，忽略 enabled/disabled 开关，允许按名称直接加载未开启的 agent
+        if not keywords and rc is not None and rc.agents is not None:
             repo_agents = _filter_agents(repo_agents, rc)
         all_agents_by_repo[repo_name] = repo_agents
 
