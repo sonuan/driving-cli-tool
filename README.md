@@ -144,7 +144,7 @@ ai-driving/
       │       ├── AGENTS.md      # 指令/系统提示（必填）
       │       ├── SOUL.md        # 人格与行为风格（可选）
       │       └── MEMORY.md      # 最佳实践知识沉淀（可选）
-      ├── proposals/             # 规范变更提案（由 self-refine 技能写入，需 owner 审批合并）
+      ├── refines/             # 规范变更提案（由 self-refine 技能写入，需 owner 审批合并）
       │   └── YYYY-MM-DD-<type>-<name>-<brief>.md
       └── REFINE_LOG.md     # 规范进化变更日志
 ```
