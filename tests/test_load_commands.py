@@ -1,7 +1,7 @@
 """load 命令单元测试
 
 覆盖：
-- _build_system_prompt：无可更新仓库时返回空字符串
+- _build_notifications：无可更新仓库时返回空字符串
 - _check_cli_update：有新版本时返回提示、无新版本/异常时返回空字符串
 - load 命令：输出结构、必需字段、repos 始终全量、keywords 透传
 """
@@ -14,7 +14,7 @@ import pytest
 from click.testing import CliRunner
 
 from driving_cli.cli import cli
-from driving_cli.commands.load import _build_system_prompt, _check_cli_update
+from driving_cli.commands.load import _build_notifications, _check_cli_update
 from driving_cli.models.config import DrivingConfig, RepoConfig
 from driving_cli.utils.config_manager import ConfigManager
 
@@ -48,26 +48,29 @@ def tmp_project(tmp_path):
     return tmp_path
 
 
-# ==================== _build_system_prompt ====================
+# ==================== _build_notifications ====================
 
-class TestBuildSystemPrompt:
+class TestBuildNotifications:
     def test_无可更新仓库时返回空字符串(self, tmp_project):
         with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
-             patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_project, [], [])):
-            result = _build_system_prompt()
+             patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_project, [], [])), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None):
+            result = _build_notifications()
         assert result == ""
 
     def test_有可更新仓库时返回提示语(self, tmp_project):
         mgr = ConfigManager(tmp_project)
         repo = mgr.get_repo("driving")
-        with patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_project, [repo], [])):
-            result = _build_system_prompt()
+        with patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_project, [repo], [])), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None):
+            result = _build_notifications()
         assert "driving" in result
         assert "driving repo pull" in result
 
     def test_异常时返回空字符串(self):
-        with patch("driving_cli.commands.load._collect_updatable", side_effect=Exception("网络错误")):
-            result = _build_system_prompt()
+        with patch("driving_cli.commands.load._collect_updatable", side_effect=Exception("网络错误")), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None):
+            result = _build_notifications()
         assert result == ""
 
 
@@ -101,14 +104,14 @@ class TestCheckCliUpdate:
             result = _check_cli_update()
         assert result == ""
 
-    def test_system_prompt同时包含仓库更新和cli更新(self, tmp_project):
+    def test_notifications同时包含仓库更新和cli更新(self, tmp_project):
         mgr = ConfigManager(tmp_project)
         repo = mgr.get_repo("driving")
         with patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_project, [repo], [])), \
              patch("driving_cli.commands.load.fetch_version_info", return_value={"version": "99.0.0"}), \
              patch("driving_cli.commands.load._get_update_version_url", return_value="http://x"), \
              patch("driving_cli.commands.load.__version__", "1.0.0"):
-            result = _build_system_prompt()
+            result = _build_notifications()
         assert "driving repo pull" in result
         assert "driving update" in result
         # CLI 更新优先级更高，应在仓库更新提示之前
@@ -138,7 +141,7 @@ class TestLoadCommand:
             result = runner.invoke(cli, ["load"])
         data = json.loads(result.output)
         for field in ("cli_version", "skills", "rules", "repos",
-                      "system_prompt", "user_prompt"):
+                      "system_prompt", "user_prompt", "notifications"):
             assert field in data
 
     def test_repos始终全量输出(self, runner, tmp_project):
@@ -285,7 +288,72 @@ class TestCheckMinCliVersion:
              patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_path, [], [])), \
              patch("driving_cli.commands.load.fetch_version_info", return_value={"version": "2.0.0"}), \
              patch("driving_cli.commands.load._get_update_version_url", return_value="http://x"):
-            from driving_cli.commands.load import _build_system_prompt
-            result = _build_system_prompt()
+            from driving_cli.commands.load import _build_notifications
+            result = _build_notifications()
         # version_required 应排在最前面
         assert result.index("9.9.9") < result.index("driving update")
+
+
+# ==================== _collect_repo_system_prompts ====================
+
+class TestCollectRepoSystemPrompts:
+    from driving_cli.commands.load import _collect_repo_system_prompts
+
+    def test_读取单仓库prompt文件(self, tmp_path):
+        repo = tmp_path / "ai-driving" / "repo-a"
+        repo.mkdir(parents=True)
+        (repo / "manifest.json").write_text('{"system_prompt": "prompts/sp.md"}', encoding="utf-8")
+        (repo / "prompts").mkdir()
+        (repo / "prompts" / "sp.md").write_text("hello rules", encoding="utf-8")
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path):
+            from driving_cli.commands.load import _collect_repo_system_prompts
+            result = _collect_repo_system_prompts()
+        assert "hello rules" in result
+
+    def test_多仓库内容拼接(self, tmp_path):
+        for name, content in [("repo-a", "rules-a"), ("repo-b", "rules-b")]:
+            repo = tmp_path / "ai-driving" / name
+            repo.mkdir(parents=True)
+            (repo / "manifest.json").write_text('{"system_prompt": "sp.md"}', encoding="utf-8")
+            (repo / "sp.md").write_text(content, encoding="utf-8")
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path):
+            from driving_cli.commands.load import _collect_repo_system_prompts
+            result = _collect_repo_system_prompts()
+        assert "rules-a" in result
+        assert "rules-b" in result
+
+    def test_无system_prompt字段时跳过(self, tmp_path):
+        repo = tmp_path / "ai-driving" / "repo-a"
+        repo.mkdir(parents=True)
+        (repo / "manifest.json").write_text('{"min_cli_version": "1.0.0"}', encoding="utf-8")
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path):
+            from driving_cli.commands.load import _collect_repo_system_prompts
+            result = _collect_repo_system_prompts()
+        assert result == ""
+
+    def test_文件不存在时跳过(self, tmp_path):
+        repo = tmp_path / "ai-driving" / "repo-a"
+        repo.mkdir(parents=True)
+        (repo / "manifest.json").write_text('{"system_prompt": "not_exist.md"}', encoding="utf-8")
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path):
+            from driving_cli.commands.load import _collect_repo_system_prompts
+            result = _collect_repo_system_prompts()
+        assert result == ""
+
+    def test_repo_prompts排在system_prompt末尾(self, tmp_path):
+        repo = tmp_path / "ai-driving" / "repo-a"
+        repo.mkdir(parents=True)
+        (repo / "manifest.json").write_text('{"system_prompt": "sp.md"}', encoding="utf-8")
+        (repo / "sp.md").write_text("business rules", encoding="utf-8")
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_path, [], [])), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value={"version": "99.0.0"}), \
+             patch("driving_cli.commands.load._get_update_version_url", return_value="http://x"), \
+             patch("driving_cli.commands.load.__version__", "1.0.0"):
+            from driving_cli.commands.load import _build_notifications
+            notifications = _build_notifications()
+            from driving_cli.commands.load import _collect_repo_system_prompts
+            system_prompt = _collect_repo_system_prompts()
+        # notifications 包含 CLI 更新提示，system_prompt 包含业务规则，两者独立
+        assert "99.0.0" in notifications
+        assert "business rules" in system_prompt

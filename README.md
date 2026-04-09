@@ -127,7 +127,7 @@ driving update --url <url>           # 使用自定义 version.json URL
 ```
 ai-driving/
   └── <repo>/
-      ├── manifest.json          # 仓库元信息（可选），支持 min_cli_version 字段
+      ├── manifest.json          # 仓库元信息（可选），支持 min_cli_version、system_prompt 字段
       ├── frameworks/            # 框架文档
       │   ├── gitlist.json       # 框架列表配置
       │   └── <framework>/
