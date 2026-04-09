@@ -139,11 +139,14 @@ ai-driving/
       ├── features/              # 需求功能
       │   └── <feature>/
       │       └── FEATURE.md     # 含 YAML frontmatter（name 必填）
-      └── agents/                # Agent 定义
-          └── <agent>/
-              ├── AGENTS.md      # 指令/系统提示（必填）
-              ├── SOUL.md        # 人格与行为风格（可选）
-              └── MEMORY.md      # 最佳实践知识沉淀（可选）
+      ├── agents/                # Agent 定义
+      │   └── <agent>/
+      │       ├── AGENTS.md      # 指令/系统提示（必填）
+      │       ├── SOUL.md        # 人格与行为风格（可选）
+      │       └── MEMORY.md      # 最佳实践知识沉淀（可选）
+      ├── proposals/             # 规范变更提案（由 self-refine 技能写入，需 owner 审批合并）
+      │   └── YYYY-MM-DD-<type>-<name>-<brief>.md
+      └── REFINE_LOG.md     # 规范进化变更日志
 ```
 
 ### AGENTS.md frontmatter 字段
@@ -247,19 +250,3 @@ driving agent memory get android-reviewer
 driving repo commit driving "update agent memory: android-reviewer"
 driving repo push driving
 ```
-
-## 内置技能
-
-安装 `driving` 仓库后，以下技能可供 AI 使用：
-
-| 技能 | 说明 |
-|------|------|
-| `agent-dispatcher` | 激活和调度 agent，支持单 agent 激活和多 agent 协作 |
-| `driving-cli` | driving-cli 工具完整使用指南 |
-| `fwk-docx` | 框架文档管理 |
-| `code-reviews` | PR 代码审查 |
-| `android-dev-workflow` | Android 开发完整工作流 |
-| `android-block-page` | Block 化页面开发 |
-| `android-list-page` | 列表页面开发 |
-| `android-standard-page` | 普通页面开发 |
-| ... | 更多见 `driving skill list` |
