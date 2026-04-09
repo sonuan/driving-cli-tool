@@ -218,3 +218,74 @@ class TestLoadDebugFlag:
             runner.invoke(cli, ["load"])
         # 默认模式执行完后 silent 为 True（load 命令设置的）
         assert _logger._silent is True
+
+
+# ==================== _check_min_cli_version ====================
+
+class TestCheckMinCliVersion:
+    def test_版本满足时返回空字符串(self, tmp_path):
+        (tmp_path / "ai-driving" / "repo-a").mkdir(parents=True)
+        (tmp_path / "ai-driving" / "repo-a" / "manifest.json").write_text(
+            '{"min_cli_version": "0.0.1"}', encoding="utf-8"
+        )
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.load.__version__", "1.0.0"):
+            from driving_cli.commands.load import _check_min_cli_version
+            result = _check_min_cli_version()
+        assert result == ""
+
+    def test_版本不满足时返回提示(self, tmp_path):
+        (tmp_path / "ai-driving" / "repo-a").mkdir(parents=True)
+        (tmp_path / "ai-driving" / "repo-a" / "manifest.json").write_text(
+            '{"min_cli_version": "9.9.9"}', encoding="utf-8"
+        )
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.load.__version__", "1.0.0"):
+            from driving_cli.commands.load import _check_min_cli_version
+            result = _check_min_cli_version()
+        assert "9.9.9" in result
+        assert "driving update" in result
+
+    def test_多仓库取最大值(self, tmp_path):
+        for name, ver in [("repo-a", "1.1.0"), ("repo-b", "2.0.0"), ("repo-c", "1.5.0")]:
+            (tmp_path / "ai-driving" / name).mkdir(parents=True)
+            (tmp_path / "ai-driving" / name / "manifest.json").write_text(
+                f'{{"min_cli_version": "{ver}"}}', encoding="utf-8"
+            )
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.load.__version__", "1.0.0"):
+            from driving_cli.commands.load import _check_min_cli_version
+            result = _check_min_cli_version()
+        assert "2.0.0" in result
+
+    def test_无manifest时返回空字符串(self, tmp_path):
+        (tmp_path / "ai-driving").mkdir()
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path):
+            from driving_cli.commands.load import _check_min_cli_version
+            result = _check_min_cli_version()
+        assert result == ""
+
+    def test_manifest格式错误时静默跳过(self, tmp_path):
+        (tmp_path / "ai-driving" / "repo-a").mkdir(parents=True)
+        (tmp_path / "ai-driving" / "repo-a" / "manifest.json").write_text(
+            "not json", encoding="utf-8"
+        )
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path):
+            from driving_cli.commands.load import _check_min_cli_version
+            result = _check_min_cli_version()
+        assert result == ""
+
+    def test_version_required优先级最高(self, tmp_path):
+        (tmp_path / "ai-driving" / "repo-a").mkdir(parents=True)
+        (tmp_path / "ai-driving" / "repo-a" / "manifest.json").write_text(
+            '{"min_cli_version": "9.9.9"}', encoding="utf-8"
+        )
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.load.__version__", "1.0.0"), \
+             patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_path, [], [])), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value={"version": "2.0.0"}), \
+             patch("driving_cli.commands.load._get_update_version_url", return_value="http://x"):
+            from driving_cli.commands.load import _build_system_prompt
+            result = _build_system_prompt()
+        # version_required 应排在最前面
+        assert result.index("9.9.9") < result.index("driving update")

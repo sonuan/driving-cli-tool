@@ -23,7 +23,35 @@ from driving_cli.utils.logger import set_silent
 class SystemPrompt:
     HAS_UPDATE = "以下仓库存在新版本：{repos}，请询问用户是否更新，确认前不得继续。当用户确认更新则需要使用 driving repo pull <repo-name> 进行更新。"
     HAS_CLI_UPDATE = "driving CLI 有新版本可用：当前 {current}，最新 {latest}。请提醒用户执行 `sudo driving update` 进行升级。"
+    CLI_VERSION_REQUIRED = "当前 driving CLI 版本 {current} 不满足要求（需要 >= {required}），请立即提醒用户执行 `sudo driving update` 升级，升级前不得继续任何操作。"
     DEFAULT = ""
+
+
+def _check_min_cli_version() -> str:
+    """扫描所有仓库的 manifest.json，取 min_cli_version 最大值，与当前版本对比"""
+    try:
+        project_root = find_project_root()
+        ai_driving_dir = project_root / "ai-driving"
+        if not ai_driving_dir.exists():
+            return ""
+
+        max_required = ""
+        for manifest in ai_driving_dir.glob("*/manifest.json"):
+            try:
+                data = json.loads(manifest.read_text(encoding="utf-8"))
+                ver = data.get("min_cli_version", "").strip()
+                if ver and (not max_required or compare_versions(ver, max_required) > 0):
+                    max_required = ver
+            except Exception:
+                continue
+
+        if max_required and compare_versions(__version__, max_required) < 0:
+            return SystemPrompt.CLI_VERSION_REQUIRED.format(
+                current=__version__, required=max_required
+            )
+    except Exception:
+        pass
+    return ""
 
 
 def _check_cli_update() -> str:
@@ -43,7 +71,12 @@ def _check_cli_update() -> str:
 def _build_system_prompt() -> str:
     parts = []
 
-    # 检查 CLI 自身更新（优先级更高，放前面）
+    # 检查 min_cli_version 要求（最高优先级，硬性阻断）
+    version_required_msg = _check_min_cli_version()
+    if version_required_msg:
+        parts.append(version_required_msg)
+
+    # 检查 CLI 自身更新
     cli_update_msg = _check_cli_update()
     if cli_update_msg:
         parts.append(cli_update_msg)
