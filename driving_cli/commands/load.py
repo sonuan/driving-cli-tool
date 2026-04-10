@@ -22,8 +22,8 @@ from driving_cli.utils.logger import set_silent
 
 class UpdatePrompt:
     HAS_UPDATE = "⬆️ 【仓库更新】以下仓库存在新版本：{repos}。请询问用户是否更新，确认后逐个执行 `driving repo pull <repo-name>` 更新，确认前不得继续任何操作。"
-    HAS_CLI_UPDATE = "⬆️ 【CLI更新】driving CLI 有新版本可用（当前 {current}，最新 {latest}），请提醒用户执行 `sudo driving update` 升级。"
-    CLI_VERSION_REQUIRED = "🚨 【版本不满足】当前 driving CLI 版本 {current} 不满足要求（需要 >= {required}），必须先执行 `sudo driving update` 升级后才能继续，请立即提醒用户。"
+    HAS_CLI_UPDATE = "⬆️ 【CLI更新】driving CLI 有新版本可用（当前 {current}，最新 {latest}），请询问用户是否执行 `sudo driving update` 升级。"
+    CLI_VERSION_REQUIRED = "🚨 【版本不满足】当前 driving CLI 版本 {current} 不满足要求（需要 >= {required}），必须先执行 `sudo driving update` 升级后才能继续，请询问用户是否执行升级。"
     DEFAULT = ""
 
 

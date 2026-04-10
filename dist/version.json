@@ -1,10 +1,11 @@
 {
   "version": "1.0.9",
-  "build_date": "2026-04-10T17:22:22+08:00",
+  "build_date": "2026-04-10T17:39:31+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
+      "v1.0.9",
       "feat：v1.0.9 新增driving refine命令，用于加载所有refine，可以提供给ai进行经验复用和管理",
       "v1.0.8 新增cli更新提醒；新增cli最小版本要求提醒；新增system_prompt仓库里维护内容，减少分支合并",
       "feat：manifest.json新增一个system_prompt配置，并将内容输出到system_prompt字段",
@@ -13,7 +14,6 @@
       "feat：优化 skill/rule/agent load <keyword> 时不受.enabled或.disabled配置影响",
       "feat: 补充repo目录结构",
       "feat: 补充repo目录结构",
-      "feat：AGENTS.md的检查清单修改为hook方式",
-      "v1.0.7"
+      "feat：AGENTS.md的检查清单修改为hook方式"
   ]
 }
