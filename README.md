@@ -108,6 +108,17 @@ driving agent export <name> --tool windsurf          # → .windsurf/rules/<name
 driving agent export <name> --tool kiro --force      # 强制重建软链接
 ```
 
+## refine — Refine 自我完善提案管理
+
+```bash
+driving refine list                          # 列出所有仓库的 pending refine 提案（按类型分组）
+driving refine list --type skill             # 只显示指定类型（skill/rule/agent/framework）
+driving refine list --repo <name>            # 只显示指定仓库的 refine
+driving refine load                          # 输出所有 pending refine 内容（JSON，供 AI 检索）
+driving refine load <name...>                # 按文件名模糊匹配（包含即命中），支持多个，name可以是skill-name、rule-name、agent-name、framework-name
+driving refine load --type rule              # 只加载指定类型的 refine
+```
+
 ## update — 更新管理
 
 ```bash
