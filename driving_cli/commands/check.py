@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
@@ -84,19 +85,39 @@ def _collect_updatable(fetch: bool = True):
     remote_repos = [r for r in repos if r.type == "remote"]
 
     compare = _has_new_version if fetch else _compare_local_remote
-    updatable = []
+
+    # 过滤未初始化的仓库
+    init_repos = []
     warnings = []
     for repo in remote_repos:
         repo_dir = project_root / repo.path
-        is_init = repo_dir.exists() and any(repo_dir.iterdir())
-        if not is_init:
+        if not (repo_dir / ".git").exists():
             warnings.append(f"仓库 '{repo.name}' 未初始化，跳过")
-            continue
-        result = compare(repo_dir)
-        if result is True:
-            updatable.append(repo)
-        elif result is None:
-            warnings.append(f"仓库 '{repo.name}' 检查失败，跳过")
+        else:
+            init_repos.append((repo, repo_dir))
+
+    # 并发检查各仓库更新状态
+    updatable = []
+    if init_repos:
+        with ThreadPoolExecutor(max_workers=min(len(init_repos), 8)) as executor:
+            future_to_repo = {
+                executor.submit(compare, repo_dir): repo
+                for repo, repo_dir in init_repos
+            }
+            for future in as_completed(future_to_repo):
+                repo = future_to_repo[future]
+                try:
+                    result = future.result()
+                except Exception:
+                    result = None
+                if result is True:
+                    updatable.append(repo)
+                elif result is None:
+                    warnings.append(f"仓库 '{repo.name}' 检查失败，跳过")
+
+    # 保持原始顺序
+    order = {repo.name: i for i, (repo, _) in enumerate(init_repos)}
+    updatable.sort(key=lambda r: order.get(r.name, 0))
 
     return project_root, updatable, warnings
 

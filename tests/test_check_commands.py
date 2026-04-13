@@ -74,7 +74,7 @@ class TestCollectUpdatable:
         ])
         repo_dir = tmp_path / "ai-driving" / "driving"
         repo_dir.mkdir(parents=True)
-        (repo_dir / "placeholder").write_text("x")  # 非空目录，视为已初始化
+        (repo_dir / ".git").mkdir()  # 模拟已初始化的 git 仓库
 
         with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path), \
              patch("driving_cli.commands.check._compare_local_remote", return_value=True):
@@ -89,7 +89,7 @@ class TestCollectUpdatable:
         ])
         repo_dir = tmp_path / "ai-driving" / "driving"
         repo_dir.mkdir(parents=True)
-        (repo_dir / "placeholder").write_text("x")
+        (repo_dir / ".git").mkdir()
 
         with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path), \
              patch("driving_cli.commands.check._compare_local_remote", return_value=False):
@@ -103,7 +103,7 @@ class TestCollectUpdatable:
         ])
         repo_dir = tmp_path / "ai-driving" / "driving"
         repo_dir.mkdir(parents=True)
-        (repo_dir / "placeholder").write_text("x")
+        (repo_dir / ".git").mkdir()
 
         with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path), \
              patch("driving_cli.commands.check._compare_local_remote", return_value=None):
@@ -146,7 +146,7 @@ class TestCheckJsonCommand:
         ])
         repo_dir = tmp_path / "ai-driving" / "driving"
         repo_dir.mkdir(parents=True)
-        (repo_dir / "placeholder").write_text("x")
+        (repo_dir / ".git").mkdir()  # 模拟已初始化的 git 仓库
 
         with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path), \
              patch("driving_cli.commands.check._has_new_version", return_value=True):
