@@ -54,9 +54,11 @@ driving load --debug                 # 同上，同时输出调试日志
 ## skill — 技能管理
 
 ```bash
-driving skill list                   # 列出所有技能（按仓库分组）
-driving skill list --repo <name>     # 只显示指定仓库的技能
-driving skill list --edit            # 交互模式，勾选启用/禁用技能
+driving skill list                              # 列出所有技能（按仓库分组）
+driving skill list --repo <name>               # 只显示指定仓库的技能
+driving skill list --edit                      # 交互模式，勾选启用/禁用技能（auto：自动选最短字段）
+driving skill list --edit --mode enable        # 强制写 enabled 白名单
+driving skill list --edit --mode disable       # 强制写 disabled 黑名单
 driving skill load                   # 只加载 tags=base 的仓库技能（供 AI 注入上下文）
 driving skill load <keywords...>     # 忽略 tags，精确匹配 repo.name 或 skill.name（取并集）
 ```

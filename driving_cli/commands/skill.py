@@ -3,6 +3,7 @@
 提供 `driving skill sync` 命令，扫描所有已安装仓库的 skills/ 目录并同步到 AGENTS.md。
 """
 
+import json
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -136,6 +137,25 @@ def parse_skill_yaml(skill_md_path: Path) -> Optional[Dict[str, str]]:
         return None
 
 
+def _load_manifest_skills(repo_dir: Path) -> Optional[dict]:
+    """读取仓库 manifest.json 中的 skills 配置，作为仓库级默认值
+
+    Args:
+        repo_dir: 仓库根目录路径
+
+    Returns:
+        dict: {"enabled": [...], "disabled": [...]}，不存在或解析失败返回 None
+    """
+    manifest_path = repo_dir / "manifest.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        return data.get("skills") or None
+    except Exception:
+        return None
+
+
 def scan_skills_from_dir(repo_name: str, skills_dir: Path, quiet: bool = False) -> List[Dict[str, str]]:
     """扫描单个仓库的 skills 目录，返回技能列表
 
@@ -213,11 +233,13 @@ def merge_skills_from_all_repos(
     for repo_name, skills_dir in skills_dirs:
         repo_skills = scan_skills_from_dir(repo_name, skills_dir, quiet=quiet)
 
-        # 按仓库的 skills.enabled / skills.disabled 过滤
+        # 优先级：driving.config.json > manifest.json > 全量加载
         rc = repo_config_map.get(repo_name)
-        if rc is not None and rc.skills is not None:
-            enabled = rc.skills.get("enabled") or []
-            disabled = rc.skills.get("disabled") or []
+        effective_skills = (rc.skills if rc and rc.skills is not None
+                            else _load_manifest_skills(skills_dir.parent))
+        if effective_skills is not None:
+            enabled = effective_skills.get("enabled") or []
+            disabled = effective_skills.get("disabled") or []
             if enabled:
                 repo_skills = [s for s in repo_skills if s["name"] in enabled]
             elif disabled:
@@ -455,13 +477,17 @@ def collect_skills(keywords: tuple = ()) -> list:
         rc = repo_config_map.get(repo_name)
         repo_skills = scan_skills_from_dir(repo_name, skills_dir, quiet=True)
         # 传入具体 skill.name 关键词时，忽略 enabled/disabled 开关，允许按名称直接加载未开启的技能
-        if not keywords and rc is not None and rc.skills is not None:
-            enabled = rc.skills.get("enabled") or []
-            disabled = rc.skills.get("disabled") or []
-            if enabled:
-                repo_skills = [s for s in repo_skills if s["name"] in enabled]
-            elif disabled:
-                repo_skills = [s for s in repo_skills if s["name"] not in disabled]
+        if not keywords:
+            # 优先级：driving.config.json > manifest.json > 全量加载
+            effective_skills = (rc.skills if rc and rc.skills is not None
+                                else _load_manifest_skills(skills_dir.parent))
+            if effective_skills is not None:
+                enabled = effective_skills.get("enabled") or []
+                disabled = effective_skills.get("disabled") or []
+                if enabled:
+                    repo_skills = [s for s in repo_skills if s["name"] in enabled]
+                elif disabled:
+                    repo_skills = [s for s in repo_skills if s["name"] not in disabled]
         all_skills_by_repo[repo_name] = repo_skills
 
     result: list = []
@@ -522,15 +548,20 @@ def skill_load(keywords: tuple):
 @skill_group.command(name="list")
 @click.option("--repo", "repo_name", default=None, help="只显示指定仓库的技能")
 @click.option("--edit", is_flag=True, default=False, help="进入交互模式，勾选/取消技能")
-def skill_list(repo_name: Optional[str], edit: bool):
+@click.option("--mode", type=click.Choice(["auto", "enable", "disable"]), default="auto",
+              help="保存模式：auto 自动选择（默认），enable 强制写 enabled，disable 强制写 disabled")
+def skill_list(repo_name: Optional[str], edit: bool, mode: str):
     """列出所有可用技能，按仓库分组显示启用状态，支持编辑模式
 
     使用 --edit 进入交互模式，通过空格勾选/取消技能，回车保存。
+    --mode 控制保存字段：auto 自动选最短，enable 强制写 enabled，disable 强制写 disabled。
 
     示例：
         driving skill list
         driving skill list --repo driving
         driving skill list --edit
+        driving skill list --edit --mode enable
+        driving skill list --edit --mode disable
     """
     try:
         project_root = find_project_root()
@@ -557,14 +588,19 @@ def skill_list(repo_name: Optional[str], edit: bool):
 
         # 扫描所有技能（不过滤，展示完整状态）
         all_skills_by_repo: Dict[str, List[Dict]] = {}
+        repo_dir_map: Dict[str, Path] = {}
         for rname, sdir in skills_dirs:
             all_skills_by_repo[rname] = scan_skills_from_dir(rname, sdir, quiet=True)
+            repo_dir_map[rname] = sdir.parent
 
-        def _is_enabled(rc, sname: str) -> bool:
-            if rc is None or rc.skills is None:
+        def _is_enabled(rc, sname: str, repo_dir: Path) -> bool:
+            # 优先级：config > manifest > 全量开启
+            skills_cfg = (rc.skills if rc and rc.skills is not None
+                          else _load_manifest_skills(repo_dir))
+            if skills_cfg is None:
                 return True
-            enabled = rc.skills.get("enabled") or []
-            disabled = rc.skills.get("disabled") or []
+            enabled = skills_cfg.get("enabled") or []
+            disabled = skills_cfg.get("disabled") or []
             if enabled:
                 return sname in enabled
             return sname not in disabled
@@ -589,8 +625,9 @@ def skill_list(repo_name: Optional[str], edit: bool):
                 if not skills:
                     continue
                 rc = repo_config_map.get(rname)
+                repo_dir = repo_dir_map.get(rname, Path("."))
                 values = [(s["name"], s["name"]) for s in skills]
-                default_checked = [s["name"] for s in skills if _is_enabled(rc, s["name"])]
+                default_checked = [s["name"] for s in skills if _is_enabled(rc, s["name"], repo_dir)]
 
                 click.echo(f"\n仓库：{rname}")
                 result = checkboxlist_dialog(
@@ -605,18 +642,41 @@ def skill_list(repo_name: Optional[str], edit: bool):
                     continue
 
                 all_names = [s["name"] for s in skills]
-                new_disabled = [n for n in all_names if n not in result]
+                checked = set(result)
+                unchecked = set(all_names) - checked
 
                 if rc is None:
                     continue
 
-                # 计算变更内容
-                old_disabled = set((rc.skills or {}).get("disabled") or [])
-                new_disabled_set = set(new_disabled)
+                # 计算变更内容：对比"保存前的有效状态"（config 或 manifest）
+                prev_skills = rc.skills if rc.skills is not None else _load_manifest_skills(repo_dir)
+                old_disabled = set((prev_skills or {}).get("disabled") or [])
+                # 若之前是 enabled 白名单模式，反推出 disabled
+                if prev_skills and (prev_skills.get("enabled") or []):
+                    old_enabled_set = set(prev_skills["enabled"])
+                    old_disabled = {n for n in all_names if n not in old_enabled_set}
+
+                new_disabled_set = unchecked
                 newly_enabled = sorted(old_disabled - new_disabled_set)   # 原来禁用，现在启用
                 newly_disabled = sorted(new_disabled_set - old_disabled)  # 原来启用，现在禁用
 
-                rc.skills = None if not new_disabled else {"enabled": [], "disabled": sorted(new_disabled)}
+                # 根据 mode 决定写哪个字段
+                if not unchecked:
+                    # 全选，清空
+                    rc.skills = None
+                elif not checked:
+                    # 全不选，空白名单
+                    rc.skills = {"enabled": [], "disabled": []}
+                elif mode == "enable":
+                    rc.skills = {"enabled": sorted(checked), "disabled": []}
+                elif mode == "disable":
+                    rc.skills = {"enabled": [], "disabled": sorted(unchecked)}
+                else:
+                    # auto：哪个列表短用哪个，相等时用 enabled
+                    if len(checked) <= len(unchecked):
+                        rc.skills = {"enabled": sorted(checked), "disabled": []}
+                    else:
+                        rc.skills = {"enabled": [], "disabled": sorted(unchecked)}
                 config_manager.update_repo(rc)
 
                 if not newly_enabled and not newly_disabled:
@@ -632,10 +692,11 @@ def skill_list(repo_name: Optional[str], edit: bool):
             total = 0
             for rname, skills in all_skills_by_repo.items():
                 rc = repo_config_map.get(rname)
+                repo_dir = repo_dir_map.get(rname, Path("."))
                 click.echo(f"\n仓库：{rname}")
                 for s in skills:
                     sname = s["name"]
-                    mark = "✓" if _is_enabled(rc, sname) else "✗"
+                    mark = "✓" if _is_enabled(rc, sname, repo_dir) else "✗"
                     click.echo(f"  [{mark}] {sname}")
                     total += 1
             click.echo(f"\n共 {total} 个技能  （使用 --edit 进入编辑模式）")

@@ -17,6 +17,7 @@ from click.testing import CliRunner
 
 from driving_cli.cli import cli
 from driving_cli.commands.skill import (
+    _load_manifest_skills,
     collect_skills,
     generate_available_skills_content,
     merge_skills_from_all_repos,
@@ -181,6 +182,37 @@ class TestParseSkillYaml:
 # ==================== scan_skills_from_dir 测试 ====================
 
 
+class TestLoadManifestSkills:
+    """测试 _load_manifest_skills 辅助函数"""
+
+    def test_读取enabled配置(self, tmp_path):
+        manifest = {"skills": {"enabled": ["skill-a", "skill-b"], "disabled": []}}
+        (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        result = _load_manifest_skills(tmp_path)
+        assert result == {"enabled": ["skill-a", "skill-b"], "disabled": []}
+
+    def test_读取disabled配置(self, tmp_path):
+        manifest = {"skills": {"enabled": [], "disabled": ["skill-x"]}}
+        (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        result = _load_manifest_skills(tmp_path)
+        assert result["disabled"] == ["skill-x"]
+
+    def test_无manifest文件返回None(self, tmp_path):
+        result = _load_manifest_skills(tmp_path)
+        assert result is None
+
+    def test_manifest无skills字段返回None(self, tmp_path):
+        manifest = {"min_cli_version": "1.0.0"}
+        (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        result = _load_manifest_skills(tmp_path)
+        assert result is None
+
+    def test_manifest格式非法返回None(self, tmp_path):
+        (tmp_path / "manifest.json").write_text("not json", encoding="utf-8")
+        result = _load_manifest_skills(tmp_path)
+        assert result is None
+
+
 class TestScanSkillsFromDir:
     """测试单仓库 skills 目录扫描"""
 
@@ -302,6 +334,51 @@ class TestMergeSkillsFromAllRepos:
         # main 有 2 个，local 有 2 个，但 skill-b 重复，合并后应有 3 个
         assert len(result) == 3
         assert len(result) <= 2 + 2  # 不超过各仓库之和
+
+    def test_manifest_enabled白名单生效(self, tmp_path):
+        """manifest.json 的 skills.enabled 应作为默认过滤"""
+        main_skills = tmp_path / "main" / "skills"
+        _make_skill_md(main_skills / "skill-a", "skill-a", "技能 A")
+        _make_skill_md(main_skills / "skill-b", "skill-b", "技能 B")
+        # 写入 manifest.json，只启用 skill-a
+        manifest = {"skills": {"enabled": ["skill-a"], "disabled": []}}
+        (tmp_path / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        result = merge_skills_from_all_repos([("main", main_skills)])
+        assert len(result) == 1
+        assert result[0]["name"] == "skill-a"
+
+    def test_manifest_disabled黑名单生效(self, tmp_path):
+        """manifest.json 的 skills.disabled 应排除对应技能"""
+        main_skills = tmp_path / "main" / "skills"
+        _make_skill_md(main_skills / "skill-a", "skill-a", "技能 A")
+        _make_skill_md(main_skills / "skill-b", "skill-b", "技能 B")
+        manifest = {"skills": {"enabled": [], "disabled": ["skill-b"]}}
+        (tmp_path / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        result = merge_skills_from_all_repos([("main", main_skills)])
+        names = {s["name"] for s in result}
+        assert names == {"skill-a"}
+
+    def test_config优先级高于manifest(self, tmp_path):
+        """driving.config.json 的 skills 配置应覆盖 manifest.json"""
+        from driving_cli.models.config import RepoConfig
+        main_skills = tmp_path / "main" / "skills"
+        _make_skill_md(main_skills / "skill-a", "skill-a", "技能 A")
+        _make_skill_md(main_skills / "skill-b", "skill-b", "技能 B")
+        # manifest 只启用 skill-a
+        manifest = {"skills": {"enabled": ["skill-a"], "disabled": []}}
+        (tmp_path / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        # driving.config.json 只启用 skill-b（优先级更高）
+        rc = RepoConfig(name="main", type="remote", path="ai-driving/main",
+                        skills={"enabled": ["skill-b"], "disabled": []})
+        result = merge_skills_from_all_repos([("main", main_skills)], repo_configs=[rc])
+        assert len(result) == 1
+        assert result[0]["name"] == "skill-b"
 
 
 # ==================== generate_available_skills_content 测试 ====================
@@ -453,6 +530,193 @@ class TestSkillSyncCommand:
 # ==================== collect_skills 测试 ====================
 
 
+# ==================== skill list manifest 感知测试 ====================
+
+
+class TestSkillListManifest:
+    """测试 skill list 在只读和 edit 模式下对 manifest.json 的感知"""
+
+    def _make_project(self, tmp_path, config_skills=None):
+        """创建带 manifest.json 的测试项目，config_skills=None 表示 config 无 skills 字段"""
+        config = {
+            "version": "2",
+            "repos": [
+                {
+                    "name": "main",
+                    "type": "remote",
+                    "url": "https://example.com/main",
+                    "path": "ai-driving/main",
+                    "local_path": None,
+                    "tags": ["base"],
+                    **({"skills": config_skills} if config_skills is not None else {}),
+                }
+            ],
+            "default_commit_message": "",
+            "update_version_url": "",
+        }
+        (tmp_path / "driving.config.json").write_text(
+            json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        skills_dir = tmp_path / "ai-driving" / "main" / "skills"
+        _make_skill_md(skills_dir / "skill-a", "skill-a", "技能 A")
+        _make_skill_md(skills_dir / "skill-b", "skill-b", "技能 B")
+        _make_skill_md(skills_dir / "skill-c", "skill-c", "技能 C")
+        return tmp_path
+
+    def test_只读模式_manifest_disabled技能显示为禁用(self, runner, tmp_path):
+        """只读模式下，manifest 禁用的技能应显示 ✗"""
+        project = self._make_project(tmp_path)
+        manifest = {"skills": {"enabled": [], "disabled": ["skill-b"]}}
+        (project / "ai-driving" / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["skill", "list"])
+        assert result.exit_code == 0
+        lines = result.output
+        # skill-b 应显示为禁用
+        assert "[✗] skill-b" in lines
+        assert "[✓] skill-a" in lines
+
+    def test_只读模式_config优先于manifest(self, runner, tmp_path):
+        """config 有 skills 时，manifest 应被忽略"""
+        # config 禁用 skill-a，manifest 禁用 skill-b
+        project = self._make_project(tmp_path, config_skills={"enabled": [], "disabled": ["skill-a"]})
+        manifest = {"skills": {"enabled": [], "disabled": ["skill-b"]}}
+        (project / "ai-driving" / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["skill", "list"])
+        assert result.exit_code == 0
+        # 应按 config 来：skill-a 禁用，skill-b 启用
+        assert "[✗] skill-a" in result.output
+        assert "[✓] skill-b" in result.output
+
+    def test_edit模式_manifest_disabled技能默认不勾选(self, runner, tmp_path):
+        """edit 模式下，manifest 禁用的技能 default_checked 中不应包含"""
+        project = self._make_project(tmp_path)
+        manifest = {"skills": {"enabled": [], "disabled": ["skill-c"]}}
+        (project / "ai-driving" / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        # mock checkboxlist_dialog，捕获 default_values 参数
+        captured = {}
+
+        def fake_dialog(**kwargs):
+            captured["default_values"] = kwargs.get("default_values", [])
+            class FakeResult:
+                def run(self): return None  # 用户取消，不保存
+            return FakeResult()
+
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog", side_effect=fake_dialog):
+                runner.invoke(cli, ["skill", "list", "--edit"])
+
+        assert "skill-c" not in captured.get("default_values", [])
+        assert "skill-a" in captured.get("default_values", [])
+        assert "skill-b" in captured.get("default_values", [])
+
+    def test_edit模式_保存时变更日志对比manifest(self, runner, tmp_path):
+        """edit 保存时，newly_enabled/disabled 应对比 manifest 默认状态"""
+        project = self._make_project(tmp_path)
+        # manifest 默认禁用 skill-c
+        manifest = {"skills": {"enabled": [], "disabled": ["skill-c"]}}
+        (project / "ai-driving" / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        # 用户在 edit 里把 skill-c 勾上（启用）
+        def fake_dialog(**kwargs):
+            class FakeResult:
+                def run(self): return ["skill-a", "skill-b", "skill-c"]  # 全部勾选
+            return FakeResult()
+
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog", side_effect=fake_dialog):
+                result = runner.invoke(cli, ["skill", "list", "--edit"])
+
+        # skill-c 从 manifest 默认禁用变为启用，应出现在变更日志
+        assert "+ skill-c" in result.output
+
+    def _fake_dialog_returning(self, checked: list):
+        def fake_dialog(**kwargs):
+            class R:
+                def run(self): return checked
+            return R()
+        return fake_dialog
+
+    def test_edit_auto_开启少时写enabled(self, runner, tmp_path):
+        """auto 模式：勾选数 <= 未勾选数时，写 enabled"""
+        project = self._make_project(tmp_path)
+        # 只勾 skill-a（1 个），未勾 2 个 → enabled 更短
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog",
+                       side_effect=self._fake_dialog_returning(["skill-a"])):
+                runner.invoke(cli, ["skill", "list", "--edit"])
+
+        from driving_cli.utils.config_manager import ConfigManager
+        cfg = ConfigManager(project).get_repo("main")
+        assert cfg.skills["enabled"] == ["skill-a"]
+        assert cfg.skills["disabled"] == []
+
+    def test_edit_auto_禁用少时写disabled(self, runner, tmp_path):
+        """auto 模式：未勾选数 < 勾选数时，写 disabled"""
+        project = self._make_project(tmp_path)
+        # 勾 skill-a + skill-b（2 个），未勾 skill-c（1 个）→ disabled 更短
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog",
+                       side_effect=self._fake_dialog_returning(["skill-a", "skill-b"])):
+                runner.invoke(cli, ["skill", "list", "--edit"])
+
+        from driving_cli.utils.config_manager import ConfigManager
+        cfg = ConfigManager(project).get_repo("main")
+        assert cfg.skills["disabled"] == ["skill-c"]
+        assert cfg.skills["enabled"] == []
+
+    def test_edit_auto_全选时清空skills(self, runner, tmp_path):
+        """auto 模式：全选时 skills 应为 None"""
+        project = self._make_project(tmp_path)
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog",
+                       side_effect=self._fake_dialog_returning(["skill-a", "skill-b", "skill-c"])):
+                runner.invoke(cli, ["skill", "list", "--edit"])
+
+        from driving_cli.utils.config_manager import ConfigManager
+        cfg = ConfigManager(project).get_repo("main")
+        assert cfg.skills is None
+
+    def test_edit_mode_enable_强制写enabled(self, runner, tmp_path):
+        """--mode enable：无论数量，始终写 enabled"""
+        project = self._make_project(tmp_path)
+        # 勾 2 个，未勾 1 个，正常 auto 会写 disabled，但 mode=enable 强制写 enabled
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog",
+                       side_effect=self._fake_dialog_returning(["skill-a", "skill-b"])):
+                runner.invoke(cli, ["skill", "list", "--edit", "--mode", "enable"])
+
+        from driving_cli.utils.config_manager import ConfigManager
+        cfg = ConfigManager(project).get_repo("main")
+        assert sorted(cfg.skills["enabled"]) == ["skill-a", "skill-b"]
+        assert cfg.skills["disabled"] == []
+
+    def test_edit_mode_disable_强制写disabled(self, runner, tmp_path):
+        """--mode disable：无论数量，始终写 disabled"""
+        project = self._make_project(tmp_path)
+        # 只勾 skill-a（1 个），正常 auto 会写 enabled，但 mode=disable 强制写 disabled
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog",
+                       side_effect=self._fake_dialog_returning(["skill-a"])):
+                runner.invoke(cli, ["skill", "list", "--edit", "--mode", "disable"])
+
+        from driving_cli.utils.config_manager import ConfigManager
+        cfg = ConfigManager(project).get_repo("main")
+        assert cfg.skills["disabled"] == ["skill-b", "skill-c"]
+        assert cfg.skills["enabled"] == []
+
+
+# ==================== collect_skills 测试 ====================
+
+
 class TestCollectSkills:
     """测试 collect_skills 的 enabled/disabled 过滤行为"""
 
@@ -514,6 +778,47 @@ class TestCollectSkills:
             result = collect_skills(keywords=("skill-c",))
         assert len(result) == 1
         assert result[0]["name"] == "skill-c"
+
+    def test_manifest_enabled白名单作为fallback(self, tmp_path):
+        """driving.config.json 无 skills 配置时，manifest.json 的 enabled 应生效"""
+        # 不传 skills_cfg（None），让 config 里没有 skills 字段
+        project = self._make_config(tmp_path, None)
+        # 写入 manifest.json，只启用 skill-a
+        manifest = {"skills": {"enabled": ["skill-a"], "disabled": []}}
+        (project / "ai-driving" / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            result = collect_skills()
+        assert len(result) == 1
+        assert result[0]["name"] == "skill-a"
+
+    def test_manifest_disabled黑名单作为fallback(self, tmp_path):
+        """driving.config.json 无 skills 配置时，manifest.json 的 disabled 应生效"""
+        project = self._make_config(tmp_path, None)
+        manifest = {"skills": {"enabled": [], "disabled": ["skill-b"]}}
+        (project / "ai-driving" / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            result = collect_skills()
+        names = {s["name"] for s in result}
+        assert "skill-b" not in names
+        assert {"skill-a", "skill-c"} == names
+
+    def test_config有skills时manifest被忽略(self, tmp_path):
+        """driving.config.json 有 skills 配置时，manifest.json 应被忽略"""
+        # config 只启用 skill-b
+        project = self._make_config(tmp_path, {"enabled": ["skill-b"], "disabled": []})
+        # manifest 只启用 skill-a（应被忽略）
+        manifest = {"skills": {"enabled": ["skill-a"], "disabled": []}}
+        (project / "ai-driving" / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            result = collect_skills()
+        assert len(result) == 1
+        assert result[0]["name"] == "skill-b"
 
 
 # ==================== 属性测试（Property 10） ====================
