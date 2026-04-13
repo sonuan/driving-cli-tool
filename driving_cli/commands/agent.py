@@ -100,6 +100,18 @@ def _parse_frontmatter(md_path: Path) -> Optional[Dict]:
 # 扫描 / 过滤
 # ---------------------------------------------------------------------------
 
+def _load_manifest_agents(repo_dir: Path) -> Optional[dict]:
+    """读取仓库 manifest.json 中的 agents 配置，作为仓库级默认值"""
+    manifest_path = repo_dir / "manifest.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        data = json_module.loads(manifest_path.read_text(encoding="utf-8"))
+        return data.get("agents") or None
+    except Exception:
+        return None
+
+
 def scan_agents_from_dir(repo_name: str, agents_dir: Path, quiet: bool = False) -> List[Dict]:
     """扫描单个仓库的 agents/ 目录，返回 agent 元数据列表。
 
@@ -223,13 +235,17 @@ def agent_group():
 @agent_group.command(name="list")
 @click.option("--repo", "repo_name", default=None, help="只显示指定仓库的 agent")
 @click.option("--edit", is_flag=True, default=False, help="进入交互模式，勾选启用/禁用 agent")
-def agent_list(repo_name: Optional[str], edit: bool):
+@click.option("--mode", type=click.Choice(["auto", "enable", "disable"]), default="auto",
+              help="保存模式：auto 自动选择（默认），enable 强制写 enabled，disable 强制写 disabled")
+def agent_list(repo_name: Optional[str], edit: bool, mode: str):
     """列出所有 agent，按仓库分组显示启用状态，支持编辑模式。
 
     示例：
         driving agent list
         driving agent list --repo driving
         driving agent list --edit
+        driving agent list --edit --mode enable
+        driving agent list --edit --mode disable
     """
     try:
         project_root = find_project_root()
@@ -254,14 +270,18 @@ def agent_list(repo_name: Optional[str], edit: bool):
         repo_config_map = {r.name: r for r in target_repos}
 
         all_agents_by_repo: Dict[str, List[Dict]] = {}
+        repo_dir_map: Dict[str, Path] = {}
         for rname, adir in agents_dirs:
             all_agents_by_repo[rname] = scan_agents_from_dir(rname, adir, quiet=True)
+            repo_dir_map[rname] = adir.parent
 
-        def _is_enabled(rc: Optional[RepoConfig], aname: str) -> bool:
-            if rc is None or rc.agents is None:
+        def _is_enabled(rc: Optional[RepoConfig], aname: str, repo_dir: Path) -> bool:
+            agents_cfg = (rc.agents if rc and rc.agents is not None
+                          else _load_manifest_agents(repo_dir))
+            if agents_cfg is None:
                 return True
-            enabled = rc.agents.get("enabled") or []
-            disabled = rc.agents.get("disabled") or []
+            enabled = agents_cfg.get("enabled") or []
+            disabled = agents_cfg.get("disabled") or []
             if enabled:
                 return aname in enabled
             return aname not in disabled
@@ -284,8 +304,9 @@ def agent_list(repo_name: Optional[str], edit: bool):
                 if not agents:
                     continue
                 rc = repo_config_map.get(rname)
+                repo_dir = repo_dir_map.get(rname, Path("."))
                 values = [(a["name"], a["name"]) for a in agents]
-                default_checked = [a["name"] for a in agents if _is_enabled(rc, a["name"])]
+                default_checked = [a["name"] for a in agents if _is_enabled(rc, a["name"], repo_dir)]
 
                 result = checkboxlist_dialog(
                     title=f"仓库：{rname}",
@@ -299,13 +320,32 @@ def agent_list(repo_name: Optional[str], edit: bool):
                     continue
 
                 all_names = [a["name"] for a in agents]
-                new_disabled = [n for n in all_names if n not in result]
-                old_disabled = set((rc.agents or {}).get("disabled") or [])
-                new_disabled_set = set(new_disabled)
-                newly_enabled = sorted(old_disabled - new_disabled_set)
-                newly_disabled = sorted(new_disabled_set - old_disabled)
+                checked = set(result)
+                unchecked = set(all_names) - checked
 
-                rc.agents = None if not new_disabled else {"enabled": [], "disabled": sorted(new_disabled)}
+                # 计算变更内容：对比有效状态（config 或 manifest）
+                prev_agents = rc.agents if rc.agents is not None else _load_manifest_agents(repo_dir)
+                old_disabled = set((prev_agents or {}).get("disabled") or [])
+                if prev_agents and (prev_agents.get("enabled") or []):
+                    old_enabled_set = set(prev_agents["enabled"])
+                    old_disabled = {n for n in all_names if n not in old_enabled_set}
+
+                newly_enabled = sorted(old_disabled - unchecked)
+                newly_disabled = sorted(unchecked - old_disabled)
+
+                if not unchecked:
+                    rc.agents = None
+                elif not checked:
+                    rc.agents = {"enabled": [], "disabled": []}
+                elif mode == "enable":
+                    rc.agents = {"enabled": sorted(checked), "disabled": []}
+                elif mode == "disable":
+                    rc.agents = {"enabled": [], "disabled": sorted(unchecked)}
+                else:
+                    if len(checked) <= len(unchecked):
+                        rc.agents = {"enabled": sorted(checked), "disabled": []}
+                    else:
+                        rc.agents = {"enabled": [], "disabled": sorted(unchecked)}
                 config_manager.update_repo(rc)
 
                 if not newly_enabled and not newly_disabled:
@@ -320,9 +360,10 @@ def agent_list(repo_name: Optional[str], edit: bool):
             total = 0
             for rname, agents in all_agents_by_repo.items():
                 rc = repo_config_map.get(rname)
+                repo_dir = repo_dir_map.get(rname, Path("."))
                 click.echo(f"\n仓库：{rname}")
                 for a in agents:
-                    mark = "✓" if _is_enabled(rc, a["name"]) else "✗"
+                    mark = "✓" if _is_enabled(rc, a["name"], repo_dir) else "✗"
                     soul_tag = " [soul]" if a["has_soul"] else ""
                     mem_tag = " [memory]" if a["has_memory"] else ""
                     click.echo(f"  [{mark}] {a['name']}{soul_tag}{mem_tag}")
@@ -350,13 +391,28 @@ def collect_agents(keywords: tuple = ()) -> list:
     repo_configs = config_manager.get_all_repos()
     repo_config_map = {r.name: r for r in repo_configs}
 
+    # 优化 1：无关键词时只扫描 base 仓库
+    if not keywords:
+        agents_dirs = [
+            (n, d) for n, d in agents_dirs
+            if "base" in ((repo_config_map.get(n) and repo_config_map[n].tags) or [])
+        ]
+
     all_agents_by_repo: Dict[str, List[Dict]] = {}
     for repo_name, agents_dir in agents_dirs:
         rc = repo_config_map.get(repo_name)
         repo_agents = scan_agents_from_dir(repo_name, agents_dir, quiet=True)
-        # 传入具体 agent.name 关键词时，忽略 enabled/disabled 开关，允许按名称直接加载未开启的 agent
-        if not keywords and rc is not None and rc.agents is not None:
-            repo_agents = _filter_agents(repo_agents, rc)
+        if not keywords:
+            # 优先级：driving.config.json > manifest.json > 全量加载
+            effective_agents = (rc.agents if rc and rc.agents is not None
+                                else _load_manifest_agents(agents_dir.parent))
+            if effective_agents is not None:
+                enabled = effective_agents.get("enabled") or []
+                disabled = effective_agents.get("disabled") or []
+                if enabled:
+                    repo_agents = [a for a in repo_agents if a["name"] in enabled]
+                elif disabled:
+                    repo_agents = [a for a in repo_agents if a["name"] not in disabled]
         all_agents_by_repo[repo_name] = repo_agents
 
     result: List[Dict] = []
@@ -370,10 +426,7 @@ def collect_agents(keywords: tuple = ()) -> list:
 
     if not keywords:
         for repo_name, repo_agents in all_agents_by_repo.items():
-            rc = repo_config_map.get(repo_name)
-            tags = rc.tags if rc and rc.tags else []
-            if "base" in tags:
-                _add(repo_agents)
+            _add(repo_agents)
     else:
         kw_set = set(keywords)
         for repo_name, repo_agents in all_agents_by_repo.items():

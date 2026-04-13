@@ -426,6 +426,156 @@ class TestAgentListCommand:
         assert "memory" in result.output
 
 
+# ==================== manifest.json 支持 agents 配置测试 ====================
+
+
+class TestAgentManifestFallback:
+    """测试 manifest.json agents 字段作为仓库级默认值"""
+
+    def _make_project(self, tmp_path, config_agents=None):
+        repos_entry = {
+            "name": "main", "type": "remote",
+            "url": "https://example.com/main",
+            "path": "ai-driving/main", "local_path": None, "tags": ["base"],
+        }
+        if config_agents is not None:
+            repos_entry["agents"] = config_agents
+        _make_config(tmp_path, [repos_entry])
+        agents_dir = tmp_path / "ai-driving" / "main" / "agents"
+        _make_agents_md(agents_dir / "agent-a", "agent-a", "Agent A 描述")
+        _make_agents_md(agents_dir / "agent-b", "agent-b", "Agent B 描述")
+        _make_agents_md(agents_dir / "agent-c", "agent-c", "Agent C 描述")
+        return tmp_path
+
+    def test_manifest_enabled白名单生效(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        manifest = {"agents": {"enabled": ["agent-a"], "disabled": []}}
+        (project / "ai-driving" / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["agent", "load"])
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["name"] == "agent-a"
+
+    def test_manifest_disabled黑名单生效(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        manifest = {"agents": {"enabled": [], "disabled": ["agent-b"]}}
+        (project / "ai-driving" / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["agent", "load"])
+        data = json.loads(result.output)
+        names = {a["name"] for a in data}
+        assert "agent-b" not in names
+        assert {"agent-a", "agent-c"} == names
+
+    def test_config优先级高于manifest(self, runner, tmp_path):
+        project = self._make_project(tmp_path, config_agents={"enabled": ["agent-c"], "disabled": []})
+        manifest = {"agents": {"enabled": ["agent-a"], "disabled": []}}
+        (project / "ai-driving" / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["agent", "load"])
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["name"] == "agent-c"
+
+    def test_list只读模式感知manifest(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        manifest = {"agents": {"enabled": [], "disabled": ["agent-b"]}}
+        (project / "ai-driving" / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["agent", "list"])
+        assert "[✗] agent-b" in result.output
+        assert "[✓] agent-a" in result.output
+
+
+class TestAgentEditSaveMode:
+    """测试 agent list --edit 保存模式"""
+
+    def _make_project(self, tmp_path, config_agents=None):
+        repos_entry = {
+            "name": "main", "type": "remote",
+            "url": "https://example.com/main",
+            "path": "ai-driving/main", "local_path": None, "tags": ["base"],
+        }
+        if config_agents is not None:
+            repos_entry["agents"] = config_agents
+        _make_config(tmp_path, [repos_entry])
+        agents_dir = tmp_path / "ai-driving" / "main" / "agents"
+        _make_agents_md(agents_dir / "agent-a", "agent-a", "Agent A 描述")
+        _make_agents_md(agents_dir / "agent-b", "agent-b", "Agent B 描述")
+        _make_agents_md(agents_dir / "agent-c", "agent-c", "Agent C 描述")
+        return tmp_path
+
+    def _fake_dialog(self, checked):
+        def fake(**kwargs):
+            class R:
+                def run(self): return checked
+            return R()
+        return fake
+
+    def test_auto_开启少时写enabled(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog",
+                       side_effect=self._fake_dialog(["agent-a"])):
+                runner.invoke(cli, ["agent", "list", "--edit"])
+        from driving_cli.utils.config_manager import ConfigManager
+        cfg = ConfigManager(project).get_repo("main")
+        assert cfg.agents["enabled"] == ["agent-a"]
+        assert cfg.agents["disabled"] == []
+
+    def test_auto_禁用少时写disabled(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog",
+                       side_effect=self._fake_dialog(["agent-a", "agent-b"])):
+                runner.invoke(cli, ["agent", "list", "--edit"])
+        from driving_cli.utils.config_manager import ConfigManager
+        cfg = ConfigManager(project).get_repo("main")
+        assert cfg.agents["disabled"] == ["agent-c"]
+        assert cfg.agents["enabled"] == []
+
+    def test_mode_enable强制写enabled(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog",
+                       side_effect=self._fake_dialog(["agent-a", "agent-b"])):
+                runner.invoke(cli, ["agent", "list", "--edit", "--mode", "enable"])
+        from driving_cli.utils.config_manager import ConfigManager
+        cfg = ConfigManager(project).get_repo("main")
+        assert sorted(cfg.agents["enabled"]) == ["agent-a", "agent-b"]
+        assert cfg.agents["disabled"] == []
+
+    def test_mode_disable强制写disabled(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog",
+                       side_effect=self._fake_dialog(["agent-a"])):
+                runner.invoke(cli, ["agent", "list", "--edit", "--mode", "disable"])
+        from driving_cli.utils.config_manager import ConfigManager
+        cfg = ConfigManager(project).get_repo("main")
+        assert cfg.agents["disabled"] == ["agent-b", "agent-c"]
+        assert cfg.agents["enabled"] == []
+
+    def test_全选时清空agents(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog",
+                       side_effect=self._fake_dialog(["agent-a", "agent-b", "agent-c"])):
+                runner.invoke(cli, ["agent", "list", "--edit"])
+        from driving_cli.utils.config_manager import ConfigManager
+        cfg = ConfigManager(project).get_repo("main")
+        assert cfg.agents is None
+
+
 # ==================== agent memory 命令 ====================
 
 

@@ -66,8 +66,10 @@ driving skill load <keywords...>     # 忽略 tags，精确匹配 repo.name 或 
 ## rule — 规则管理
 
 ```bash
-driving rule list                    # 列出所有规则（按仓库分组）
-driving rule list --edit             # 交互模式，勾选启用/禁用规则
+driving rule list                              # 列出所有规则（按仓库分组）
+driving rule list --edit                      # 交互模式，勾选启用/禁用规则（auto：自动选最短字段）
+driving rule list --edit --mode enable        # 强制写 enabled 白名单
+driving rule list --edit --mode disable       # 强制写 disabled 黑名单
 driving rule load                    # 只加载 tags=base 的仓库规则（供 AI 注入上下文）
 driving rule load <keywords...>      # 忽略 tags，精确匹配 repo.name 或 rule.name（取并集）
 ```
@@ -89,9 +91,11 @@ driving feature list --detail                 # 输出完整字段
 - `MEMORY.md`（可选）：最佳实践知识沉淀，随 git 同步，团队共享
 
 ```bash
-driving agent list                        # 列出所有 agent（按仓库分组）
-driving agent list --repo <name>          # 只显示指定仓库的 agent
-driving agent list --edit                 # 交互模式，勾选启用/禁用 agent
+driving agent list                              # 列出所有 agent（按仓库分组）
+driving agent list --repo <name>               # 只显示指定仓库的 agent
+driving agent list --edit                      # 交互模式，勾选启用/禁用 agent（auto：自动选最短字段）
+driving agent list --edit --mode enable        # 强制写 enabled 白名单
+driving agent list --edit --mode disable       # 强制写 disabled 黑名单
 driving agent load                        # 只加载 tags=base 的仓库 agent（供 AI 注入上下文）
 driving agent load <keywords...>          # 精确匹配 repo.name 或 agent.name（取并集）
 

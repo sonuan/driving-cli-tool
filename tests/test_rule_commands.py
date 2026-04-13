@@ -403,6 +403,156 @@ class TestRuleListCommand:
         assert "list" in result.output
 
 
+# ==================== manifest.json 支持 rules 配置测试 ====================
+
+
+class TestRuleManifestFallback:
+    """测试 manifest.json rules 字段作为仓库级默认值"""
+
+    def _make_project(self, tmp_path, config_rules=None):
+        repos_entry = {
+            "name": "main", "type": "remote",
+            "url": "https://example.com/main",
+            "path": "ai-driving/main", "local_path": None, "tags": ["base"],
+        }
+        if config_rules is not None:
+            repos_entry["rules"] = config_rules
+        _make_config(tmp_path, [repos_entry])
+        rules_dir = tmp_path / "ai-driving" / "main" / "rules"
+        _make_rule_md(rules_dir / "rule-a.md", "rule-a", "规则 A")
+        _make_rule_md(rules_dir / "rule-b.md", "rule-b", "规则 B")
+        _make_rule_md(rules_dir / "rule-c.md", "rule-c", "规则 C")
+        return tmp_path
+
+    def test_manifest_enabled白名单生效(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        manifest = {"rules": {"enabled": ["rule-a"], "disabled": []}}
+        (project / "ai-driving" / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        with patch("driving_cli.commands.rule.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["rule", "load"])
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["name"] == "rule-a"
+
+    def test_manifest_disabled黑名单生效(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        manifest = {"rules": {"enabled": [], "disabled": ["rule-b"]}}
+        (project / "ai-driving" / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        with patch("driving_cli.commands.rule.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["rule", "load"])
+        data = json.loads(result.output)
+        names = {r["name"] for r in data}
+        assert "rule-b" not in names
+        assert {"rule-a", "rule-c"} == names
+
+    def test_config优先级高于manifest(self, runner, tmp_path):
+        project = self._make_project(tmp_path, config_rules={"enabled": ["rule-c"], "disabled": []})
+        manifest = {"rules": {"enabled": ["rule-a"], "disabled": []}}
+        (project / "ai-driving" / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        with patch("driving_cli.commands.rule.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["rule", "load"])
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["name"] == "rule-c"
+
+    def test_list只读模式感知manifest(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        manifest = {"rules": {"enabled": [], "disabled": ["rule-b"]}}
+        (project / "ai-driving" / "main" / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        with patch("driving_cli.commands.rule.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["rule", "list"])
+        assert "[✗] rule-b" in result.output
+        assert "[✓] rule-a" in result.output
+
+
+class TestRuleEditSaveMode:
+    """测试 rule list --edit 保存模式"""
+
+    def _make_project(self, tmp_path, config_rules=None):
+        repos_entry = {
+            "name": "main", "type": "remote",
+            "url": "https://example.com/main",
+            "path": "ai-driving/main", "local_path": None, "tags": ["base"],
+        }
+        if config_rules is not None:
+            repos_entry["rules"] = config_rules
+        _make_config(tmp_path, [repos_entry])
+        rules_dir = tmp_path / "ai-driving" / "main" / "rules"
+        _make_rule_md(rules_dir / "rule-a.md", "rule-a", "规则 A")
+        _make_rule_md(rules_dir / "rule-b.md", "rule-b", "规则 B")
+        _make_rule_md(rules_dir / "rule-c.md", "rule-c", "规则 C")
+        return tmp_path
+
+    def _fake_dialog(self, checked):
+        def fake(**kwargs):
+            class R:
+                def run(self): return checked
+            return R()
+        return fake
+
+    def test_auto_开启少时写enabled(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        with patch("driving_cli.commands.rule.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog",
+                       side_effect=self._fake_dialog(["rule-a"])):
+                runner.invoke(cli, ["rule", "list", "--edit"])
+        from driving_cli.utils.config_manager import ConfigManager
+        cfg = ConfigManager(project).get_repo("main")
+        assert cfg.rules["enabled"] == ["rule-a"]
+        assert cfg.rules["disabled"] == []
+
+    def test_auto_禁用少时写disabled(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        with patch("driving_cli.commands.rule.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog",
+                       side_effect=self._fake_dialog(["rule-a", "rule-b"])):
+                runner.invoke(cli, ["rule", "list", "--edit"])
+        from driving_cli.utils.config_manager import ConfigManager
+        cfg = ConfigManager(project).get_repo("main")
+        assert cfg.rules["disabled"] == ["rule-c"]
+        assert cfg.rules["enabled"] == []
+
+    def test_mode_enable强制写enabled(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        with patch("driving_cli.commands.rule.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog",
+                       side_effect=self._fake_dialog(["rule-a", "rule-b"])):
+                runner.invoke(cli, ["rule", "list", "--edit", "--mode", "enable"])
+        from driving_cli.utils.config_manager import ConfigManager
+        cfg = ConfigManager(project).get_repo("main")
+        assert sorted(cfg.rules["enabled"]) == ["rule-a", "rule-b"]
+        assert cfg.rules["disabled"] == []
+
+    def test_mode_disable强制写disabled(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        with patch("driving_cli.commands.rule.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog",
+                       side_effect=self._fake_dialog(["rule-a"])):
+                runner.invoke(cli, ["rule", "list", "--edit", "--mode", "disable"])
+        from driving_cli.utils.config_manager import ConfigManager
+        cfg = ConfigManager(project).get_repo("main")
+        assert cfg.rules["disabled"] == ["rule-b", "rule-c"]
+        assert cfg.rules["enabled"] == []
+
+    def test_全选时清空rules(self, runner, tmp_path):
+        project = self._make_project(tmp_path)
+        with patch("driving_cli.commands.rule.find_project_root", return_value=project):
+            with patch("prompt_toolkit.shortcuts.checkboxlist_dialog",
+                       side_effect=self._fake_dialog(["rule-a", "rule-b", "rule-c"])):
+                runner.invoke(cli, ["rule", "list", "--edit"])
+        from driving_cli.utils.config_manager import ConfigManager
+        cfg = ConfigManager(project).get_repo("main")
+        assert cfg.rules is None
+
+
 # ==================== 属性测试 ====================
 
 from hypothesis import given, settings

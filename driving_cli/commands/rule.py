@@ -13,8 +13,6 @@ import click
 from driving_cli.models.config import RepoConfig
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
-
-# 尝试导入 yaml，如果失败则使用简单解析器
 try:
     import yaml
 
@@ -196,6 +194,46 @@ def scan_rules_from_dir(repo_name: str, rules_dir: Path, quiet: bool = False, he
     return rules
 
 
+def _load_manifest_rules(repo_dir: Path) -> Optional[dict]:
+    """读取仓库 manifest.json 中的 rules 配置，作为仓库级默认值"""
+    manifest_path = repo_dir / "manifest.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        data = json_module.loads(manifest_path.read_text(encoding="utf-8"))
+        return data.get("rules") or None
+    except Exception:
+        return None
+
+
+def _scan_rules_with_filter(
+    repo_name: str,
+    rules_dir: Path,
+    enabled: List[str],
+    disabled: List[str],
+    quiet: bool = True,
+) -> List[Dict]:
+    """扫描规则目录，enabled 白名单时只读对应文件，减少文件 IO。"""
+    if enabled:
+        rules = []
+        enabled_set = set(enabled)
+        for rule_name in sorted(enabled_set):
+            rule_file = rules_dir / f"{rule_name}.md"
+            if not rule_file.exists():
+                continue
+            rule_info = parse_rule_yaml(rule_file, header_only=True)
+            if rule_info:
+                rule_info["path"] = f"ai-driving/{repo_name}/rules/{rule_name}.md"
+                rules.append(rule_info)
+        return rules
+
+    all_rules = scan_rules_from_dir(repo_name, rules_dir, quiet=quiet, header_only=True)
+    if disabled:
+        disabled_set = set(disabled)
+        all_rules = [r for r in all_rules if r["name"] not in disabled_set]
+    return all_rules
+
+
 def filter_rules_by_config(rules: List[Dict], repo_config: RepoConfig) -> List[Dict]:
     """根据仓库的 rules 配置过滤规则列表
 
@@ -249,13 +287,26 @@ def collect_rules(keywords: tuple = ()) -> list:
     repo_configs = config_manager.get_all_repos()
     repo_config_map = {r.name: r for r in repo_configs}
 
+    # 优化 1：无关键词时只扫描 base 仓库
+    if not keywords:
+        rules_dirs = [
+            (n, d) for n, d in rules_dirs
+            if "base" in ((repo_config_map.get(n) and repo_config_map[n].tags) or [])
+        ]
+
     all_rules_by_repo: dict = {}
     for repo_name, rules_dir in rules_dirs:
         rc = repo_config_map.get(repo_name)
-        repo_rules = scan_rules_from_dir(repo_name, rules_dir, quiet=True, header_only=True)
-        # 传入具体 rule.name 关键词时，忽略 enabled/disabled 开关，允许按名称直接加载未开启的规则
-        if not keywords and rc is not None:
-            repo_rules = filter_rules_by_config(repo_rules, rc)
+        if not keywords:
+            # 优先级：driving.config.json > manifest.json > 全量加载
+            effective_rules = (rc.rules if rc and rc.rules is not None
+                               else _load_manifest_rules(rules_dir.parent))
+            enabled = (effective_rules or {}).get("enabled") or []
+            disabled = (effective_rules or {}).get("disabled") or []
+            # 优化 2：enabled 白名单时提前过滤文件
+            repo_rules = _scan_rules_with_filter(repo_name, rules_dir, enabled, disabled)
+        else:
+            repo_rules = scan_rules_from_dir(repo_name, rules_dir, quiet=True, header_only=True)
         all_rules_by_repo[repo_name] = repo_rules
 
     result: list = []
@@ -269,10 +320,7 @@ def collect_rules(keywords: tuple = ()) -> list:
 
     if not keywords:
         for repo_name, repo_rules in all_rules_by_repo.items():
-            rc = repo_config_map.get(repo_name)
-            tags = rc.tags if rc and rc.tags else []
-            if "base" in tags:
-                _add(repo_rules)
+            _add(repo_rules)
     else:
         kw_set = set(keywords)
         for repo_name, repo_rules in all_rules_by_repo.items():
@@ -314,15 +362,20 @@ def rule_load(keywords: tuple):
 @rule_group.command(name="list")
 @click.option("--repo", "repo_name", default=None, help="只显示指定仓库的规则")
 @click.option("--edit", is_flag=True, default=False, help="进入交互模式，勾选/取消规则")
-def rule_list(repo_name: Optional[str], edit: bool):
+@click.option("--mode", type=click.Choice(["auto", "enable", "disable"]), default="auto",
+              help="保存模式：auto 自动选择（默认），enable 强制写 enabled，disable 强制写 disabled")
+def rule_list(repo_name: Optional[str], edit: bool, mode: str):
     """列出所有规则，按仓库分组显示启用状态，支持编辑模式
 
     使用 --edit 进入交互模式，通过空格勾选/取消规则，回车保存。
+    --mode 控制保存字段：auto 自动选最短，enable 强制写 enabled，disable 强制写 disabled。
 
     示例：
         driving rule list
         driving rule list --repo my-local
         driving rule list --edit
+        driving rule list --edit --mode enable
+        driving rule list --edit --mode disable
     """
     try:
         project_root = find_project_root()
@@ -349,14 +402,18 @@ def rule_list(repo_name: Optional[str], edit: bool):
 
         # 扫描所有规则（不过滤，展示完整状态）
         all_rules_by_repo: Dict[str, List[Dict]] = {}
+        repo_dir_map: Dict[str, Path] = {}
         for rname, rdir in rules_dirs:
             all_rules_by_repo[rname] = scan_rules_from_dir(rname, rdir, quiet=True)
+            repo_dir_map[rname] = rdir.parent
 
-        def _is_enabled(rc: Optional[RepoConfig], rule_name: str) -> bool:
-            if rc is None or rc.rules is None:
+        def _is_enabled(rc: Optional[RepoConfig], rule_name: str, repo_dir: Path) -> bool:
+            rules_cfg = (rc.rules if rc and rc.rules is not None
+                         else _load_manifest_rules(repo_dir))
+            if rules_cfg is None:
                 return True
-            enabled = rc.rules.get("enabled") or []
-            disabled = rc.rules.get("disabled") or []
+            enabled = rules_cfg.get("enabled") or []
+            disabled = rules_cfg.get("disabled") or []
             if enabled:
                 return rule_name in enabled
             return rule_name not in disabled
@@ -380,8 +437,9 @@ def rule_list(repo_name: Optional[str], edit: bool):
                 if not rules:
                     continue
                 rc = repo_config_map.get(rname)
+                repo_dir = repo_dir_map.get(rname, Path("."))
                 values = [(r["name"], r["name"]) for r in rules]
-                default_checked = [r["name"] for r in rules if _is_enabled(rc, r["name"])]
+                default_checked = [r["name"] for r in rules if _is_enabled(rc, r["name"], repo_dir)]
 
                 click.echo(f"\n仓库：{rname}")
                 result = checkboxlist_dialog(
@@ -396,17 +454,35 @@ def rule_list(repo_name: Optional[str], edit: bool):
                     continue
 
                 all_names = [r["name"] for r in rules]
-                new_disabled = [n for n in all_names if n not in result]
+                checked = set(result)
+                unchecked = set(all_names) - checked
 
                 if rc is None:
                     continue
 
-                old_disabled = set((rc.rules or {}).get("disabled") or [])
-                new_disabled_set = set(new_disabled)
-                newly_enabled = sorted(old_disabled - new_disabled_set)
-                newly_disabled = sorted(new_disabled_set - old_disabled)
+                # 计算变更内容：对比有效状态（config 或 manifest）
+                prev_rules = rc.rules if rc.rules is not None else _load_manifest_rules(repo_dir)
+                old_disabled = set((prev_rules or {}).get("disabled") or [])
+                if prev_rules and (prev_rules.get("enabled") or []):
+                    old_enabled_set = set(prev_rules["enabled"])
+                    old_disabled = {n for n in all_names if n not in old_enabled_set}
 
-                rc.rules = None if not new_disabled else {"enabled": [], "disabled": sorted(new_disabled)}
+                newly_enabled = sorted(old_disabled - unchecked)
+                newly_disabled = sorted(unchecked - old_disabled)
+
+                if not unchecked:
+                    rc.rules = None
+                elif not checked:
+                    rc.rules = {"enabled": [], "disabled": []}
+                elif mode == "enable":
+                    rc.rules = {"enabled": sorted(checked), "disabled": []}
+                elif mode == "disable":
+                    rc.rules = {"enabled": [], "disabled": sorted(unchecked)}
+                else:
+                    if len(checked) <= len(unchecked):
+                        rc.rules = {"enabled": sorted(checked), "disabled": []}
+                    else:
+                        rc.rules = {"enabled": [], "disabled": sorted(unchecked)}
                 config_manager.update_repo(rc)
 
                 if not newly_enabled and not newly_disabled:
@@ -422,10 +498,11 @@ def rule_list(repo_name: Optional[str], edit: bool):
             total = 0
             for rname, rules in all_rules_by_repo.items():
                 rc = repo_config_map.get(rname)
+                repo_dir = repo_dir_map.get(rname, Path("."))
                 click.echo(f"\n仓库：{rname}")
                 for r in rules:
                     rname_rule = r["name"]
-                    mark = "✓" if _is_enabled(rc, rname_rule) else "✗"
+                    mark = "✓" if _is_enabled(rc, rname_rule, repo_dir) else "✗"
                     click.echo(f"  [{mark}] {rname_rule}")
                     total += 1
             click.echo(f"\n共 {total} 条规则  （使用 --edit 进入编辑模式）")
