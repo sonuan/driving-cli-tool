@@ -1,10 +1,12 @@
 {
-  "version": "1.0.9",
-  "build_date": "2026-04-10T18:00:23+08:00",
+  "version": "1.1.0",
+  "build_date": "2026-04-13T09:41:05+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
+      "feat：driving cli更新提醒，加上sudo",
+      "feat：1.0.9 driving cli更新提醒不需要sudo就可以更新",
       "feat：1.0.9 优化更新提醒通知的文案，引导用户升级",
       "v1.0.9",
       "feat：v1.0.9 新增driving refine命令，用于加载所有refine，可以提供给ai进行经验复用和管理",
@@ -12,8 +14,6 @@
       "feat：manifest.json新增一个system_prompt配置，并将内容输出到system_prompt字段",
       "feat: 仓库新增manifest.json文件，配置min_cli_version，用于强制要求CLI更新",
       "feat: driving load 新增CLI更新提醒到system_prompt字段",
-      "feat：优化 skill/rule/agent load <keyword> 时不受.enabled或.disabled配置影响",
-      "feat: 补充repo目录结构",
-      "feat: 补充repo目录结构"
+      "feat：优化 skill/rule/agent load <keyword> 时不受.enabled或.disabled配置影响"
   ]
 }
