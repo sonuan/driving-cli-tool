@@ -1,11 +1,29 @@
 """load 命令 - 一次性输出所有上下文数据，供 AI 会话注入"""
 
 import json
+import sys
+import time
+from datetime import datetime
 from pathlib import Path
 
 import click
 
 from driving_cli import __version__
+
+# 模块级调试开关，由 load() 设置后供内部函数使用
+_debug_enabled = False
+_load_start: float = 0.0
+
+
+def _dbg(msg: str) -> None:
+    """输出带时间戳和相对耗时的调试日志到 stderr"""
+    if not _debug_enabled:
+        return
+    elapsed = time.perf_counter() - _load_start
+    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    click.echo(f"[DEBUG {ts}] (+{elapsed*1000:.1f}ms) {msg}", file=sys.stderr)
+
+
 from driving_cli.commands.agent import collect_agents
 from driving_cli.commands.repo import collect_repos
 from driving_cli.commands.check import _collect_updatable
@@ -101,23 +119,32 @@ def _build_notifications() -> str:
     parts = []
 
     # 检查 min_cli_version 要求（最高优先级，硬性阻断）
+    _dbg("检查 min_cli_version ...")
+    t = time.perf_counter()
     version_required_msg = _check_min_cli_version()
+    _dbg(f"min_cli_version 检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
     if version_required_msg:
         parts.append(version_required_msg)
 
     # 检查 CLI 自身更新
+    _dbg("检查 CLI 自身更新 ...")
+    t = time.perf_counter()
     cli_update_msg = _check_cli_update()
+    _dbg(f"CLI 更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
     if cli_update_msg:
         parts.append(cli_update_msg)
 
     # 检查仓库更新
+    _dbg("检查仓库更新 ...")
+    t = time.perf_counter()
     try:
         _, updatable, _ = _collect_updatable(fetch=False)
+        _dbg(f"仓库更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，可更新仓库数={len(updatable)}")
         if updatable:
             repos_str = "、".join(r.name for r in updatable)
             parts.append(UpdatePrompt.HAS_UPDATE.format(repos=repos_str))
     except Exception:
-        pass
+        _dbg(f"仓库更新检查异常，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
 
     return "\n\n".join(parts)
 
@@ -138,20 +165,46 @@ def load(keywords: tuple, debug: bool):
         driving load --debug
     """
     set_silent(not debug)
+    global _debug_enabled, _load_start
+    _debug_enabled = debug
+    _load_start = time.perf_counter()
+    _dbg(f"driving load 开始，版本={__version__}，keywords={keywords}")
     try:
         project_root = find_project_root()
         config_manager = ConfigManager(project_root)
         config = config_manager.load()
+        _dbg(f"配置加载完成，project_root={project_root}")
+
+        t = time.perf_counter()
+        skills = collect_skills(keywords)
+        _dbg(f"collect_skills 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(skills)}")
+
+        t = time.perf_counter()
+        rules = collect_rules(keywords)
+        _dbg(f"collect_rules 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(rules)}")
+
+        t = time.perf_counter()
+        repos = collect_repos(keywords)
+        _dbg(f"collect_repos 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(repos)}")
+
+        t = time.perf_counter()
+        system_prompt = _collect_repo_system_prompts()
+        _dbg(f"collect_repo_system_prompts 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，长度={len(system_prompt)}")
+
+        t = time.perf_counter()
+        notifications = _build_notifications()
+        _dbg(f"build_notifications 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
 
         result = {
             "cli_version": __version__,
-            "skills": collect_skills(keywords),
-            "rules": collect_rules(keywords),
-            "repos": collect_repos(keywords),
-            "system_prompt": _collect_repo_system_prompts(),
+            "skills": skills,
+            "rules": rules,
+            "repos": repos,
+            "system_prompt": system_prompt,
             "user_prompt": config.user_prompt,
-            "notifications": _build_notifications(),
+            "notifications": notifications,
         }
+        _dbg(f"load 全部完成，总耗时 {(time.perf_counter()-_load_start)*1000:.1f}ms")
         click.echo(json.dumps(result, ensure_ascii=False, indent=2))
     except Exception as e:
         click.echo(json.dumps({"error": str(e)}, ensure_ascii=False))
