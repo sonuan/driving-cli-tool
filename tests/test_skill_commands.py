@@ -714,6 +714,111 @@ class TestSkillListManifest:
         assert cfg.skills["enabled"] == []
 
 
+# ==================== _scan_skills_with_filter 测试 ====================
+
+
+class TestScanSkillsWithFilter:
+    """测试 _scan_skills_with_filter 的提前过滤逻辑"""
+
+    def test_enabled白名单只读指定目录(self, tmp_path):
+        """enabled 非空时，只扫描 enabled 列表中的目录"""
+        from driving_cli.commands.skill import _scan_skills_with_filter
+        skills_dir = tmp_path / "skills"
+        _make_skill_md(skills_dir / "skill-a", "skill-a", "技能 A")
+        _make_skill_md(skills_dir / "skill-b", "skill-b", "技能 B")
+        _make_skill_md(skills_dir / "skill-c", "skill-c", "技能 C")
+
+        result = _scan_skills_with_filter("main", skills_dir, enabled=["skill-a"], disabled=[])
+        assert len(result) == 1
+        assert result[0]["name"] == "skill-a"
+
+    def test_enabled白名单跳过不存在的目录(self, tmp_path):
+        """enabled 列表中不存在的技能目录应被跳过，不报错"""
+        from driving_cli.commands.skill import _scan_skills_with_filter
+        skills_dir = tmp_path / "skills"
+        _make_skill_md(skills_dir / "skill-a", "skill-a", "技能 A")
+
+        result = _scan_skills_with_filter("main", skills_dir,
+                                          enabled=["skill-a", "not-exist"], disabled=[])
+        assert len(result) == 1
+        assert result[0]["name"] == "skill-a"
+
+    def test_disabled黑名单全量扫描后排除(self, tmp_path):
+        """disabled 非空时，全量扫描后排除 disabled 列表"""
+        from driving_cli.commands.skill import _scan_skills_with_filter
+        skills_dir = tmp_path / "skills"
+        _make_skill_md(skills_dir / "skill-a", "skill-a", "技能 A")
+        _make_skill_md(skills_dir / "skill-b", "skill-b", "技能 B")
+
+        result = _scan_skills_with_filter("main", skills_dir, enabled=[], disabled=["skill-b"])
+        names = {s["name"] for s in result}
+        assert names == {"skill-a"}
+
+    def test_两者均空时全量扫描(self, tmp_path):
+        """enabled 和 disabled 均为空时，返回全量技能"""
+        from driving_cli.commands.skill import _scan_skills_with_filter
+        skills_dir = tmp_path / "skills"
+        _make_skill_md(skills_dir / "skill-a", "skill-a", "技能 A")
+        _make_skill_md(skills_dir / "skill-b", "skill-b", "技能 B")
+
+        result = _scan_skills_with_filter("main", skills_dir, enabled=[], disabled=[])
+        assert len(result) == 2
+
+
+class TestCollectSkillsBaseFilter:
+    """测试 collect_skills 优化 1：无关键词时只扫描 base 仓库"""
+
+    def _make_project(self, tmp_path, base_repo_skills, non_base_repo_skills):
+        config = {
+            "version": "2",
+            "repos": [
+                {
+                    "name": "base-repo",
+                    "type": "remote",
+                    "url": "https://example.com/base",
+                    "path": "ai-driving/base-repo",
+                    "local_path": None,
+                    "tags": ["base"],
+                },
+                {
+                    "name": "extra-repo",
+                    "type": "remote",
+                    "url": "https://example.com/extra",
+                    "path": "ai-driving/extra-repo",
+                    "local_path": None,
+                    "tags": [],
+                },
+            ],
+            "default_commit_message": "",
+            "update_version_url": "",
+        }
+        (tmp_path / "driving.config.json").write_text(
+            json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        for name in base_repo_skills:
+            _make_skill_md(tmp_path / "ai-driving" / "base-repo" / "skills" / name, name, f"{name} 描述")
+        for name in non_base_repo_skills:
+            _make_skill_md(tmp_path / "ai-driving" / "extra-repo" / "skills" / name, name, f"{name} 描述")
+        return tmp_path
+
+    def test_无关键词只返回base仓库技能(self, tmp_path):
+        """不传关键词时，非 base 仓库的技能不应出现在结果中"""
+        project = self._make_project(tmp_path, ["skill-base"], ["skill-extra"])
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            result = collect_skills()
+        names = {s["name"] for s in result}
+        assert "skill-base" in names
+        assert "skill-extra" not in names
+
+    def test_关键词匹配非base仓库(self, tmp_path):
+        """传入 repo.name 关键词时，非 base 仓库也应被扫描"""
+        project = self._make_project(tmp_path, ["skill-base"], ["skill-extra"])
+        with patch("driving_cli.commands.skill.find_project_root", return_value=project):
+            result = collect_skills(keywords=("extra-repo",))
+        names = {s["name"] for s in result}
+        assert "skill-extra" in names
+
+
 # ==================== collect_skills 测试 ====================
 
 

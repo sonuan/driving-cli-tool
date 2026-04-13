@@ -456,6 +456,44 @@ def skill_sync():
         raise click.Abort()
 
 
+def _scan_skills_with_filter(
+    repo_name: str,
+    skills_dir: Path,
+    enabled: List[str],
+    disabled: List[str],
+    quiet: bool = True,
+) -> List[Dict[str, str]]:
+    """扫描技能目录，支持提前按 enabled 白名单过滤目录，减少不必要的文件 IO。
+
+    - enabled 非空：只扫描 enabled 列表中存在的子目录
+    - disabled 非空：全量扫描后排除 disabled
+    - 两者均空：全量扫描
+    """
+    if enabled:
+        # 优化：只读 enabled 列表中的目录，跳过其他
+        skills = []
+        enabled_set = set(enabled)
+        for skill_name in sorted(enabled_set):
+            skill_dir = skills_dir / skill_name
+            if not skill_dir.is_dir():
+                continue
+            skill_md = skill_dir / "SKILL.md"
+            if not skill_md.exists():
+                continue
+            skill_info = parse_skill_yaml(skill_md)
+            if skill_info and skill_info.get("description", "").strip():
+                skill_info["path"] = f"ai-driving/{repo_name}/skills/{skill_name}/"
+                skills.append(skill_info)
+        return skills
+
+    # disabled 或全量：走原有全量扫描，再过滤
+    all_skills = scan_skills_from_dir(repo_name, skills_dir, quiet=quiet)
+    if disabled:
+        disabled_set = set(disabled)
+        all_skills = [s for s in all_skills if s["name"] not in disabled_set]
+    return all_skills
+
+
 def collect_skills(keywords: tuple = ()) -> list:
     """收集可用技能列表，供 skill load 和 driving load 复用。
 
@@ -472,22 +510,27 @@ def collect_skills(keywords: tuple = ()) -> list:
     repo_configs = config_manager.get_all_repos()
     repo_config_map = {r.name: r for r in repo_configs}
 
+    # 优化 1：无关键词时，只扫描 base 仓库，跳过非 base 仓库的文件 IO
+    if not keywords:
+        skills_dirs = [
+            (n, d) for n, d in skills_dirs
+            if "base" in ((repo_config_map.get(n) and repo_config_map[n].tags) or [])
+        ]
+
     all_skills_by_repo: dict = {}
     for repo_name, skills_dir in skills_dirs:
         rc = repo_config_map.get(repo_name)
-        repo_skills = scan_skills_from_dir(repo_name, skills_dir, quiet=True)
-        # 传入具体 skill.name 关键词时，忽略 enabled/disabled 开关，允许按名称直接加载未开启的技能
         if not keywords:
             # 优先级：driving.config.json > manifest.json > 全量加载
             effective_skills = (rc.skills if rc and rc.skills is not None
                                 else _load_manifest_skills(skills_dir.parent))
-            if effective_skills is not None:
-                enabled = effective_skills.get("enabled") or []
-                disabled = effective_skills.get("disabled") or []
-                if enabled:
-                    repo_skills = [s for s in repo_skills if s["name"] in enabled]
-                elif disabled:
-                    repo_skills = [s for s in repo_skills if s["name"] not in disabled]
+            enabled = (effective_skills or {}).get("enabled") or []
+            disabled = (effective_skills or {}).get("disabled") or []
+            # 优化 2：enabled 白名单时，提前过滤目录，减少文件 IO
+            repo_skills = _scan_skills_with_filter(repo_name, skills_dir, enabled, disabled)
+        else:
+            # 有关键词时忽略 enabled/disabled，全量扫描
+            repo_skills = scan_skills_from_dir(repo_name, skills_dir, quiet=True)
         all_skills_by_repo[repo_name] = repo_skills
 
     result: list = []
@@ -501,10 +544,7 @@ def collect_skills(keywords: tuple = ()) -> list:
 
     if not keywords:
         for repo_name, repo_skills in all_skills_by_repo.items():
-            rc = repo_config_map.get(repo_name)
-            tags = rc.tags if rc and rc.tags else []
-            if "base" in tags:
-                _add(repo_skills)
+            _add(repo_skills)
     else:
         kw_set = set(keywords)
         for repo_name, repo_skills in all_skills_by_repo.items():
