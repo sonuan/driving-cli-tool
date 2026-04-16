@@ -70,6 +70,66 @@ def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[s
     _install_local(config_mgr, project_root, local_path, repo_name, force, description)
 
 
+def _set_submodule_ignore(git_root: Path, submodule_path: str):
+    """在 .gitmodules 中为指定 submodule 补充 ignore = all
+
+    让主项目忽略 submodule 内部的变更（dirty/untracked），
+    避免主项目 git status 被 submodule 内容污染。
+
+    若该 submodule 已有 ignore 配置则跳过，不重复写入。
+    """
+    gitmodules_path = git_root / ".gitmodules"
+    if not gitmodules_path.exists():
+        return
+
+    content = gitmodules_path.read_text(encoding="utf-8")
+    lines = content.splitlines(keepends=True)
+
+    # 找到对应 submodule 块的起始行
+    # .gitmodules 格式：[submodule "path/to/sub"]
+    section_header = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[submodule") and submodule_path in stripped:
+            section_header = i
+            break
+
+    if section_header is None:
+        log_warning(f"未在 .gitmodules 中找到 submodule '{submodule_path}'，跳过 ignore 设置")
+        return
+
+    # 扫描该 section 内的所有 key，检查是否已有 ignore
+    i = section_header + 1
+    insert_pos = None
+    while i < len(lines):
+        stripped = lines[i].strip()
+        # 遇到下一个 section 则停止
+        if stripped.startswith("["):
+            insert_pos = i
+            break
+        if stripped.startswith("ignore"):
+            log_info(f"submodule '{submodule_path}' 已有 ignore 配置，跳过")
+            return
+        i += 1
+    else:
+        # 到文件末尾
+        insert_pos = len(lines)
+
+    # 在 section 末尾（下一个 section 之前）插入 ignore = all
+    # 保持与其他字段相同的缩进风格（tab 或 4 空格）
+    # 检测当前 section 内的缩进
+    indent = "\t"
+    for j in range(section_header + 1, insert_pos):
+        if lines[j].strip() and not lines[j].startswith("["):
+            indent = lines[j][: len(lines[j]) - len(lines[j].lstrip())]
+            break
+
+    ignore_line = f"{indent}ignore = all\n"
+    lines.insert(insert_pos, ignore_line)
+    gitmodules_path.write_text("".join(lines), encoding="utf-8")
+    log_info(f"已为 submodule '{submodule_path}' 设置 ignore = all")
+
+
 def _cleanup_stale_git_modules(git_root: Path, submodule_path: str):
     """清理残留的 .git/modules 数据
 
@@ -159,6 +219,7 @@ def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
                 # 确保父目录存在
                 (git_root / submodule_path).parent.mkdir(parents=True, exist_ok=True)
                 git_repo.git.submodule("add", repo_cfg.url, submodule_path)
+                _set_submodule_ignore(git_root, submodule_path)
                 log_success(f"仓库 '{repo_cfg.name}' 添加并初始化成功")
                 initialized_count += 1
             except git.exc.GitCommandError as e:
@@ -221,6 +282,9 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
     except git.exc.GitCommandError as e:
         log_error(f"添加 submodule 失败: {e}")
         raise click.Abort()
+
+    # 补充 ignore = all，让主项目忽略 submodule 内部变更
+    _set_submodule_ignore(git_root, submodule_path)
 
     # 写入配置
     repo_cfg = RepoConfig(

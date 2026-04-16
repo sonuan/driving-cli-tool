@@ -12,7 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from driving_cli.cli import cli
-from driving_cli.commands.repo import _resolve_repos, repo_group
+from driving_cli.commands.repo import _resolve_repos, _set_submodule_ignore, repo_group
 from driving_cli.models.config import DrivingConfig, RepoConfig
 from driving_cli.utils.config_manager import ConfigManager
 
@@ -204,6 +204,129 @@ class TestRepoInstall:
         assert result.exit_code == 0
         # 应调用 submodule update --init
         mock_git_repo.git.submodule.assert_called_once_with("update", "--init", "ai-driving/main")
+
+    def test_install_remote_sets_ignore_all(self, runner, tmp_project, config_mgr):
+        """--url 安装 submodule 后，.gitmodules 中应补充 ignore = all"""
+        gitmodules = tmp_project / ".gitmodules"
+        gitmodules.write_text(
+            '[submodule "ai-driving/myrepo"]\n'
+            '\tpath = ai-driving/myrepo\n'
+            '\turl = https://github.com/org/myrepo.git\n',
+            encoding="utf-8",
+        )
+
+        mock_git_repo = MagicMock()
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.git.Repo", return_value=mock_git_repo):
+            result = runner.invoke(repo_group, [
+                "install", "--url", "https://github.com/org/myrepo.git", "--name", "myrepo"
+            ])
+
+        assert result.exit_code == 0
+        content = gitmodules.read_text(encoding="utf-8")
+        assert "ignore = all" in content
+
+    def test_install_no_args_submodule_add_sets_ignore_all(self, runner, tmp_project, config_mgr):
+        """无参数 install 走 submodule add 路径时，.gitmodules 中应补充 ignore = all"""
+        config_mgr.add_repo(RepoConfig(
+            name="main", type="remote",
+            url="https://github.com/org/repo.git",
+            path="ai-driving/main",
+        ))
+        gitmodules = tmp_project / ".gitmodules"
+        gitmodules.write_text(
+            '[submodule "ai-driving/main"]\n'
+            '\tpath = ai-driving/main\n'
+            '\turl = https://github.com/org/repo.git\n',
+            encoding="utf-8",
+        )
+
+        mock_git_repo = MagicMock()
+        # 让 submodule update --init 失败（抛 GitCommandError），触发 submodule add 路径
+        import git as _git
+        mock_git_repo.git.submodule.side_effect = [
+            _git.exc.GitCommandError("submodule", 128),  # update --init 失败
+            None,                                          # submodule add 成功
+        ]
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.git.Repo", return_value=mock_git_repo), \
+             patch("driving_cli.commands.repo._cleanup_stale_git_modules"):
+            runner.invoke(repo_group, ["install"])
+
+        content = gitmodules.read_text(encoding="utf-8")
+        assert "ignore = all" in content
+
+
+# ==================== _set_submodule_ignore 单元测试 ====================
+
+class TestSetSubmoduleIgnore:
+    def test_adds_ignore_all(self, tmp_path):
+        """正常情况：为 submodule 块末尾插入 ignore = all"""
+        gitmodules = tmp_path / ".gitmodules"
+        gitmodules.write_text(
+            '[submodule "ai-driving/foo"]\n'
+            '\tpath = ai-driving/foo\n'
+            '\turl = https://github.com/org/foo.git\n',
+            encoding="utf-8",
+        )
+        _set_submodule_ignore(tmp_path, "ai-driving/foo")
+        content = gitmodules.read_text(encoding="utf-8")
+        assert "ignore = all" in content
+
+    def test_idempotent_when_ignore_exists(self, tmp_path):
+        """已有 ignore 配置时不重复写入"""
+        original = (
+            '[submodule "ai-driving/foo"]\n'
+            '\tpath = ai-driving/foo\n'
+            '\turl = https://github.com/org/foo.git\n'
+            '\tignore = all\n'
+        )
+        gitmodules = tmp_path / ".gitmodules"
+        gitmodules.write_text(original, encoding="utf-8")
+        _set_submodule_ignore(tmp_path, "ai-driving/foo")
+        assert gitmodules.read_text(encoding="utf-8").count("ignore") == 1
+
+    def test_only_affects_target_submodule(self, tmp_path):
+        """多个 submodule 时只修改目标块"""
+        gitmodules = tmp_path / ".gitmodules"
+        gitmodules.write_text(
+            '[submodule "ai-driving/foo"]\n'
+            '\tpath = ai-driving/foo\n'
+            '\turl = https://github.com/org/foo.git\n'
+            '[submodule "ai-driving/bar"]\n'
+            '\tpath = ai-driving/bar\n'
+            '\turl = https://github.com/org/bar.git\n',
+            encoding="utf-8",
+        )
+        _set_submodule_ignore(tmp_path, "ai-driving/foo")
+        content = gitmodules.read_text(encoding="utf-8")
+        lines = content.splitlines()
+        # ignore 应出现在 foo 块内，bar 块内不应有
+        foo_idx = next(i for i, l in enumerate(lines) if "foo" in l and l.startswith("["))
+        bar_idx = next(i for i, l in enumerate(lines) if "bar" in l and l.startswith("["))
+        foo_block = lines[foo_idx:bar_idx]
+        bar_block = lines[bar_idx:]
+        assert any("ignore = all" in l for l in foo_block)
+        assert not any("ignore" in l for l in bar_block)
+
+    def test_no_gitmodules_file(self, tmp_path):
+        """不存在 .gitmodules 时静默跳过，不报错"""
+        _set_submodule_ignore(tmp_path, "ai-driving/foo")  # 不应抛异常
+
+    def test_submodule_not_found(self, tmp_path):
+        """submodule 不在 .gitmodules 中时静默跳过"""
+        gitmodules = tmp_path / ".gitmodules"
+        gitmodules.write_text(
+            '[submodule "ai-driving/other"]\n'
+            '\tpath = ai-driving/other\n'
+            '\turl = https://github.com/org/other.git\n',
+            encoding="utf-8",
+        )
+        _set_submodule_ignore(tmp_path, "ai-driving/foo")
+        content = gitmodules.read_text(encoding="utf-8")
+        assert "ignore" not in content
 
 
 # ==================== repo uninstall 测试 ====================
