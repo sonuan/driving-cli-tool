@@ -70,64 +70,63 @@ def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[s
     _install_local(config_mgr, project_root, local_path, repo_name, force, description)
 
 
-def _set_submodule_ignore(git_root: Path, submodule_path: str):
-    """在 .gitmodules 中为指定 submodule 补充 ignore = all
+def _set_submodule_config(git_root: Path, submodule_path: str, key: str, value: str):
+    """在 .gitmodules 中为指定 submodule 设置任意 key = value
 
-    让主项目忽略 submodule 内部的变更（dirty/untracked），
-    避免主项目 git status 被 submodule 内容污染。
-
-    若该 submodule 已有 ignore 配置则跳过，不重复写入。
+    若该 key 已存在则跳过（幂等），不存在则追加到 section 末尾。
+    缩进风格自动跟随文件现有风格。
     """
     gitmodules_path = git_root / ".gitmodules"
     if not gitmodules_path.exists():
         return
 
-    content = gitmodules_path.read_text(encoding="utf-8")
-    lines = content.splitlines(keepends=True)
+    lines = gitmodules_path.read_text(encoding="utf-8").splitlines(keepends=True)
 
-    # 找到对应 submodule 块的起始行
-    # .gitmodules 格式：[submodule "path/to/sub"]
+    # 定位目标 submodule 块
     section_header = None
     for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("[submodule") and submodule_path in stripped:
+        if line.strip().startswith("[submodule") and submodule_path in line:
             section_header = i
             break
 
     if section_header is None:
-        log_warning(f"未在 .gitmodules 中找到 submodule '{submodule_path}'，跳过 ignore 设置")
+        log_warning(f"未在 .gitmodules 中找到 submodule '{submodule_path}'，跳过 {key} 设置")
         return
 
-    # 扫描该 section 内的所有 key，检查是否已有 ignore
+    # 扫描 section 内容，检查 key 是否已存在
     i = section_header + 1
-    insert_pos = None
+    insert_pos = len(lines)
     while i < len(lines):
         stripped = lines[i].strip()
-        # 遇到下一个 section 则停止
         if stripped.startswith("["):
             insert_pos = i
             break
-        if stripped.startswith("ignore"):
-            log_info(f"submodule '{submodule_path}' 已有 ignore 配置，跳过")
+        # key 匹配：去掉空格后以 "key" 或 "key=" 开头
+        if stripped == key or stripped.startswith(f"{key}=") or stripped.startswith(f"{key} ="):
+            log_info(f"submodule '{submodule_path}' 已有 {key} 配置，跳过")
             return
         i += 1
-    else:
-        # 到文件末尾
-        insert_pos = len(lines)
 
-    # 在 section 末尾（下一个 section 之前）插入 ignore = all
-    # 保持与其他字段相同的缩进风格（tab 或 4 空格）
-    # 检测当前 section 内的缩进
+    # 检测缩进风格
     indent = "\t"
     for j in range(section_header + 1, insert_pos):
         if lines[j].strip() and not lines[j].startswith("["):
             indent = lines[j][: len(lines[j]) - len(lines[j].lstrip())]
             break
 
-    ignore_line = f"{indent}ignore = all\n"
-    lines.insert(insert_pos, ignore_line)
+    lines.insert(insert_pos, f"{indent}{key} = {value}\n")
     gitmodules_path.write_text("".join(lines), encoding="utf-8")
-    log_info(f"已为 submodule '{submodule_path}' 设置 ignore = all")
+    log_info(f"已为 submodule '{submodule_path}' 设置 {key} = {value}")
+
+
+def _set_submodule_ignore(git_root: Path, submodule_path: str):
+    """为 submodule 设置 ignore = all 和 fetchRecurseSubmodules = false
+
+    - ignore = all：主项目 git status/diff 不显示 submodule 变更
+    - fetchRecurseSubmodules = false：主项目 fetch/pull 不自动拉取 submodule 远端
+    """
+    _set_submodule_config(git_root, submodule_path, "ignore", "all")
+    _set_submodule_config(git_root, submodule_path, "fetchRecurseSubmodules", "false")
 
 
 def _cleanup_stale_git_modules(git_root: Path, submodule_path: str):
@@ -265,7 +264,6 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
 
     git_repo = git.Repo(git_root)
     install_path = f"ai-driving/{repo_name}"
-    abs_install_path = project_root / "ai-driving" / repo_name
 
     # 计算相对于 git 根目录的路径（submodule 路径需相对于 git 根目录）
     try:
@@ -277,11 +275,33 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
     log_info(f"正在添加远程仓库 '{repo_name}'...")
     log_info(f"仓库地址：{url}")
 
+    # 清理残留的工作目录，避免 "destination path already exists" 报错
+    abs_install_path = project_root / "ai-driving" / repo_name
+    if abs_install_path.exists() and not abs_install_path.is_symlink():
+        import shutil
+        log_warning(f"检测到残留工作目录：{submodule_path}，正在清理...")
+        shutil.rmtree(abs_install_path)
+        log_info(f"已清理：{submodule_path}")
+
+    # 清理残留的 .git/modules 数据（需在工作目录清理后执行，确保触发条件满足）
+    _cleanup_stale_git_modules(git_root, submodule_path)
+
+    log_info("正在 clone 远程仓库，请稍候...")
     try:
-        git_repo.create_submodule(submodule_path, submodule_path, url=url)
+        git_repo.git.submodule("add", "--force", url, submodule_path)
     except git.exc.GitCommandError as e:
-        log_error(f"添加 submodule 失败: {e}")
-        raise click.Abort()
+        err_str = str(e)
+        # 主仓库尚无 commit 时，checkout 会失败，改用 --no-checkout 跳过
+        if "yet to be born" in err_str or "unable to checkout" in err_str:
+            log_warning("主仓库尚无 commit，使用 --no-checkout 模式添加 submodule")
+            try:
+                git_repo.git.submodule("add", "--force", "--no-checkout", url, submodule_path)
+            except git.exc.GitCommandError as e2:
+                log_error(f"添加 submodule 失败: {e2}")
+                raise click.Abort()
+        else:
+            log_error(f"添加 submodule 失败: {e}")
+            raise click.Abort()
 
     # 补充 ignore = all，让主项目忽略 submodule 内部变更
     _set_submodule_ignore(git_root, submodule_path)

@@ -12,7 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from driving_cli.cli import cli
-from driving_cli.commands.repo import _resolve_repos, _set_submodule_ignore, repo_group
+from driving_cli.commands.repo import _resolve_repos, _set_submodule_config, _set_submodule_ignore, repo_group
 from driving_cli.models.config import DrivingConfig, RepoConfig
 from driving_cli.utils.config_manager import ConfigManager
 
@@ -226,9 +226,10 @@ class TestRepoInstall:
         assert result.exit_code == 0
         content = gitmodules.read_text(encoding="utf-8")
         assert "ignore = all" in content
+        assert "fetchRecurseSubmodules = false" in content
 
     def test_install_no_args_submodule_add_sets_ignore_all(self, runner, tmp_project, config_mgr):
-        """无参数 install 走 submodule add 路径时，.gitmodules 中应补充 ignore = all"""
+        """无参数 install 走 submodule add 路径时，.gitmodules 中应补充 ignore = all 和 fetchRecurseSubmodules"""
         config_mgr.add_repo(RepoConfig(
             name="main", type="remote",
             url="https://github.com/org/repo.git",
@@ -257,13 +258,14 @@ class TestRepoInstall:
 
         content = gitmodules.read_text(encoding="utf-8")
         assert "ignore = all" in content
+        assert "fetchRecurseSubmodules = false" in content
 
 
 # ==================== _set_submodule_ignore 单元测试 ====================
 
 class TestSetSubmoduleIgnore:
     def test_adds_ignore_all(self, tmp_path):
-        """正常情况：为 submodule 块末尾插入 ignore = all"""
+        """正常情况：为 submodule 块末尾插入 ignore = all 和 fetchRecurseSubmodules = false"""
         gitmodules = tmp_path / ".gitmodules"
         gitmodules.write_text(
             '[submodule "ai-driving/foo"]\n'
@@ -274,6 +276,7 @@ class TestSetSubmoduleIgnore:
         _set_submodule_ignore(tmp_path, "ai-driving/foo")
         content = gitmodules.read_text(encoding="utf-8")
         assert "ignore = all" in content
+        assert "fetchRecurseSubmodules = false" in content
 
     def test_idempotent_when_ignore_exists(self, tmp_path):
         """已有 ignore 配置时不重复写入"""
@@ -282,11 +285,13 @@ class TestSetSubmoduleIgnore:
             '\tpath = ai-driving/foo\n'
             '\turl = https://github.com/org/foo.git\n'
             '\tignore = all\n'
+            '\tfetchRecurseSubmodules = false\n'
         )
         gitmodules = tmp_path / ".gitmodules"
         gitmodules.write_text(original, encoding="utf-8")
         _set_submodule_ignore(tmp_path, "ai-driving/foo")
         assert gitmodules.read_text(encoding="utf-8").count("ignore") == 1
+        assert gitmodules.read_text(encoding="utf-8").count("fetchRecurseSubmodules") == 1
 
     def test_only_affects_target_submodule(self, tmp_path):
         """多个 submodule 时只修改目标块"""
@@ -303,7 +308,6 @@ class TestSetSubmoduleIgnore:
         _set_submodule_ignore(tmp_path, "ai-driving/foo")
         content = gitmodules.read_text(encoding="utf-8")
         lines = content.splitlines()
-        # ignore 应出现在 foo 块内，bar 块内不应有
         foo_idx = next(i for i, l in enumerate(lines) if "foo" in l and l.startswith("["))
         bar_idx = next(i for i, l in enumerate(lines) if "bar" in l and l.startswith("["))
         foo_block = lines[foo_idx:bar_idx]
@@ -313,7 +317,7 @@ class TestSetSubmoduleIgnore:
 
     def test_no_gitmodules_file(self, tmp_path):
         """不存在 .gitmodules 时静默跳过，不报错"""
-        _set_submodule_ignore(tmp_path, "ai-driving/foo")  # 不应抛异常
+        _set_submodule_ignore(tmp_path, "ai-driving/foo")
 
     def test_submodule_not_found(self, tmp_path):
         """submodule 不在 .gitmodules 中时静默跳过"""
@@ -327,6 +331,65 @@ class TestSetSubmoduleIgnore:
         _set_submodule_ignore(tmp_path, "ai-driving/foo")
         content = gitmodules.read_text(encoding="utf-8")
         assert "ignore" not in content
+
+
+# ==================== _set_submodule_config 单元测试 ====================
+
+class TestSetSubmoduleConfig:
+    def _make_gitmodules(self, tmp_path, content):
+        f = tmp_path / ".gitmodules"
+        f.write_text(content, encoding="utf-8")
+        return f
+
+    def test_adds_new_key(self, tmp_path):
+        """正常写入新 key"""
+        f = self._make_gitmodules(tmp_path,
+            '[submodule "ai-driving/foo"]\n'
+            '\tpath = ai-driving/foo\n'
+            '\turl = https://github.com/org/foo.git\n'
+        )
+        _set_submodule_config(tmp_path, "ai-driving/foo", "mykey", "myval")
+        assert "mykey = myval" in f.read_text(encoding="utf-8")
+
+    def test_idempotent(self, tmp_path):
+        """key 已存在时不重复写入"""
+        f = self._make_gitmodules(tmp_path,
+            '[submodule "ai-driving/foo"]\n'
+            '\tpath = ai-driving/foo\n'
+            '\tmykey = myval\n'
+        )
+        _set_submodule_config(tmp_path, "ai-driving/foo", "mykey", "myval")
+        assert f.read_text(encoding="utf-8").count("mykey") == 1
+
+    def test_preserves_other_sections(self, tmp_path):
+        """不影响其他 submodule 块"""
+        f = self._make_gitmodules(tmp_path,
+            '[submodule "ai-driving/foo"]\n'
+            '\tpath = ai-driving/foo\n'
+            '\turl = https://github.com/org/foo.git\n'
+            '[submodule "ai-driving/bar"]\n'
+            '\tpath = ai-driving/bar\n'
+            '\turl = https://github.com/org/bar.git\n'
+        )
+        _set_submodule_config(tmp_path, "ai-driving/foo", "mykey", "myval")
+        content = f.read_text(encoding="utf-8")
+        lines = content.splitlines()
+        bar_idx = next(i for i, l in enumerate(lines) if "bar" in l and l.startswith("["))
+        bar_block = lines[bar_idx:]
+        assert not any("mykey" in l for l in bar_block)
+
+    def test_no_gitmodules(self, tmp_path):
+        """文件不存在时静默跳过"""
+        _set_submodule_config(tmp_path, "ai-driving/foo", "k", "v")
+
+    def test_submodule_not_found(self, tmp_path):
+        """submodule 不存在时静默跳过"""
+        f = self._make_gitmodules(tmp_path,
+            '[submodule "ai-driving/other"]\n'
+            '\tpath = ai-driving/other\n'
+        )
+        _set_submodule_config(tmp_path, "ai-driving/foo", "k", "v")
+        assert "k = v" not in f.read_text(encoding="utf-8")
 
 
 # ==================== repo uninstall 测试 ====================
