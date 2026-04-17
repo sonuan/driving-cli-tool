@@ -417,6 +417,99 @@ class TestSetSubmoduleConfig:
         assert "k = v" not in f.read_text(encoding="utf-8")
 
 
+# ==================== _migrate_local_to_remote 单元测试 ====================
+
+class TestMigrateLocalToRemote:
+    def test_migrate_confirms_and_pushes(self, runner, tmp_project, config_mgr, tmp_path):
+        """检测到 local 仓库时，用户确认后执行推送并切换为 submodule"""
+        import git as _git
+
+        # 创建本地 git 仓库
+        src_dir = tmp_path / "my-local"
+        src_dir.mkdir()
+        local_repo = _git.Repo.init(src_dir)
+        (src_dir / "README.md").write_text("hello")
+        local_repo.index.add(["README.md"])
+        local_repo.index.commit("init")
+
+        # 注册为 local 仓库
+        config_mgr.add_repo(RepoConfig(
+            name="my-local", type="local",
+            url=None, path="ai-driving/my-local",
+            local_path=str(src_dir),
+        ))
+        install_dir = tmp_project / "ai-driving" / "my-local"
+        install_dir.parent.mkdir(parents=True, exist_ok=True)
+        install_dir.symlink_to(src_dir)
+
+        mock_git_repo = MagicMock()
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.git.Repo", return_value=mock_git_repo):
+            result = runner.invoke(repo_group, [
+                "install", "--url", "https://github.com/org/my-local.git", "--name", "my-local"
+            ], input="y\n")
+
+        assert "检测到本地仓库" in result.output
+
+    def test_migrate_aborts_on_no(self, runner, tmp_project, config_mgr, tmp_path):
+        """用户拒绝时中止，不执行任何操作"""
+        src_dir = tmp_path / "my-local"
+        src_dir.mkdir()
+
+        config_mgr.add_repo(RepoConfig(
+            name="my-local", type="local",
+            url=None, path="ai-driving/my-local",
+            local_path=str(src_dir),
+        ))
+
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = runner.invoke(repo_group, [
+                "install", "--url", "https://github.com/org/my-local.git", "--name", "my-local"
+            ], input="n\n")
+
+        assert result.exit_code != 0
+        # 配置中仍保留 local 仓库
+        assert config_mgr.get_repo("my-local") is not None
+
+    def test_migrate_skips_push_if_no_git(self, runner, tmp_project, config_mgr, tmp_path):
+        """本地目录不是 git 仓库时，自动 init + commit 后继续推送"""
+        import git as _git
+
+        src_dir = tmp_path / "my-local"
+        src_dir.mkdir()
+        (src_dir / "README.md").write_text("hello")  # 有内容可提交
+
+        config_mgr.add_repo(RepoConfig(
+            name="my-local", type="local",
+            url=None, path="ai-driving/my-local",
+            local_path=str(src_dir),
+        ))
+        install_dir = tmp_project / "ai-driving" / "my-local"
+        install_dir.parent.mkdir(parents=True, exist_ok=True)
+        install_dir.symlink_to(src_dir)
+
+        mock_git_repo = MagicMock()
+        real_git_repo = _git.Repo  # 保存真实引用，避免 patch 后递归
+
+        def fake_repo(path=None, *args, **kwargs):
+            # 主仓库用 mock，local_dir 用真实 git.Repo
+            if path is not None and str(path) == str(src_dir):
+                return real_git_repo(path)
+            return mock_git_repo
+
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.git.Repo", side_effect=fake_repo), \
+             patch("driving_cli.commands.repo.git.Repo.init", side_effect=real_git_repo.init):
+            result = runner.invoke(repo_group, [
+                "install", "--url", "https://github.com/org/my-local.git", "--name", "my-local"
+            ], input="y\n")
+
+        # 自动初始化后 src_dir 应成为 git 仓库
+        assert "自动初始化" in result.output
+
+
 # ==================== repo uninstall 测试 ====================
 
 class TestRepoUninstall:

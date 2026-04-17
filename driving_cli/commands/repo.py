@@ -227,6 +227,94 @@ def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
     log_info(f"完成：初始化 {initialized_count} 个，跳过 {skipped_count} 个")
 
 
+def _migrate_local_to_remote(config_mgr: ConfigManager, project_root: Path, repo_cfg: "RepoConfig", remote_url: str):
+    """将本地仓库迁移到远程：添加 remote origin 并推送，再清理本地目录
+
+    迁移步骤：
+    1. 找到本地仓库目录（软链接指向的真实路径或普通目录）
+    2. 添加 remote origin（若已存在则跳过）
+    3. 推送当前分支到远程
+    4. 仅推送成功后才删除本地目录，为后续 submodule add 腾出位置
+    """
+    # 确定本地仓库的真实路径
+    if repo_cfg.local_path:
+        local_dir = Path(repo_cfg.local_path)
+    else:
+        local_dir = project_root / repo_cfg.path
+        if local_dir.is_symlink():
+            local_dir = local_dir.resolve()
+
+    if not local_dir.exists():
+        log_warning(f"本地仓库目录不存在：{local_dir}，跳过推送步骤")
+        return
+
+    try:
+        local_repo = git.Repo(local_dir)
+    except git.exc.InvalidGitRepositoryError:
+        # 不是 git 仓库，自动初始化并提交所有内容
+        log_info(f"'{local_dir}' 不是 git 仓库，自动执行 git init + commit...")
+        try:
+            local_repo = git.Repo.init(local_dir)
+            # 写入 .gitignore 排除嵌套 .git 目录，避免 GitLab fsck 拒绝
+            gitignore = local_dir / ".gitignore"
+            ignore_content = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+            if ".git" not in ignore_content:
+                with open(gitignore, "a", encoding="utf-8") as f:
+                    f.write("\n# auto-added by driving\n**/.git\n")
+            files_to_add = [
+                str(p.relative_to(local_dir))
+                for p in local_dir.rglob("*")
+                if p.is_file() and ".git" not in p.parts
+            ]
+            if files_to_add:
+                local_repo.index.add(files_to_add)
+            local_repo.index.commit("init by driving")
+            log_success("已自动初始化并提交本地内容")
+        except Exception as e:
+            log_error(f"自动初始化失败: {e}")
+            raise click.Abort()
+
+    # 添加或更新 remote origin
+    try:
+        if "origin" in [r.name for r in local_repo.remotes]:
+            local_repo.remotes.origin.set_url(remote_url)
+            log_info(f"已更新 remote origin：{remote_url}")
+        else:
+            local_repo.create_remote("origin", remote_url)
+            log_info(f"已添加 remote origin：{remote_url}")
+    except Exception as e:
+        log_error(f"设置 remote 失败: {e}")
+        raise click.Abort()
+
+    # 推送当前分支
+    if local_repo.head.is_detached or not local_repo.head.is_valid():
+        log_error("本地仓库无有效分支，无法推送，请先提交内容后再迁移")
+        raise click.Abort()
+
+    try:
+        branch = local_repo.active_branch.name
+        log_info(f"正在推送分支 '{branch}' 到远程，请稍候...")
+        push_infos = local_repo.remotes.origin.push(refspec=f"{branch}:{branch}", set_upstream=True)
+        # 检查推送结果，gitpython 在某些错误下不抛异常，需手动检查 flags
+        for info in push_infos:
+            if info.flags & info.ERROR:
+                log_error(f"推送失败：{info.summary.strip()}")
+                raise click.Abort()
+        log_success(f"推送成功：{branch} → {remote_url}")
+    except git.exc.GitCommandError as e:
+        log_error(f"推送失败: {e}")
+        raise click.Abort()
+
+    # 仅推送成功后才清理本地目录/软链接，为 submodule add 腾出位置
+    install_dir = project_root / repo_cfg.path
+    if install_dir.is_symlink():
+        install_dir.unlink()
+    elif install_dir.exists():
+        import shutil
+        shutil.rmtree(install_dir)
+    log_info(f"已清理本地目录：{repo_cfg.path}")
+
+
 def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, repo_name: Optional[str], force: bool, description: Optional[str] = None):
     """安装远程 Git 仓库（submodule）"""
     # 校验 Git URL 格式
@@ -246,10 +334,18 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
     # 检查名称是否已存在
     existing = config_mgr.get_repo(repo_name)
     if existing is not None:
-        if not force:
+        if existing.type == "local" and not force:
+            # 本地仓库迁移到远程：提示用户确认
+            log_info(f"检测到本地仓库 '{repo_name}'，将推送内容到远程并切换为 submodule")
+            confirmed = click.confirm("是否继续？", default=False)
+            if not confirmed:
+                raise click.Abort()
+            _migrate_local_to_remote(config_mgr, project_root, existing, url)
+        elif not force:
             log_error(f"仓库 '{repo_name}' 已存在，使用 --force 覆盖")
             raise click.Abort()
-        log_warning(f"强制覆盖已存在的仓库 '{repo_name}'")
+        else:
+            log_warning(f"强制覆盖已存在的仓库 '{repo_name}'")
         try:
             config_mgr.remove_repo(repo_name)
         except ValueError:
