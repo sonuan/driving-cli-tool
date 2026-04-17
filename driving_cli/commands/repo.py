@@ -291,13 +291,14 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
         git_repo.git.submodule("add", "--force", url, submodule_path)
     except git.exc.GitCommandError as e:
         err_str = str(e)
-        # 主仓库尚无 commit 时，checkout 会失败，改用 --no-checkout 跳过
+        # 主仓库尚无 commit 时，checkout 步骤会失败，但 clone 和 .gitmodules 写入已完成。
+        # 检查 .gitmodules 中是否已有该 submodule 条目来判断 add 是否实际成功。
         if "yet to be born" in err_str or "unable to checkout" in err_str:
-            log_warning("主仓库尚无 commit，使用 --no-checkout 模式添加 submodule")
-            try:
-                git_repo.git.submodule("add", "--force", "--no-checkout", url, submodule_path)
-            except git.exc.GitCommandError as e2:
-                log_error(f"添加 submodule 失败: {e2}")
+            gitmodules_path = git_root / ".gitmodules"
+            if gitmodules_path.exists() and submodule_path in gitmodules_path.read_text(encoding="utf-8"):
+                log_warning("主仓库尚无 commit，submodule 已注册但暂未 checkout，后续执行 'driving repo install' 可完成初始化")
+            else:
+                log_error(f"添加 submodule 失败: {e}")
                 raise click.Abort()
         else:
             log_error(f"添加 submodule 失败: {e}")

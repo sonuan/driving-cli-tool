@@ -228,6 +228,31 @@ class TestRepoInstall:
         assert "ignore = all" in content
         assert "fetchRecurseSubmodules = false" in content
 
+    def test_install_remote_yet_to_be_born(self, runner, tmp_project, config_mgr):
+        """主仓库无 commit 时，checkout 失败但 .gitmodules 已写入，应视为成功"""
+        import git as _git
+        gitmodules = tmp_project / ".gitmodules"
+        gitmodules.write_text(
+            '[submodule "ai-driving/myrepo"]\n'
+            '\tpath = ai-driving/myrepo\n'
+            '\turl = https://github.com/org/myrepo.git\n',
+            encoding="utf-8",
+        )
+
+        mock_git_repo = MagicMock()
+        mock_git_repo.git.submodule.side_effect = _git.exc.GitCommandError(
+            "submodule", 128, stderr="fatal: You are on a branch yet to be born"
+        )
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.git.Repo", return_value=mock_git_repo):
+            result = runner.invoke(repo_group, [
+                "install", "--url", "https://github.com/org/myrepo.git", "--name", "myrepo"
+            ])
+
+        assert result.exit_code == 0
+        assert "尚无 commit" in result.output
+
     def test_install_no_args_submodule_add_sets_ignore_all(self, runner, tmp_project, config_mgr):
         """无参数 install 走 submodule add 路径时，.gitmodules 中应补充 ignore = all 和 fetchRecurseSubmodules"""
         config_mgr.add_repo(RepoConfig(
