@@ -268,7 +268,7 @@ def _migrate_local_to_remote(config_mgr: ConfigManager, project_root: Path, repo
             ]
             if files_to_add:
                 local_repo.index.add(files_to_add)
-            local_repo.index.commit("init by driving")
+            local_repo.index.commit("init by driving cli")
             log_success("已自动初始化并提交本地内容")
         except Exception as e:
             log_error(f"自动初始化失败: {e}")
