@@ -1,19 +1,19 @@
 {
-  "version": "1.1.1",
-  "build_date": "2026-04-13T11:58:10+08:00",
+  "version": "1.1.2",
+  "build_date": "2026-04-20T16:29:22+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
-      "v1.1.1 新增manifest.json配置管控skills、rules、agents",
-      "feat：优化仓库更新检测的耗时",
-      "feat：driving load --debug添加关键日志和时间戳",
-      "feat：添加2个字段说明",
-      "feat: 优化driving rule和agent支持manifest.json控制",
-      "feat: 优化driving skill的性能",
-      "feat：支持manifest.json配置skills，优先级比driving.config.json里的低。",
-      "v1.1.0",
-      "feat：driving cli更新提醒，加上sudo",
-      "feat：1.0.9 driving cli更新提醒不需要sudo就可以更新"
+      "v1.1.2",
+      "feat：driving load 新增参数 --with framework,agent，支持返回frameworks和agents",
+      "feat：新增framework load命令",
+      "feat: driving repo 优化一个文案",
+      "feat：repo install 支持 local 切换到 remote，并提交到空git中",
+      "feat：解决repo install 空仓库时可能出现的报错",
+      "feat: repo install 添加到.gitmodules中的配置添加上 fetchRecurseSubmodules = false",
+      "feat: repo install 添加到.gitmodules中的配置添加上 ignore = all",
+      "v1.1.1",
+      "v1.1.1 新增manifest.json配置管控skills、rules、agents"
   ]
 }
