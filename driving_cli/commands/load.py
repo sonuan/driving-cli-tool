@@ -25,6 +25,7 @@ def _dbg(msg: str) -> None:
 
 
 from driving_cli.commands.agent import collect_agents
+from driving_cli.commands.framework import collect_frameworks
 from driving_cli.commands.repo import collect_repos
 from driving_cli.commands.check import _collect_updatable
 from driving_cli.commands.rule import collect_rules
@@ -152,28 +153,37 @@ def _build_notifications() -> str:
 @click.command("load")
 @click.argument("keywords", nargs=-1, required=False)
 @click.option("--debug", is_flag=True, default=False, help="输出调试日志")
-def load(keywords: tuple, debug: bool):
+@click.option("--with", "with_modules", default="", metavar="MODULES",
+              help="附带额外模块，逗号分隔，可选值：framework, agent")
+def load(keywords: tuple, debug: bool, with_modules: str):
     """一次性输出所有上下文数据（skills、rules、repos、prompts），供 AI 会话注入
 
     不传参数时加载 tags=base 的仓库内容。
     传入 repo-name 时只加载匹配仓库的 skills/rules。
+    使用 --with 附带额外模块（framework、agent），关键词同样生效。
 
     示例：
         driving load
         driving load f-message
-        driving load f-message f-qucall
+        driving load --with framework
+        driving load --with framework,agent
+        driving load driving --with framework,agent
+        driving load xstatic --with framework
         driving load --debug
     """
     set_silent(not debug)
     global _debug_enabled, _load_start
     _debug_enabled = debug
     _load_start = time.perf_counter()
-    _dbg(f"driving load 开始，版本={__version__}，keywords={keywords}")
+    _dbg(f"driving load 开始，版本={__version__}，keywords={keywords}，with={with_modules}")
     try:
         project_root = find_project_root()
         config_manager = ConfigManager(project_root)
         config = config_manager.load()
         _dbg(f"配置加载完成，project_root={project_root}")
+
+        # 解析 --with 模块列表
+        modules = {m.strip().lower() for m in with_modules.split(",") if m.strip()}
 
         t = time.perf_counter()
         skills = collect_skills(keywords)
@@ -195,15 +205,32 @@ def load(keywords: tuple, debug: bool):
         notifications = _build_notifications()
         _dbg(f"build_notifications 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
 
+        frameworks = None
+        if "framework" in modules:
+            t = time.perf_counter()
+            frameworks = collect_frameworks(keywords)
+            _dbg(f"collect_frameworks 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(frameworks)}")
+
+        agents_data = None
+        if "agent" in modules:
+            t = time.perf_counter()
+            agents_data = collect_agents(keywords)
+            _dbg(f"collect_agents 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(agents_data)}")
+
         result = {
             "cli_version": __version__,
             "skills": skills,
             "rules": rules,
             "repos": repos,
-            "system_prompt": system_prompt,
-            "user_prompt": config.user_prompt,
-            "notifications": notifications,
         }
+        if frameworks is not None:
+            result["frameworks"] = frameworks
+        if agents_data is not None:
+            result["agents"] = agents_data
+        result["system_prompt"] = system_prompt
+        result["user_prompt"] = config.user_prompt
+        result["notifications"] = notifications
+
         _dbg(f"load 全部完成，总耗时 {(time.perf_counter()-_load_start)*1000:.1f}ms")
         click.echo(json.dumps(result, ensure_ascii=False, indent=2))
     except Exception as e:

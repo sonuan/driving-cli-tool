@@ -516,6 +516,75 @@ def _parse_yaml_frontmatter(content: str) -> Dict[str, str]:
     return result
 
 
+def collect_frameworks(keywords: tuple = ()) -> List[Dict]:
+    """收集框架文档元信息，供 framework load 和 driving load 复用。
+
+    不传关键词时，加载所有仓库的框架文档。
+    传入关键词时，按 repo.name 或 framework.name 精确匹配（取并集）。
+
+    Args:
+        keywords: 过滤关键词，支持仓库名或框架名
+
+    Returns:
+        List[Dict]: 框架列表，每项包含 name、description、path
+    """
+    config_manager = _get_config_manager()
+    repos = config_manager.get_all_repos()
+
+    if not repos:
+        return []
+
+    # 收集所有仓库的框架文档，按 repo_name 分组
+    all_by_repo: Dict[str, List[Dict]] = {}
+    for repo in repos:
+        frameworks_dir = config_manager.get_repo_dir(repo.name) / "frameworks"
+        if not frameworks_dir.exists():
+            continue
+
+        repo_results: List[Dict] = []
+        for fw_dir in sorted(frameworks_dir.iterdir()):
+            if not fw_dir.is_dir():
+                continue
+            framework_md = fw_dir / "FRAMEWORK.md"
+            if not framework_md.exists():
+                continue
+            try:
+                content = framework_md.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            meta = _parse_yaml_frontmatter(content)
+            repo_results.append({
+                "name": meta.get("name", fw_dir.name),
+                "description": meta.get("description", ""),
+                "path": f"ai-driving/{repo.name}/frameworks/{fw_dir.name}",
+            })
+        all_by_repo[repo.name] = repo_results
+
+    # 按关键词过滤：repo.name 命中则取整个仓库，framework.name 命中则精确匹配
+    results: List[Dict] = []
+    seen: set = set()
+
+    def _add(items: List[Dict]) -> None:
+        for item in items:
+            if item["path"] not in seen:
+                seen.add(item["path"])
+                results.append(item)
+
+    if not keywords:
+        for repo_items in all_by_repo.values():
+            _add(repo_items)
+    else:
+        kw_set = set(keywords)
+        for repo_name, repo_items in all_by_repo.items():
+            if repo_name in kw_set:
+                _add(repo_items)
+                continue
+            matched = [fw for fw in repo_items if fw["name"] in kw_set]
+            _add(matched)
+
+    return results
+
+
 @framework_group.command(name="load")
 @click.argument("keywords", nargs=-1, required=False)
 def framework_load(keywords: tuple = ()):
@@ -535,65 +604,8 @@ def framework_load(keywords: tuple = ()):
         driving framework load driving xstatic
     """
     try:
-        config_manager = _get_config_manager()
-        repos = config_manager.get_all_repos()
-
-        if not repos:
-            log_error("未找到任何已安装仓库，请先执行 'driving repo install'")
-            raise click.Abort()
-
-        # 收集所有仓库的框架文档，按 repo_name 分组
-        all_by_repo: dict[str, list[dict]] = {}
-        for repo in repos:
-            frameworks_dir = config_manager.get_repo_dir(repo.name) / "frameworks"
-            if not frameworks_dir.exists():
-                continue
-
-            repo_results = []
-            for fw_dir in sorted(frameworks_dir.iterdir()):
-                if not fw_dir.is_dir():
-                    continue
-                framework_md = fw_dir / "FRAMEWORK.md"
-                if not framework_md.exists():
-                    continue
-                try:
-                    content = framework_md.read_text(encoding="utf-8")
-                except OSError:
-                    continue
-                meta = _parse_yaml_frontmatter(content)
-                repo_results.append({
-                    "name": meta.get("name", fw_dir.name),
-                    "description": meta.get("description", ""),
-                    "path": f"ai-driving/{repo.name}/frameworks/{fw_dir.name}",
-                })
-            all_by_repo[repo.name] = repo_results
-
-        # 按关键词过滤：repo.name 命中则取整个仓库，framework.name 命中则精确匹配
-        results: list[dict] = []
-        seen: set[str] = set()
-
-        def _add(items: list[dict]):
-            for item in items:
-                if item["path"] not in seen:
-                    seen.add(item["path"])
-                    results.append(item)
-
-        if not keywords:
-            for repo_items in all_by_repo.values():
-                _add(repo_items)
-        else:
-            kw_set = set(keywords)
-            for repo_name, repo_items in all_by_repo.items():
-                if repo_name in kw_set:
-                    # 整个仓库命中
-                    _add(repo_items)
-                    continue
-                # 按 framework.name 精确匹配
-                matched = [fw for fw in repo_items if fw["name"] in kw_set]
-                _add(matched)
-
+        results = collect_frameworks(keywords)
         print(json.dumps({"frameworks": results}, ensure_ascii=False, indent=2))
-
     except click.Abort:
         raise
     except Exception as e:

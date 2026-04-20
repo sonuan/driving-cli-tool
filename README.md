@@ -17,6 +17,20 @@ pip3 install -e .
 
 ---
 
+## load — 一次性加载所有上下文
+
+> 在 AGENTS.md 作为强制前置调用
+
+```bash
+driving load                         # 输出 skills、rules、repos 等，供 AI 会话注入
+driving load <repo-name>             # 只加载指定仓库的 skills/rules（repos 始终全量）
+driving load <repo-name> <repo-name> # 同时加载多个仓库
+driving load --with framework        # 附带框架文档（关键词同样生效）
+driving load --with agent            # 附带 agent 列表（关键词同样生效）
+driving load --with framework,agent  # 同时附带框架和 agent
+driving load --debug                 # 同上，同时输出调试日志
+```
+
 ## repo — 规范仓库管理
 
 ```bash
@@ -42,15 +56,6 @@ driving framework pull <name>                 # 更新框架仓库
 driving framework sources <name>              # 获取框架源码路径列表
 driving framework load                        # 加载所有框架文档元信息（name/description/path）
 driving framework load <keywords...>          # 按框架名或仓库名过滤（取并集）
-```
-
-## load — 一次性加载所有上下文
-
-```bash
-driving load                         # 输出 skills、rules、agents、repos 等，供 AI 会话注入
-driving load <repo-name>             # 只加载指定仓库的 skills/rules/agents（repos 始终全量）
-driving load <repo-name> <repo-name> # 同时加载多个仓库
-driving load --debug                 # 同上，同时输出调试日志
 ```
 
 ## skill — 技能管理

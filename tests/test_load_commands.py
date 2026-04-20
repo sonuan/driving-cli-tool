@@ -179,6 +179,71 @@ class TestLoadCommand:
         assert isinstance(data["skills"], list)
         assert isinstance(data["rules"], list)
 
+    def test_不传with时不含frameworks和agents字段(self, runner, tmp_project):
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None):
+            result = runner.invoke(cli, ["load"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "frameworks" not in data
+        assert "agents" not in data
+
+    def test_with_framework时输出frameworks字段(self, runner, tmp_project):
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.framework.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None):
+            result = runner.invoke(cli, ["load", "--with", "framework"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "frameworks" in data
+        assert isinstance(data["frameworks"], list)
+        assert "agents" not in data
+
+    def test_with_agent时输出agents字段(self, runner, tmp_project):
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None):
+            result = runner.invoke(cli, ["load", "--with", "agent"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "agents" in data
+        assert isinstance(data["agents"], list)
+        assert "frameworks" not in data
+
+    def test_with_framework_agent时同时输出两个字段(self, runner, tmp_project):
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.framework.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None):
+            result = runner.invoke(cli, ["load", "--with", "framework,agent"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "frameworks" in data
+        assert "agents" in data
+
+    def test_with_framework_agent字段顺序在system_prompt之前(self, runner, tmp_project):
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.framework.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None):
+            result = runner.invoke(cli, ["load", "--with", "framework,agent"])
+        assert result.exit_code == 0
+        keys = list(json.loads(result.output).keys())
+        assert keys.index("frameworks") < keys.index("system_prompt")
+        assert keys.index("agents") < keys.index("system_prompt")
+
 # ==================== --debug / silent 模式 ====================
 
 class TestLoadDebugFlag:
