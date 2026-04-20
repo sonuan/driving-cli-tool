@@ -40,6 +40,8 @@ driving framework install <name>              # 安装框架仓库
 driving framework checkout <name> <branch>    # 切换框架分支
 driving framework pull <name>                 # 更新框架仓库
 driving framework sources <name>              # 获取框架源码路径列表
+driving framework load                        # 加载所有框架文档元信息（name/description/path）
+driving framework load <keywords...>          # 按框架名或仓库名过滤（取并集）
 ```
 
 ## load — 一次性加载所有上下文

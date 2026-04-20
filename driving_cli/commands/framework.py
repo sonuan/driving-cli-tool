@@ -4,8 +4,9 @@
 """
 
 import json
+import re
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import click
 import git
@@ -489,3 +490,112 @@ def framework_sources(framework_name: str):
         raise click.Abort()
 
 
+
+
+def _parse_yaml_frontmatter(content: str) -> Dict[str, str]:
+    """解析 Markdown 文件的 YAML front-matter
+
+    只提取 --- 块内的顶层 key: value 字符串字段，不依赖 PyYAML。
+
+    Args:
+        content: Markdown 文件内容
+
+    Returns:
+        Dict[str, str]: 解析出的字段字典，解析失败返回空字典
+    """
+    match = re.match(r"^---\s*\n(.*?)\n---\s*\n", content, re.DOTALL)
+    if not match:
+        return {}
+
+    result: Dict[str, str] = {}
+    for line in match.group(1).splitlines():
+        # 只处理顶层 key: value（不以空格开头）
+        kv = re.match(r"^(\w[\w\-]*)\s*:\s*(.+)$", line)
+        if kv:
+            result[kv.group(1)] = kv.group(2).strip()
+    return result
+
+
+@framework_group.command(name="load")
+@click.argument("keywords", nargs=-1, required=False)
+def framework_load(keywords: tuple = ()):
+    """加载框架文档元信息
+
+    扫描所有已安装仓库的 frameworks/ 目录，读取每个框架的
+    FRAMEWORK.md YAML front-matter，返回 name、description、path。
+
+    不传关键词时，加载所有仓库的框架文档。
+    传入关键词时，按 repo.name 或 framework.name 精确匹配（取并集）。
+    支持多个关键词：driving framework load driving xstatic
+
+    示例：
+        driving framework load
+        driving framework load driving
+        driving framework load xstatic ximage
+        driving framework load driving xstatic
+    """
+    try:
+        config_manager = _get_config_manager()
+        repos = config_manager.get_all_repos()
+
+        if not repos:
+            log_error("未找到任何已安装仓库，请先执行 'driving repo install'")
+            raise click.Abort()
+
+        # 收集所有仓库的框架文档，按 repo_name 分组
+        all_by_repo: dict[str, list[dict]] = {}
+        for repo in repos:
+            frameworks_dir = config_manager.get_repo_dir(repo.name) / "frameworks"
+            if not frameworks_dir.exists():
+                continue
+
+            repo_results = []
+            for fw_dir in sorted(frameworks_dir.iterdir()):
+                if not fw_dir.is_dir():
+                    continue
+                framework_md = fw_dir / "FRAMEWORK.md"
+                if not framework_md.exists():
+                    continue
+                try:
+                    content = framework_md.read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                meta = _parse_yaml_frontmatter(content)
+                repo_results.append({
+                    "name": meta.get("name", fw_dir.name),
+                    "description": meta.get("description", ""),
+                    "path": f"ai-driving/{repo.name}/frameworks/{fw_dir.name}",
+                })
+            all_by_repo[repo.name] = repo_results
+
+        # 按关键词过滤：repo.name 命中则取整个仓库，framework.name 命中则精确匹配
+        results: list[dict] = []
+        seen: set[str] = set()
+
+        def _add(items: list[dict]):
+            for item in items:
+                if item["path"] not in seen:
+                    seen.add(item["path"])
+                    results.append(item)
+
+        if not keywords:
+            for repo_items in all_by_repo.values():
+                _add(repo_items)
+        else:
+            kw_set = set(keywords)
+            for repo_name, repo_items in all_by_repo.items():
+                if repo_name in kw_set:
+                    # 整个仓库命中
+                    _add(repo_items)
+                    continue
+                # 按 framework.name 精确匹配
+                matched = [fw for fw in repo_items if fw["name"] in kw_set]
+                _add(matched)
+
+        print(json.dumps({"frameworks": results}, ensure_ascii=False, indent=2))
+
+    except click.Abort:
+        raise
+    except Exception as e:
+        log_error(f"加载框架文档失败: {e}")
+        raise click.Abort()

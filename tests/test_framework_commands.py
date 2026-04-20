@@ -432,6 +432,162 @@ class TestFrameworkCheckoutPull:
 # ==================== cli 集成测试 ====================
 
 
+class TestFrameworkLoad:
+    """测试 driving framework load 命令"""
+
+    @pytest.fixture
+    def project_with_framework_docs(self, tmp_path):
+        """创建包含 FRAMEWORK.md 的项目结构"""
+        config = {
+            "version": "2",
+            "repos": [
+                {
+                    "name": "main",
+                    "type": "remote",
+                    "url": "https://github.com/example/main",
+                    "path": "ai-driving/main",
+                    "local_path": None,
+                },
+            ],
+            "default_commit_message": "update by driving",
+            "update_version_url": "",
+        }
+        (tmp_path / "driving.config.json").write_text(
+            json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+        frameworks_dir = tmp_path / "ai-driving" / "main" / "frameworks"
+
+        # xstatic：有 FRAMEWORK.md
+        xstatic_dir = frameworks_dir / "xstatic"
+        xstatic_dir.mkdir(parents=True)
+        (xstatic_dir / "FRAMEWORK.md").write_text(
+            "---\nname: xstatic\ndescription: Activity/Fragment 基础封装框架\n---\n# xstatic\n",
+            encoding="utf-8",
+        )
+
+        # ximage：有 FRAMEWORK.md
+        ximage_dir = frameworks_dir / "ximage"
+        ximage_dir.mkdir(parents=True)
+        (ximage_dir / "FRAMEWORK.md").write_text(
+            "---\nname: ximage\ndescription: 图片加载框架\n---\n# ximage\n",
+            encoding="utf-8",
+        )
+
+        # xnet：没有 FRAMEWORK.md，应被跳过
+        xnet_dir = frameworks_dir / "xnet"
+        xnet_dir.mkdir(parents=True)
+
+        # gitlist.json（load 命令不依赖它，但保持目录完整）
+        (frameworks_dir / "gitlist.json").write_text("[]", encoding="utf-8")
+
+        return tmp_path
+
+    def test_返回所有有文档的框架(self, runner, project_with_framework_docs):
+        """load 应返回所有存在 FRAMEWORK.md 的框架"""
+        with runner.isolated_filesystem():
+            import os
+            os.chdir(project_with_framework_docs)
+            result = runner.invoke(cli, ["framework", "load"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        names = [fw["name"] for fw in data["frameworks"]]
+        assert "xstatic" in names
+        assert "ximage" in names
+
+    def test_跳过没有FRAMEWORK_md的目录(self, runner, project_with_framework_docs):
+        """没有 FRAMEWORK.md 的目录应被跳过"""
+        with runner.isolated_filesystem():
+            import os
+            os.chdir(project_with_framework_docs)
+            result = runner.invoke(cli, ["framework", "load"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        names = [fw["name"] for fw in data["frameworks"]]
+        assert "xnet" not in names
+
+    def test_返回字段包含name_description_path(self, runner, project_with_framework_docs):
+        """每个框架条目应包含 name、description、path 三个字段"""
+        with runner.isolated_filesystem():
+            import os
+            os.chdir(project_with_framework_docs)
+            result = runner.invoke(cli, ["framework", "load"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        for fw in data["frameworks"]:
+            assert "name" in fw
+            assert "description" in fw
+            assert "path" in fw
+
+    def test_path为相对路径(self, runner, project_with_framework_docs):
+        """path 字段应为相对路径，格式为 ai-driving/<repo>/frameworks/<name>"""
+        with runner.isolated_filesystem():
+            import os
+            os.chdir(project_with_framework_docs)
+            result = runner.invoke(cli, ["framework", "load"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        for fw in data["frameworks"]:
+            assert fw["path"].startswith("ai-driving/")
+            assert not Path(fw["path"]).is_absolute()
+
+    def test_指定框架名过滤(self, runner, project_with_framework_docs):
+        """指定框架名时只返回该框架"""
+        with runner.isolated_filesystem():
+            import os
+            os.chdir(project_with_framework_docs)
+            result = runner.invoke(cli, ["framework", "load", "xstatic"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data["frameworks"]) == 1
+        assert data["frameworks"][0]["name"] == "xstatic"
+
+    def test_多个框架名同时匹配(self, runner, project_with_framework_docs):
+        """传入多个框架名时返回所有匹配框架"""
+        with runner.isolated_filesystem():
+            import os
+            os.chdir(project_with_framework_docs)
+            result = runner.invoke(cli, ["framework", "load", "xstatic", "ximage"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        names = [fw["name"] for fw in data["frameworks"]]
+        assert "xstatic" in names
+        assert "ximage" in names
+        assert len(data["frameworks"]) == 2
+
+    def test_仓库名命中返回整个仓库(self, runner, project_with_framework_docs):
+        """传入仓库名时返回该仓库下所有框架"""
+        with runner.isolated_filesystem():
+            import os
+            os.chdir(project_with_framework_docs)
+            result = runner.invoke(cli, ["framework", "load", "main"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        names = [fw["name"] for fw in data["frameworks"]]
+        assert "xstatic" in names
+        assert "ximage" in names
+
+    def test_不存在的关键词返回空列表(self, runner, project_with_framework_docs):
+        """不匹配任何框架或仓库时返回空列表（与 skill load 行为一致）"""
+        with runner.isolated_filesystem():
+            import os
+            os.chdir(project_with_framework_docs)
+            result = runner.invoke(cli, ["framework", "load", "nonexistent"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["frameworks"] == []
+
+    def test_description从frontmatter读取(self, runner, project_with_framework_docs):
+        """description 应从 YAML front-matter 中读取"""
+        with runner.isolated_filesystem():
+            import os
+            os.chdir(project_with_framework_docs)
+            result = runner.invoke(cli, ["framework", "load", "xstatic"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["frameworks"][0]["description"] == "Activity/Fragment 基础封装框架"
+
+
 class TestCliIntegration:
     """测试 cli.py 中 framework 子命令组的挂载"""
 
@@ -444,6 +600,7 @@ class TestCliIntegration:
         assert "checkout" in result.output
         assert "pull" in result.output
         assert "sources" in result.output
+        assert "load" in result.output
 
 
 
