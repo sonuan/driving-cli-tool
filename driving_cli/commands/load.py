@@ -193,9 +193,12 @@ def load(keywords: tuple, debug: bool, with_modules: str):
         rules = collect_rules(keywords)
         _dbg(f"collect_rules 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(rules)}")
 
-        t = time.perf_counter()
-        repos = collect_repos(keywords)
-        _dbg(f"collect_repos 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(repos)}")
+        # 带关键词时不收集 repos（关键词即 repo-name，无需重复返回仓库信息）
+        repos = []
+        if not keywords:
+            t = time.perf_counter()
+            repos = collect_repos(keywords)
+            _dbg(f"collect_repos 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(repos)}")
 
         frameworks = None
         if "framework" in modules:
