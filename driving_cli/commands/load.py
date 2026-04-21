@@ -197,14 +197,6 @@ def load(keywords: tuple, debug: bool, with_modules: str):
         repos = collect_repos(keywords)
         _dbg(f"collect_repos 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(repos)}")
 
-        t = time.perf_counter()
-        system_prompt = _collect_repo_system_prompts()
-        _dbg(f"collect_repo_system_prompts 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，长度={len(system_prompt)}")
-
-        t = time.perf_counter()
-        notifications = _build_notifications()
-        _dbg(f"build_notifications 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
-
         frameworks = None
         if "framework" in modules:
             t = time.perf_counter()
@@ -217,19 +209,38 @@ def load(keywords: tuple, debug: bool, with_modules: str):
             agents_data = collect_agents(keywords)
             _dbg(f"collect_agents 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(agents_data)}")
 
-        result = {
-            "cli_version": __version__,
-            "skills": skills,
-            "rules": rules,
-            "repos": repos,
-        }
-        if frameworks is not None:
+        result = {"cli_version": __version__}
+
+        # 空列表不输出，避免给 AI 造成误解
+        if skills:
+            result["skills"] = skills
+        if rules:
+            result["rules"] = rules
+        if repos:
+            result["repos"] = repos
+        if frameworks:
             result["frameworks"] = frameworks
-        if agents_data is not None:
+        if agents_data:
             result["agents"] = agents_data
-        result["system_prompt"] = system_prompt
-        result["user_prompt"] = config.user_prompt
-        result["notifications"] = notifications
+
+        # 带关键词时不输出 system_prompt / user_prompt / notifications
+        if not keywords:
+            t = time.perf_counter()
+            system_prompt = _collect_repo_system_prompts()
+            _dbg(f"collect_repo_system_prompts 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，长度={len(system_prompt)}")
+
+            t = time.perf_counter()
+            notifications = _build_notifications()
+            _dbg(f"build_notifications 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
+
+            if system_prompt:
+                result["system_prompt"] = system_prompt
+            if config.user_prompt:
+                result["user_prompt"] = config.user_prompt
+            if notifications:
+                result["notifications"] = notifications
+        else:
+            _dbg("带关键词，跳过 system_prompt / user_prompt / notifications")
 
         _dbg(f"load 全部完成，总耗时 {(time.perf_counter()-_load_start)*1000:.1f}ms")
         click.echo(json.dumps(result, ensure_ascii=False, indent=2))
