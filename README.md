@@ -206,9 +206,10 @@ trigger: manual                 # Windsurf 所需
       "url": "https://github.com/your-org/driving",
       "path": "ai-driving/driving",
       "tags": ["base"],
-      "skills": { "enabled": [], "disabled": [] },
-      "rules":  { "enabled": [], "disabled": [] },
-      "agents": { "enabled": [], "disabled": [] }
+      "skills": { "enabled": [], "disabled": ["some-skill"] },
+      "rules": { "enabled": [], "disabled": [] },
+      "agents": { "enabled": [], "disabled": [] },
+      "check_sample_rate": 100
     },
     {
       "name": "f-message",
@@ -218,13 +219,20 @@ trigger: manual                 # Windsurf 所需
     }
   ],
   "default_commit_message": "update by driving",
-  "update_version_url": ""
+  "update_version_url": "",
+  "check_sample_rate": 100
 }
 ```
 
-`tags` 含 `"base"` 的仓库在无关键词时默认加载；传入关键词时忽略 tags，只按 repo.name / skill.name / rule.name 精确匹配。
+- `check_sample_rate`（全局）：`load` 时的更新检测采样率，默认 `100`（每次都检测）
+- `check_sample_rate`（仓库级）：覆盖全局配置，优先级更高
+  - `0`：永不检测该仓库更新
+  - `1~100`：按概率采样，每次 `load` 随机决定是否检测
+  - `-1`：始终检测，检测到更新时自动执行 `repo pull`（静默，不打扰用户）
+  
+- `tags` 含 `"base"` 的仓库在无关键词时默认加载；传入关键词时忽略 tags，只按 repo.name / skill.name / rule.name 精确匹配。
 
-`skills` / `rules` / `agents` 均支持白名单（`enabled` 非空）和黑名单（`disabled` 非空）两种模式。
+- `skills` / `rules` / `agents` 均支持白名单（`enabled` 非空）和黑名单（`disabled` 非空）两种模式。
 
 ### gitlist.json 配置
 

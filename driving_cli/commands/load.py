@@ -115,8 +115,55 @@ def _collect_repo_system_prompts() -> str:
         return ""
 
 
-def _build_notifications() -> str:
-    """构建通知类内容（更新提醒、版本不满足）"""
+def _check_and_pull_repos() -> str:
+    """检查仓库更新，自动拉取 check_sample_rate=-1 的仓库，返回需通知的提示文本"""
+    _dbg("检查仓库更新 ...")
+    t = time.perf_counter()
+    try:
+        _, updatable, _, auto_pull, sample_log = _collect_updatable(fetch=False)
+
+        # 打印采样结果
+        for repo_name, rate, hit, roll in sample_log:
+            if rate == 0:
+                _dbg(f"  仓库 '{repo_name}'：采样率=0，跳过检测")
+            elif rate == -1:
+                _dbg(f"  仓库 '{repo_name}'：采样率=-1（auto_pull），始终检测")
+            else:
+                _dbg(f"  仓库 '{repo_name}'：采样率={rate}，随机值={roll}，{'命中' if hit else '未命中'}")
+
+        _dbg(f"仓库更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，可更新仓库数={len(updatable)}，自动拉取数={len(auto_pull)}")
+
+        # 自动拉取 check_sample_rate=-1 的仓库
+        if auto_pull:
+            import subprocess as _sp
+            auto_pull_names = {r.name for r in auto_pull}
+            for repo in auto_pull:
+                _dbg(f"自动拉取仓库 '{repo.name}' ...")
+                try:
+                    _sp.run(
+                        ["driving", "repo", "pull", repo.name],
+                        stdout=_sp.DEVNULL, stderr=_sp.DEVNULL, timeout=30,
+                    )
+                except Exception as e:
+                    _dbg(f"自动拉取 '{repo.name}' 失败：{e}")
+            # 需要通知的仓库 = 有更新但不在自动拉取列表中的
+            notify_repos = [r for r in updatable if r.name not in auto_pull_names]
+        else:
+            notify_repos = updatable
+
+        if notify_repos:
+            repos_str = "、".join(r.name for r in notify_repos)
+            return UpdatePrompt.HAS_UPDATE.format(repos=repos_str)
+    except Exception:
+        _dbg(f"仓库更新检查异常，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
+    return ""
+
+
+def _build_notifications(repo_update_msg: str = "") -> str:
+    """构建通知类内容（更新提醒、版本不满足）
+
+    repo_update_msg: 仓库更新提示，由外部提前检查后传入
+    """
     parts = []
 
     # 检查 min_cli_version 要求（最高优先级，硬性阻断）
@@ -135,17 +182,8 @@ def _build_notifications() -> str:
     if cli_update_msg:
         parts.append(cli_update_msg)
 
-    # 检查仓库更新
-    _dbg("检查仓库更新 ...")
-    t = time.perf_counter()
-    try:
-        _, updatable, _ = _collect_updatable(fetch=False)
-        _dbg(f"仓库更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，可更新仓库数={len(updatable)}")
-        if updatable:
-            repos_str = "、".join(r.name for r in updatable)
-            parts.append(UpdatePrompt.HAS_UPDATE.format(repos=repos_str))
-    except Exception:
-        _dbg(f"仓库更新检查异常，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
+    if repo_update_msg:
+        parts.append(repo_update_msg)
 
     return "\n\n".join(parts)
 
@@ -184,6 +222,14 @@ def load(keywords: tuple, debug: bool, with_modules: str):
 
         # 解析 --with 模块列表
         modules = {m.strip().lower() for m in with_modules.split(",") if m.strip()}
+
+        # 带关键词时不检查仓库更新；不带关键词时提前检查并 auto_pull，
+        # 确保后续 collect 读到的是最新内容
+        repo_update_msg = ""
+        if not keywords:
+            t = time.perf_counter()
+            repo_update_msg = _check_and_pull_repos()
+            _dbg(f"仓库更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
 
         t = time.perf_counter()
         skills = collect_skills(keywords)
@@ -233,7 +279,7 @@ def load(keywords: tuple, debug: bool, with_modules: str):
             _dbg(f"collect_repo_system_prompts 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，长度={len(system_prompt)}")
 
             t = time.perf_counter()
-            notifications = _build_notifications()
+            notifications = _build_notifications(repo_update_msg)
             _dbg(f"build_notifications 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
 
             if system_prompt:

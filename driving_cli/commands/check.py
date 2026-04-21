@@ -1,6 +1,7 @@
 """check 命令 - 打印 CLI 版本并检查各 remote 仓库是否有可用更新"""
 
 import json
+import random
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -74,15 +75,47 @@ def check(as_json: bool):
 
 
 def _collect_updatable(fetch: bool = True):
-    """收集可更新仓库列表，返回 (project_root, updatable, warnings)
+    """收集可更新仓库列表，返回 (project_root, updatable, warnings, auto_pull)
 
     fetch=True 时先 git fetch 再对比（check 命令用），
     fetch=False 时纯本地对比（load 命令用）。
+
+    采样率规则（仅 fetch=False 即 load 场景生效）：
+      - 仓库级 check_sample_rate 优先，未设置则取全局值
+      - 0：跳过检测
+      - 1~100：随机采样，命中才检测
+      - -1：始终检测，检测到更新时加入 auto_pull 列表（由调用方自动拉取）
+      - check 命令（fetch=True）不受采样率影响，始终全量检测
     """
     project_root = find_project_root()
     config_mgr = ConfigManager(project_root)
-    repos = config_mgr.get_all_repos()
+    config = config_mgr.load()
+    repos = config.repos
     remote_repos = [r for r in repos if r.type == "remote"]
+
+    # load 场景：按采样率过滤参与检测的仓库，并记录 -1 仓库
+    auto_pull_names: set = set()
+    sample_log: list = []  # [(repo_name, rate, hit)]
+    if not fetch:
+        sampled = []
+        for repo in remote_repos:
+            rate = repo.check_sample_rate if repo.check_sample_rate is not None else config.check_sample_rate
+            if rate == 0:
+                sample_log.append((repo.name, 0, False, None))
+                continue  # 永不检测
+            elif rate == -1:
+                auto_pull_names.add(repo.name)
+                sampled.append(repo)  # 始终参与检测
+                sample_log.append((repo.name, -1, True, None))
+            else:
+                # 1~100 采样
+                rate = max(1, min(100, rate))
+                roll = random.randint(1, 100)
+                hit = roll <= rate
+                sample_log.append((repo.name, rate, hit, roll))
+                if hit:
+                    sampled.append(repo)
+        remote_repos = sampled
 
     compare = _has_new_version if fetch else _compare_local_remote
 
@@ -119,13 +152,16 @@ def _collect_updatable(fetch: bool = True):
     order = {repo.name: i for i, (repo, _) in enumerate(init_repos)}
     updatable.sort(key=lambda r: order.get(r.name, 0))
 
-    return project_root, updatable, warnings
+    # 区分需要自动拉取的仓库
+    auto_pull = [r for r in updatable if r.name in auto_pull_names]
+
+    return project_root, updatable, warnings, auto_pull, sample_log
 
 
 def _check_json():
     """JSON 模式：输出结构化检测结果，不做交互"""
     try:
-        _, updatable, warnings = _collect_updatable()
+        _, updatable, warnings, _, _ = _collect_updatable()
     except ValueError as e:
         click.echo(json.dumps({"version": __version__, "error": str(e)}))
         raise SystemExit(1)
@@ -143,7 +179,7 @@ def _check_interactive():
     log_info(f"driving CLI 版本: {__version__}")
 
     try:
-        project_root, updatable, warnings = _collect_updatable()
+        project_root, updatable, warnings, _, _ = _collect_updatable()
     except ValueError as e:
         log_error(str(e))
         raise click.Abort()

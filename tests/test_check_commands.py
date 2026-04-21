@@ -42,7 +42,7 @@ class TestCollectUpdatable:
     def test_无仓库时返回空列表(self, tmp_path):
         _make_config(tmp_path, [])
         with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path):
-            _, updatable, warnings = _collect_updatable(fetch=False)
+            _, updatable, warnings, auto_pull, sample_log = _collect_updatable(fetch=False)
         assert updatable == []
         assert warnings == []
 
@@ -51,7 +51,7 @@ class TestCollectUpdatable:
             {"name": "my-local", "type": "local", "path": "ai-driving/my-local"},
         ])
         with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path):
-            _, updatable, warnings = _collect_updatable(fetch=False)
+            _, updatable, warnings, auto_pull, sample_log = _collect_updatable(fetch=False)
         assert updatable == []
         assert warnings == []
 
@@ -62,7 +62,7 @@ class TestCollectUpdatable:
         ])
         # 目录不存在，视为未初始化
         with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path):
-            _, updatable, warnings = _collect_updatable(fetch=False)
+            _, updatable, warnings, auto_pull, sample_log = _collect_updatable(fetch=False)
         assert updatable == []
         assert len(warnings) == 1
         assert "driving" in warnings[0]
@@ -78,7 +78,7 @@ class TestCollectUpdatable:
 
         with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path), \
              patch("driving_cli.commands.check._compare_local_remote", return_value=True):
-            _, updatable, warnings = _collect_updatable(fetch=False)
+            _, updatable, warnings, auto_pull, sample_log = _collect_updatable(fetch=False)
         assert len(updatable) == 1
         assert updatable[0].name == "driving"
 
@@ -93,7 +93,7 @@ class TestCollectUpdatable:
 
         with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path), \
              patch("driving_cli.commands.check._compare_local_remote", return_value=False):
-            _, updatable, warnings = _collect_updatable(fetch=False)
+            _, updatable, warnings, auto_pull, sample_log = _collect_updatable(fetch=False)
         assert updatable == []
 
     def test_compare返回None时加入warnings(self, tmp_path):
@@ -107,7 +107,7 @@ class TestCollectUpdatable:
 
         with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path), \
              patch("driving_cli.commands.check._compare_local_remote", return_value=None):
-            _, updatable, warnings = _collect_updatable(fetch=False)
+            _, updatable, warnings, auto_pull, sample_log = _collect_updatable(fetch=False)
         assert updatable == []
         assert len(warnings) == 1
 

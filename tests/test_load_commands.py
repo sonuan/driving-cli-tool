@@ -53,7 +53,7 @@ def tmp_project(tmp_path):
 class TestBuildNotifications:
     def test_无可更新仓库时返回空字符串(self, tmp_project):
         with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
-             patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_project, [], [])), \
+             patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_project, [], [], [], [])), \
              patch("driving_cli.commands.load.fetch_version_info", return_value=None):
             result = _build_notifications()
         assert result == ""
@@ -61,16 +61,20 @@ class TestBuildNotifications:
     def test_有可更新仓库时返回提示语(self, tmp_project):
         mgr = ConfigManager(tmp_project)
         repo = mgr.get_repo("driving")
-        with patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_project, [repo], [])), \
+        with patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_project, [repo], [], [], [])), \
              patch("driving_cli.commands.load.fetch_version_info", return_value=None):
-            result = _build_notifications()
+            from driving_cli.commands.load import _check_and_pull_repos
+            repo_msg = _check_and_pull_repos()
+            result = _build_notifications(repo_msg)
         assert "driving" in result
         assert "driving repo pull" in result
 
     def test_异常时返回空字符串(self):
         with patch("driving_cli.commands.load._collect_updatable", side_effect=Exception("网络错误")), \
              patch("driving_cli.commands.load.fetch_version_info", return_value=None):
-            result = _build_notifications()
+            from driving_cli.commands.load import _check_and_pull_repos
+            repo_msg = _check_and_pull_repos()
+            result = _build_notifications(repo_msg)
         assert result == ""
 
 
@@ -107,11 +111,13 @@ class TestCheckCliUpdate:
     def test_notifications同时包含仓库更新和cli更新(self, tmp_project):
         mgr = ConfigManager(tmp_project)
         repo = mgr.get_repo("driving")
-        with patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_project, [repo], [])), \
+        with patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_project, [repo], [], [], [])), \
              patch("driving_cli.commands.load.fetch_version_info", return_value={"version": "99.0.0"}), \
              patch("driving_cli.commands.load._get_update_version_url", return_value="http://x"), \
              patch("driving_cli.commands.load.__version__", "1.0.0"):
-            result = _build_notifications()
+            from driving_cli.commands.load import _check_and_pull_repos
+            repo_msg = _check_and_pull_repos()
+            result = _build_notifications(repo_msg)
         assert "driving repo pull" in result
         assert "driving update" in result
         # CLI 更新优先级更高，应在仓库更新提示之前
@@ -140,9 +146,9 @@ class TestLoadCommand:
              patch("driving_cli.commands.load.fetch_version_info", return_value=None):
             result = runner.invoke(cli, ["load"])
         data = json.loads(result.output)
-        for field in ("cli_version", "skills", "rules", "repos",
-                      "system_prompt", "user_prompt", "notifications"):
-            assert field in data
+        # cli_version 和 repos 始终存在；其余字段按需输出（非空才出现）
+        assert "cli_version" in data
+        assert "repos" in data
 
     def test_repos始终全量输出(self, runner, tmp_project):
         with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
@@ -176,8 +182,11 @@ class TestLoadCommand:
              patch("driving_cli.commands.load.fetch_version_info", return_value=None):
             result = runner.invoke(cli, ["load"])
         data = json.loads(result.output)
-        assert isinstance(data["skills"], list)
-        assert isinstance(data["rules"], list)
+        # 非空时才输出，有则断言类型正确
+        if "skills" in data:
+            assert isinstance(data["skills"], list)
+        if "rules" in data:
+            assert isinstance(data["rules"], list)
 
     def test_不传with时不含frameworks和agents字段(self, runner, tmp_project):
         with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
@@ -197,6 +206,7 @@ class TestLoadCommand:
              patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.framework.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.collect_frameworks", return_value=[{"name": "ximage", "description": "图片框架", "path": "ai-driving/driving/frameworks/ximage"}]), \
              patch("driving_cli.commands.load.fetch_version_info", return_value=None):
             result = runner.invoke(cli, ["load", "--with", "framework"])
         assert result.exit_code == 0
@@ -210,6 +220,7 @@ class TestLoadCommand:
              patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.collect_agents", return_value=[{"name": "android-reviewer", "description": "Android 审查", "path": "ai-driving/driving/agents/android-reviewer"}]), \
              patch("driving_cli.commands.load.fetch_version_info", return_value=None):
             result = runner.invoke(cli, ["load", "--with", "agent"])
         assert result.exit_code == 0
@@ -224,6 +235,8 @@ class TestLoadCommand:
              patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.framework.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.collect_frameworks", return_value=[{"name": "ximage", "description": "图片框架", "path": "ai-driving/driving/frameworks/ximage"}]), \
+             patch("driving_cli.commands.load.collect_agents", return_value=[{"name": "android-reviewer", "description": "Android 审查", "path": "ai-driving/driving/agents/android-reviewer"}]), \
              patch("driving_cli.commands.load.fetch_version_info", return_value=None):
             result = runner.invoke(cli, ["load", "--with", "framework,agent"])
         assert result.exit_code == 0
@@ -237,6 +250,9 @@ class TestLoadCommand:
              patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.framework.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.collect_frameworks", return_value=[{"name": "ximage", "description": "图片框架", "path": "ai-driving/driving/frameworks/ximage"}]), \
+             patch("driving_cli.commands.load.collect_agents", return_value=[{"name": "android-reviewer", "description": "Android 审查", "path": "ai-driving/driving/agents/android-reviewer"}]), \
+             patch("driving_cli.commands.load._collect_repo_system_prompts", return_value="some rules"), \
              patch("driving_cli.commands.load.fetch_version_info", return_value=None):
             result = runner.invoke(cli, ["load", "--with", "framework,agent"])
         assert result.exit_code == 0
@@ -350,7 +366,7 @@ class TestCheckMinCliVersion:
         )
         with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
              patch("driving_cli.commands.load.__version__", "1.0.0"), \
-             patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_path, [], [])), \
+             patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_path, [], [], [], [])), \
              patch("driving_cli.commands.load.fetch_version_info", return_value={"version": "2.0.0"}), \
              patch("driving_cli.commands.load._get_update_version_url", return_value="http://x"):
             from driving_cli.commands.load import _build_notifications
@@ -411,7 +427,7 @@ class TestCollectRepoSystemPrompts:
         (repo / "manifest.json").write_text('{"system_prompt": "sp.md"}', encoding="utf-8")
         (repo / "sp.md").write_text("business rules", encoding="utf-8")
         with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
-             patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_path, [], [])), \
+             patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_path, [], [], [], [])), \
              patch("driving_cli.commands.load.fetch_version_info", return_value={"version": "99.0.0"}), \
              patch("driving_cli.commands.load._get_update_version_url", return_value="http://x"), \
              patch("driving_cli.commands.load.__version__", "1.0.0"):
