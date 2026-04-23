@@ -3,7 +3,7 @@
 import click
 
 from driving_cli import __version__
-from driving_cli.commands import agent, check, feature, framework, ide, load, refine, repo, rule, skill, update
+from driving_cli.commands import agent, check, feature, framework, gate, ide, load, refine, repo, rule, skill, update
 
 
 @click.group()
@@ -33,6 +33,9 @@ cli.add_command(skill.skill_group)
 
 # 注册 rule 子命令组（多仓库规则管理）
 cli.add_command(rule.rule_group)
+
+# 注册 gate 子命令组（门禁规则管理）
+cli.add_command(gate.gate_group)
 
 # 注册 feature 子命令组（多仓库需求功能管理）
 cli.add_command(feature.feature_group)

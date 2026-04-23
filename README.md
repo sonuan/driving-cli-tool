@@ -81,6 +81,29 @@ driving rule load                    # 只加载 tags=base 的仓库规则（供
 driving rule load <keywords...>      # 忽略 tags，精确匹配 repo.name 或 rule.name（取并集）
 ```
 
+## gate — 门禁规则管理
+
+```bash
+driving gate list                          # 以表格形式列出所有 gate（列：ID/Name/Type/Location/Repo）
+driving gate list --json                   # 以 JSON 数组格式输出（每条记录含 id/name/type/location/repo）
+driving gate load                          # 加载所有 gate 的完整内容（JSON）
+driving gate load <gate-id>                # 加载指定 gate（大小写不敏感）
+driving gate load <gate-id> <gate-id> ...  # 加载多个指定 gate
+```
+
+`gate load` 输出格式：
+```json
+{
+  "system_prompt": "...",   // 来自 gates.json 顶层 system_prompt 字段，多仓库拼接；为空时不输出
+  "gates": [ { ...完整 gate 对象... } ]
+}
+```
+
+- 任一 ID 找不到时，`gates` 返回空数组 `[]`，不报错退出
+- 多仓库存在相同 ID 时，返回 `driving.config.json` 中排在最前的仓库的 gate，并输出警告
+
+**gate 配置文件：** 仓库 `manifest.json` 中通过 `"gates": "rules/gates.json"` 指向门禁定义文件。
+
 ## feature — 需求功能管理
 
 ```bash
@@ -151,7 +174,7 @@ driving update --url <url>           # 使用自定义 version.json URL
 ```
 ai-driving/
   └── <repo>/
-      ├── manifest.json          # 仓库元信息（可选），支持 min_cli_version、system_prompt、skills、rules、agents 字段
+      ├── manifest.json          # 仓库元信息（可选），支持 min_cli_version、system_prompt、skills、rules、agents、gates 字段
       ├── frameworks/            # 框架文档
       │   ├── gitlist.json       # 框架列表配置
       │   └── <framework>/
