@@ -498,7 +498,7 @@ def collect_skills(keywords: tuple = ()) -> list:
     """收集可用技能列表，供 skill load 和 driving load 复用。
 
     不传关键词时，只加载 tags 含 "base" 的仓库的技能。
-    传入关键词时，按 repo.name 或 skill.name 精确匹配（取并集）。
+    传入关键词时，按 repo.name 精确匹配或 skill.name/description 模糊匹配（不区分大小写，取并集）。
     """
     project_root = find_project_root()
     config_manager = ConfigManager(project_root)
@@ -546,12 +546,14 @@ def collect_skills(keywords: tuple = ()) -> list:
         for repo_name, repo_skills in all_skills_by_repo.items():
             _add(repo_skills)
     else:
-        kw_set = set(keywords)
+        from driving_cli.utils.match import fuzzy_match_any
+        kw_lower = tuple(k.lower() for k in keywords)
         for repo_name, repo_skills in all_skills_by_repo.items():
-            if repo_name in kw_set:
+            if repo_name.lower() in kw_lower:
                 _add(repo_skills)
                 continue
-            matched = [s for s in repo_skills if s["name"] in kw_set]
+            matched = [s for s in repo_skills
+                       if fuzzy_match_any((s["name"], s.get("description", "")), keywords)]
             _add(matched)
 
     return [

@@ -277,6 +277,7 @@ def rule_group():
 
 def collect_rules(keywords: tuple = ()) -> list:
     """收集可用规则列表，供 rule load 和 driving load 复用。"""
+
     project_root = find_project_root()
     config_manager = ConfigManager(project_root)
 
@@ -322,12 +323,14 @@ def collect_rules(keywords: tuple = ()) -> list:
         for repo_name, repo_rules in all_rules_by_repo.items():
             _add(repo_rules)
     else:
-        kw_set = set(keywords)
+        from driving_cli.utils.match import fuzzy_match_any
+        kw_lower = tuple(k.lower() for k in keywords)
         for repo_name, repo_rules in all_rules_by_repo.items():
-            if repo_name in kw_set:
+            if repo_name.lower() in kw_lower:
                 _add(repo_rules)
                 continue
-            matched = [r for r in repo_rules if r["name"] in kw_set]
+            matched = [r for r in repo_rules
+                       if fuzzy_match_any((r["name"], r.get("description", "")), keywords)]
             _add(matched)
 
     return [

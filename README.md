@@ -67,7 +67,7 @@ driving skill list --edit                      # 交互模式，勾选启用/禁
 driving skill list --edit --mode enable        # 强制写 enabled 白名单
 driving skill list --edit --mode disable       # 强制写 disabled 黑名单
 driving skill load                   # 只加载 tags=base 的仓库技能（供 AI 注入上下文）
-driving skill load <keywords...>     # 忽略 tags，精确匹配 repo.name 或 skill.name（取并集）
+driving skill load <keywords...>     # 忽略 tags，repo.name 精确匹配或 name/description 模糊匹配（不区分大小写，取并集）
 ```
 
 ## rule — 规则管理
@@ -78,7 +78,7 @@ driving rule list --edit                      # 交互模式，勾选启用/禁�
 driving rule list --edit --mode enable        # 强制写 enabled 白名单
 driving rule list --edit --mode disable       # 强制写 disabled 黑名单
 driving rule load                    # 只加载 tags=base 的仓库规则（供 AI 注入上下文）
-driving rule load <keywords...>      # 忽略 tags，精确匹配 repo.name 或 rule.name（取并集）
+driving rule load <keywords...>      # 忽略 tags，repo.name 精确匹配或 name/description 模糊匹配（不区分大小写，取并集）
 ```
 
 ## gate — 门禁规则管理
@@ -127,7 +127,7 @@ driving agent list --edit                      # 交互模式，勾选启用/禁
 driving agent list --edit --mode enable        # 强制写 enabled 白名单
 driving agent list --edit --mode disable       # 强制写 disabled 黑名单
 driving agent load                        # 只加载 tags=base 的仓库 agent（供 AI 注入上下文）
-driving agent load <keywords...>          # 精确匹配 repo.name 或 agent.name（取并集）
+driving agent load <keywords...>          # repo.name 精确匹配或 name/description 模糊匹配（不区分大小写，取并集）
 
 # 记忆管理
 driving agent memory get <name>                  # 读取 MEMORY.md 内容
@@ -253,7 +253,7 @@ trigger: manual                 # Windsurf 所需
   - `1~100`：按概率采样，每次 `load` 随机决定是否检测
   - `-1`：始终检测，检测到更新时自动执行 `repo pull`（静默，不打扰用户）
   
-- `tags` 含 `"base"` 的仓库在无关键词时默认加载；传入关键词时忽略 tags，只按 repo.name / skill.name / rule.name 精确匹配。
+- `tags` 含 `"base"` 的仓库在无关键词时默认加载；传入关键词时忽略 tags，repo.name 精确匹配（不区分大小写）或 name/description 模糊匹配（子串包含即命中）。
 
 - `skills` / `rules` / `agents` 均支持白名单（`enabled` 非空）和黑名单（`disabled` 非空）两种模式。
 
@@ -288,12 +288,12 @@ driving repo install --url https://github.com/your-org/driving
 
 # 2. 在 AI 会话中加载上下文
 driving skill load                    # 只加载 tags=base 的仓库
-driving skill load f-message          # 精确匹配 repo.name=f-message
-driving skill load f-message f-qucall # 精确匹配多个 repo.name，取并集
+driving skill load f-message          # 精确匹配 repo.name=f-message（加载该仓库全部技能）
+driving skill load message qucall     # 模糊匹配 name/description 包含 "message" 或 "qucall"
 driving rule load f-message
 driving agent load                    # 只加载 tags=base 的仓库
-driving agent load android            # 精确匹配 repo.name=android
-driving agent load android-reviewer  # 精确匹配 agent.name=android-reviewer
+driving agent load android            # 精确匹配 repo.name=android（加载该仓库全部 agent）
+driving agent load reviewer           # 模糊匹配 name/description 包含 "reviewer"
 
 # 3. 查看可用框架并安装
 driving framework list

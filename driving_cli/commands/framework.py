@@ -520,7 +520,7 @@ def collect_frameworks(keywords: tuple = ()) -> List[Dict]:
     """收集框架文档元信息，供 framework load 和 driving load 复用。
 
     不传关键词时，加载所有仓库的框架文档。
-    传入关键词时，按 repo.name 或 framework.name 精确匹配（取并集）。
+    传入关键词时，按 repo.name 精确匹配或 framework.name/description 模糊匹配（不区分大小写，取并集）。
 
     Args:
         keywords: 过滤关键词，支持仓库名或框架名
@@ -574,12 +574,14 @@ def collect_frameworks(keywords: tuple = ()) -> List[Dict]:
         for repo_items in all_by_repo.values():
             _add(repo_items)
     else:
-        kw_set = set(keywords)
+        from driving_cli.utils.match import fuzzy_match_any
+        kw_lower = tuple(k.lower() for k in keywords)
         for repo_name, repo_items in all_by_repo.items():
-            if repo_name in kw_set:
+            if repo_name.lower() in kw_lower:
                 _add(repo_items)
                 continue
-            matched = [fw for fw in repo_items if fw["name"] in kw_set]
+            matched = [fw for fw in repo_items
+                       if fuzzy_match_any((fw["name"], fw.get("description", "")), keywords)]
             _add(matched)
 
     return results

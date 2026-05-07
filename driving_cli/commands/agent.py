@@ -381,6 +381,7 @@ def agent_list(repo_name: Optional[str], edit: bool, mode: str):
 
 def collect_agents(keywords: tuple = ()) -> list:
     """收集可用 agent 列表，供 agent load 和 driving load 复用。"""
+
     project_root = find_project_root()
     config_manager = ConfigManager(project_root)
 
@@ -428,12 +429,14 @@ def collect_agents(keywords: tuple = ()) -> list:
         for repo_name, repo_agents in all_agents_by_repo.items():
             _add(repo_agents)
     else:
-        kw_set = set(keywords)
+        from driving_cli.utils.match import fuzzy_match_any
+        kw_lower = tuple(k.lower() for k in keywords)
         for repo_name, repo_agents in all_agents_by_repo.items():
-            if repo_name in kw_set:
+            if repo_name.lower() in kw_lower:
                 _add(repo_agents)
                 continue
-            matched = [a for a in repo_agents if a["name"] in kw_set]
+            matched = [a for a in repo_agents
+                       if fuzzy_match_any((a["name"], a.get("description", "")), keywords)]
             _add(matched)
 
     return [

@@ -823,8 +823,10 @@ def collect_repos(keywords: tuple = ()) -> list:
     """收集仓库列表，供 repo load 和 driving load 复用。
 
     不传关键词时，返回所有仓库。
-    传入关键词时，按 repo.name 精确匹配（取并集）。
+    传入关键词时，按 repo.name 精确匹配或 repo.description 模糊匹配（不区分大小写，取并集）。
     """
+    from driving_cli.utils.match import fuzzy_match
+
     project_root = find_project_root()
     config_mgr = ConfigManager(project_root)
 
@@ -836,8 +838,11 @@ def collect_repos(keywords: tuple = ()) -> list:
     if not keywords:
         matched = repos
     else:
-        kw_set = set(keywords)
-        matched = [r for r in repos if r.name in kw_set]
+        kw_lower = tuple(k.lower() for k in keywords)
+        matched = [
+            r for r in repos
+            if r.name.lower() in kw_lower or fuzzy_match(r.description or "", keywords)
+        ]
 
     return [
         {
