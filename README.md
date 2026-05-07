@@ -42,6 +42,7 @@ driving repo load [name...]          # 输出仓库列表（JSON，支持关键�
 driving repo pull <name>             # 从远程拉取更新
 driving repo commit <name> <message> # 提交修改
 driving repo push <name>             # 推送到远程
+driving repo checkout <name> <branch>  # 切换仓库分支
 ```
 
 ## framework — 框架文档管理

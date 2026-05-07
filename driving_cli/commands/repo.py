@@ -800,6 +800,70 @@ def _git_push(repo_cfg: RepoConfig, project_root: Path):
         log_error(f"仓库 '{repo_cfg.name}' 推送失败: {e}")
 
 
+# ==================== repo checkout ====================
+
+@repo_group.command(name="checkout")
+@click.argument("repo_name")
+@click.argument("branch")
+def checkout(repo_name: str, branch: str):
+    """切换仓库分支
+
+    对指定仓库执行 git checkout <branch>，切换到目标分支。
+    如果本地不存在该分支，会尝试从远程拉取。
+
+    示例：
+        driving repo checkout driving main
+        driving repo checkout driving feature/new-skill
+    """
+    project_root = find_project_root()
+    config_mgr = ConfigManager(project_root)
+
+    repo_cfg = config_mgr.get_repo(repo_name)
+    if repo_cfg is None:
+        log_error(f"仓库 '{repo_name}' 不存在，使用 'driving repo list' 查看已安装仓库")
+        raise click.Abort()
+
+    if repo_cfg.type == "local":
+        log_warning(f"仓库 '{repo_name}' 是本地仓库，跳过 checkout 操作")
+        return
+
+    _git_checkout(repo_cfg, project_root, branch)
+
+
+def _git_checkout(repo_cfg: RepoConfig, project_root: Path, branch: str):
+    """对指定远程仓库执行 git checkout"""
+    repo_dir = project_root / repo_cfg.path
+    if not repo_dir.exists():
+        log_error(f"仓库 '{repo_cfg.name}' 目录不存在：{repo_cfg.path}")
+        log_info("请先执行 'driving repo install' 初始化仓库")
+        return
+
+    log_info(f"正在切换仓库 '{repo_cfg.name}' 到分支 '{branch}'...")
+    try:
+        repo = git.Repo(repo_dir)
+        if repo.is_dirty(untracked_files=True):
+            log_warning(f"仓库 '{repo_cfg.name}' 存在未提交的修改，请先提交或暂存后再切换分支")
+            return
+
+        # 先尝试 fetch，确保远程分支信息最新
+        if repo.remotes:
+            try:
+                repo.remotes.origin.fetch()
+            except git.exc.GitCommandError:
+                pass  # fetch 失败不阻断，可能是离线环境
+
+        # 执行 checkout
+        repo.git.checkout(branch)
+        log_success(f"仓库 '{repo_cfg.name}' 已切换到分支 '{branch}'")
+    except git.exc.GitCommandError as e:
+        if "did not match any" in str(e) or "pathspec" in str(e):
+            log_error(f"分支 '{branch}' 不存在，请检查分支名称")
+        else:
+            log_error(f"仓库 '{repo_cfg.name}' 切换分支失败: {e}")
+    except Exception as e:
+        log_error(f"仓库 '{repo_cfg.name}' 切换分支失败: {e}")
+
+
 # ==================== repo load ====================
 
 @repo_group.command(name="load")
