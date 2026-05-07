@@ -1,6 +1,27 @@
 """关键词模糊匹配工具"""
 
 
+def normalize_keywords(keywords: tuple) -> tuple:
+    """将关键词元组中的逗号分隔项展开为独立关键词。
+
+    支持空格分隔（click 自动处理）和逗号分隔，例如：
+        ("a,b", "c") -> ("a", "b", "c")
+        ("a", "b")   -> ("a", "b")
+
+    Args:
+        keywords: click 传入的原始关键词元组
+
+    Returns:
+        展开后的关键词元组
+    """
+    return tuple(
+        part.strip()
+        for kw in keywords
+        for part in kw.split(",")
+        if part.strip()
+    )
+
+
 def fuzzy_match(text: str, keywords: tuple) -> bool:
     """判断 text 是否匹配任一关键词（不区分大小写的子串匹配）。
 

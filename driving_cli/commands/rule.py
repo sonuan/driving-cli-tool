@@ -354,6 +354,9 @@ def rule_load(keywords: tuple):
         driving rule load f-message f-qucall
         driving rule load code-style
     """
+    from driving_cli.utils.match import normalize_keywords
+    keywords = normalize_keywords(keywords)
+
     try:
         output = collect_rules(keywords)
         click.echo(json_module.dumps(output, ensure_ascii=False, indent=2))

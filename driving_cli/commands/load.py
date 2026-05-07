@@ -213,6 +213,11 @@ def load(keywords: tuple, debug: bool, with_modules: str):
     global _debug_enabled, _load_start
     _debug_enabled = debug
     _load_start = time.perf_counter()
+
+    # 支持逗号分隔：将 ("a,b", "c") 展开为 ("a", "b", "c")
+    from driving_cli.utils.match import normalize_keywords
+    keywords = normalize_keywords(keywords)
+
     _dbg(f"driving load 开始，版本={__version__}，keywords={keywords}，with={with_modules}")
     try:
         project_root = find_project_root()

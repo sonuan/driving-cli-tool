@@ -605,6 +605,9 @@ def framework_load(keywords: tuple = ()):
         driving framework load xstatic ximage
         driving framework load driving xstatic
     """
+    from driving_cli.utils.match import normalize_keywords
+    keywords = normalize_keywords(keywords)
+
     try:
         results = collect_frameworks(keywords)
         print(json.dumps({"frameworks": results}, ensure_ascii=False, indent=2))

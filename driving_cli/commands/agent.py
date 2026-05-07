@@ -461,6 +461,9 @@ def agent_load(keywords: tuple):
         driving agent load android
         driving agent load android ios
     """
+    from driving_cli.utils.match import normalize_keywords
+    keywords = normalize_keywords(keywords)
+
     try:
         output = collect_agents(keywords)
         click.echo(json_module.dumps(output, ensure_ascii=False, indent=2))

@@ -879,6 +879,9 @@ def load(keywords: tuple):
         driving repo load repo-a repo-b
     """
     import json as _json
+    from driving_cli.utils.match import normalize_keywords
+    keywords = normalize_keywords(keywords)
+
     result = collect_repos(keywords)
     print(_json.dumps(result, ensure_ascii=False, indent=2))
 

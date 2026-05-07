@@ -24,7 +24,8 @@ pip3 install -e .
 ```bash
 driving load                         # 输出 skills、rules、repos 等，供 AI 会话注入
 driving load <repo-name>             # 只加载指定仓库的 skills/rules（repos 始终全量）
-driving load <repo-name> <repo-name> # 同时加载多个仓库
+driving load <repo-name> <repo-name> # 同时加载多个仓库（空格或逗号分隔均可）
+driving load <name>,<name>           # 逗号分隔写法
 driving load --with framework        # 附带框架文档（关键词同样生效）
 driving load --with agent            # 附带 agent 列表（关键词同样生效）
 driving load --with framework,agent  # 同时附带框架和 agent
