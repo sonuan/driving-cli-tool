@@ -1,19 +1,19 @@
 {
-  "version": "1.1.4",
-  "build_date": "2026-04-23T17:39:03+08:00",
+  "version": "1.1.5",
+  "build_date": "2026-05-07T16:09:41+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
+      "v1.1.5",
+      "feat：driving repo 新增分支切换能力",
+      "feat：driving load <keywords> 支持多关键词，支持name和description的模糊搜索",
       "v1.1.4",
       "feat：新增driving gate门禁规则管理，通过门禁来管控工作流的确认动作一定执行",
       "v1.1.3",
       "feat：driving load 检查仓库更新新增采样率，可以在业务侧控制检测更新提醒频率，默认100%，值-1为自动pull就不做提醒更新",
       "feat：driving load 带关键字为repo时，不要返回repos，不重复返回",
       "feat：优化load命令的返回值如果为空时，不要返回，且有关键词时不返回system_prompt、user_prompt、notifications",
-      "v1.1.2",
-      "feat：driving load 新增参数 --with framework,agent，支持返回frameworks和agents",
-      "feat：新增framework load命令",
-      "feat: driving repo 优化一个文案"
+      "v1.1.2"
   ]
 }
