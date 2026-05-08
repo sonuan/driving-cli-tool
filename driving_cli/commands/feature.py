@@ -13,14 +13,6 @@ import click
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.logger import log_error, log_info, log_warning
 
-# 尝试导入 yaml，如果失败则使用简单解析器
-try:
-    import yaml
-
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
-
 # 精简摘要字段集合
 SUMMARY_FIELDS = {"name", "title", "description", "status", "urls", "path", "repo"}
 
@@ -31,91 +23,10 @@ ALL_FIELDS = {
 }
 
 
-def _parse_frontmatter_simple(yaml_content: str) -> Optional[Dict]:
-    """简化的 YAML 解析器，支持 FEATURE.md 中的所有字段
-
-    Args:
-        yaml_content: YAML 内容字符串
-
-    Returns:
-        Dict: 包含解析字段的字典，缺少 name 则返回 None
-    """
-    result: Dict = {}
-    lines = yaml_content.split("\n")
-    i = 0
-
-    while i < len(lines):
-        line = lines[i]
-        stripped = line.strip()
-
-        if not stripped or stripped.startswith("#"):
-            i += 1
-            continue
-
-        # 解析简单 key: value 字段
-        for field in ("name", "title", "description", "status", "priority", "module", "assignee"):
-            if stripped.startswith(f"{field}:"):
-                value = stripped[len(field) + 1:].strip()
-                result[field] = value
-                i += 1
-                break
-        else:
-            # 解析 tags 列表（YAML 块序列）
-            if stripped.startswith("tags:"):
-                tags = []
-                i += 1
-                while i < len(lines):
-                    tag_line = lines[i]
-                    tag_stripped = tag_line.strip()
-                    if tag_stripped.startswith("- "):
-                        tags.append(tag_stripped[2:].strip())
-                        i += 1
-                    else:
-                        break
-                result["tags"] = tags
-                continue
-
-            # 解析 urls 列表（YAML 块序列，每项含 type/url/title）
-            if stripped.startswith("urls:"):
-                urls = []
-                i += 1
-                current_url: Optional[Dict] = None
-                while i < len(lines):
-                    url_line = lines[i]
-                    url_stripped = url_line.strip()
-                    if url_stripped.startswith("- "):
-                        if current_url is not None:
-                            urls.append(current_url)
-                        # 新的 url 条目，可能包含第一个字段
-                        rest = url_stripped[2:].strip()
-                        current_url = {}
-                        if ":" in rest:
-                            k, v = rest.split(":", 1)
-                            current_url[k.strip()] = v.strip()
-                        i += 1
-                    elif url_stripped and current_url is not None and ":" in url_stripped:
-                        k, v = url_stripped.split(":", 1)
-                        current_url[k.strip()] = v.strip()
-                        i += 1
-                    else:
-                        break
-                if current_url is not None:
-                    urls.append(current_url)
-                result["urls"] = urls
-                continue
-
-            i += 1
-
-    if "name" not in result:
-        return None
-    return result
-
-
 def parse_feature_yaml(feature_md_path: Path) -> Optional[Dict]:
     """解析 FEATURE.md 文件的 YAML frontmatter
 
     提取所有字段：name、title、description、status、priority、module、assignee、tags、urls。
-    优先使用 PyYAML，降级到简单解析器。
 
     Args:
         feature_md_path: FEATURE.md 文件路径
@@ -123,64 +34,24 @@ def parse_feature_yaml(feature_md_path: Path) -> Optional[Dict]:
     Returns:
         Dict: 包含所有 frontmatter 字段的字典，缺少 name 字段则返回 None
     """
+    from driving_cli.utils.yaml_parser import parse_frontmatter
+
     try:
-        content = feature_md_path.read_text(encoding="utf-8")
-
-        # 检查是否有 YAML frontmatter
-        if not content.startswith("---"):
-            return None
-
-        # 按独立行的 --- 分割
-        lines = content.split("\n")
-        end_idx = None
-        for i, line in enumerate(lines[1:], start=1):
-            if line.strip() == "---":
-                end_idx = i
-                break
-
-        if end_idx is None:
-            return None
-
-        yaml_content = "\n".join(lines[1:end_idx]).strip()
-
-        # 优先使用 PyYAML 解析
-        if HAS_YAML:
-            try:
-                yaml_data = yaml.safe_load(yaml_content)
-                if not yaml_data or "name" not in yaml_data:
-                    return None
-                return {
-                    "name": str(yaml_data.get("name", "")),
-                    "title": str(yaml_data.get("title", "") or ""),
-                    "description": str(yaml_data.get("description", "") or ""),
-                    "status": str(yaml_data.get("status", "") or ""),
-                    "priority": str(yaml_data.get("priority", "") or ""),
-                    "module": str(yaml_data.get("module", "") or ""),
-                    "assignee": str(yaml_data.get("assignee", "") or ""),
-                    "tags": list(yaml_data.get("tags") or []),
-                    "urls": list(yaml_data.get("urls") or []),
-                }
-            except Exception as e:
-                log_warning(f"PyYAML 解析失败，尝试使用简化解析器: {e}")
-                parsed = _parse_frontmatter_simple(yaml_content)
-        else:
-            parsed = _parse_frontmatter_simple(yaml_content)
-
-        if parsed is None:
+        data = parse_frontmatter(feature_md_path, required_fields=["name"])
+        if data is None:
             return None
 
         return {
-            "name": str(parsed.get("name", "")),
-            "title": str(parsed.get("title", "") or ""),
-            "description": str(parsed.get("description", "") or ""),
-            "status": str(parsed.get("status", "") or ""),
-            "priority": str(parsed.get("priority", "") or ""),
-            "module": str(parsed.get("module", "") or ""),
-            "assignee": str(parsed.get("assignee", "") or ""),
-            "tags": list(parsed.get("tags") or []),
-            "urls": list(parsed.get("urls") or []),
+            "name": str(data.get("name", "")),
+            "title": str(data.get("title", "") or ""),
+            "description": str(data.get("description", "") or ""),
+            "status": str(data.get("status", "") or ""),
+            "priority": str(data.get("priority", "") or ""),
+            "module": str(data.get("module", "") or ""),
+            "assignee": str(data.get("assignee", "") or ""),
+            "tags": list(data.get("tags") or []),
+            "urls": list(data.get("urls") or []),
         }
-
     except Exception as e:
         log_warning(f"解析 {feature_md_path} 失败: {e}")
         return None

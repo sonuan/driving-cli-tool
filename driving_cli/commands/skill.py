@@ -13,83 +13,6 @@ import click
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
 
-# 尝试导入 yaml，如果失败则使用简单解析器
-try:
-    import yaml
-
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
-
-
-def parse_yaml_simple(yaml_content: str) -> Optional[Dict[str, str]]:
-    """简化的 YAML 解析器，仅支持 name 和 description 字段
-
-    Args:
-        yaml_content: YAML 内容字符串
-
-    Returns:
-        Dict: 包含 name 和 description 的字典，如果解析失败则返回 None
-    """
-    result = {}
-    lines = yaml_content.split("\n")
-    i = 0
-
-    while i < len(lines):
-        line = lines[i].strip()
-
-        # 跳过空行和注释
-        if not line or line.startswith("#"):
-            i += 1
-            continue
-
-        # 解析 name
-        if line.startswith("name:"):
-            value = line[5:].strip()
-            result["name"] = value
-            i += 1
-            continue
-
-        # 解析 description
-        if line.startswith("description:"):
-            value = line[12:].strip()
-
-            # 单行 description
-            if value and value != "|":
-                result["description"] = value
-                i += 1
-                continue
-
-            # 多行 description（使用 |）
-            if value == "|":
-                desc_lines = []
-                i += 1
-                while i < len(lines):
-                    next_line = lines[i]
-                    if next_line.startswith("  ") or next_line.startswith("\t"):
-                        desc_lines.append(next_line.strip())
-                        i += 1
-                    else:
-                        break
-                result["description"] = " ".join(desc_lines)
-                continue
-
-            # 空 description
-            result["description"] = ""
-            i += 1
-            continue
-
-        i += 1
-
-    # 验证必需字段
-    if "name" not in result:
-        return None
-
-    # 确保 description 存在（即使为空）
-    if "description" not in result:
-        result["description"] = ""
-
-    return result
 
 
 def parse_skill_yaml(skill_md_path: Path) -> Optional[Dict[str, str]]:
@@ -101,40 +24,15 @@ def parse_skill_yaml(skill_md_path: Path) -> Optional[Dict[str, str]]:
     Returns:
         Dict: 包含 name 和 description 的字典，如果解析失败则返回 None
     """
-    try:
-        yaml_lines = []
-        with skill_md_path.open(encoding="utf-8") as f:
-            for lineno, line in enumerate(f):
-                if lineno == 0:
-                    if line.rstrip("\n") != "---":
-                        return None
-                    continue
-                if line.strip() == "---":
-                    break
-                yaml_lines.append(line)
-            else:
-                return None  # 未找到结束 ---
+    from driving_cli.utils.yaml_parser import parse_frontmatter
 
-        yaml_content = "".join(yaml_lines).strip()
-
-        if HAS_YAML:
-            try:
-                yaml_data = yaml.safe_load(yaml_content)
-                if not yaml_data or "name" not in yaml_data:
-                    return None
-                return {
-                    "name": yaml_data.get("name", ""),
-                    "description": yaml_data.get("description", ""),
-                }
-            except Exception as e:
-                log_warning(f"PyYAML 解析失败，尝试使用简化解析器: {e}")
-                return parse_yaml_simple(yaml_content)
-        else:
-            return parse_yaml_simple(yaml_content)
-
-    except Exception as e:
-        log_warning(f"解析 {skill_md_path} 失败: {e}")
+    data = parse_frontmatter(skill_md_path, required_fields=["name"])
+    if data is None:
         return None
+    return {
+        "name": str(data.get("name", "")),
+        "description": str(data.get("description", "")),
+    }
 
 
 def _load_manifest_skills(repo_dir: Path) -> Optional[dict]:
@@ -402,11 +300,6 @@ def skill_sync():
     path 字段为完整路径：ai-driving/<repo-name>/skills/<skill-name>/
     """
     try:
-        # 在命令执行时输出 PyYAML 警告
-        if not HAS_YAML:
-            log_warning("PyYAML 未安装，将使用简化的 YAML 解析器")
-            log_warning("建议安装 PyYAML 以获得更好的兼容性: pip3 install PyYAML")
-
         # 查找项目根目录并初始化 ConfigManager
         project_root = find_project_root()
         config_manager = ConfigManager(project_root)

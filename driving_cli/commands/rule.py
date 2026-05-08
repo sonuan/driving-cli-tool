@@ -13,151 +13,33 @@ import click
 from driving_cli.models.config import RepoConfig
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
-try:
-    import yaml
-
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
-
-
-def _parse_frontmatter_simple(yaml_content: str) -> Optional[Dict]:
-    """简化的 YAML 解析器，仅支持 name 和 description 字段
-
-    Args:
-        yaml_content: YAML 内容字符串
-
-    Returns:
-        Dict: 包含 name 和 description 的字典，缺少 name 则返回 None
-    """
-    result = {}
-    lines = yaml_content.split("\n")
-    i = 0
-
-    while i < len(lines):
-        line = lines[i].strip()
-
-        if not line or line.startswith("#"):
-            i += 1
-            continue
-
-        if line.startswith("name:"):
-            result["name"] = line[5:].strip()
-            i += 1
-            continue
-
-        if line.startswith("description:"):
-            value = line[12:].strip()
-            if value and value != "|":
-                result["description"] = value
-                i += 1
-                continue
-            if value == "|":
-                desc_lines = []
-                i += 1
-                while i < len(lines):
-                    next_line = lines[i]
-                    if next_line.startswith("  ") or next_line.startswith("\t"):
-                        desc_lines.append(next_line.strip())
-                        i += 1
-                    else:
-                        break
-                result["description"] = " ".join(desc_lines)
-                continue
-            result["description"] = ""
-            i += 1
-            continue
-
-        i += 1
-
-    if "name" not in result:
-        return None
-    if "description" not in result:
-        result["description"] = ""
-    return result
 
 
 def parse_rule_yaml(rule_md_path: Path, header_only: bool = False) -> Optional[Dict]:
     """解析规则 .md 文件的 YAML frontmatter
 
-    提取 name、description 字段；header_only=False 时还提取正文作为 content。
-    header_only=True 时逐行读取到第二个 --- 即停止，避免读取大文件正文。
+    提取 name、description 字段。
 
     Args:
         rule_md_path: 规则 .md 文件路径
-        header_only: True 时只解析 frontmatter，不读取正文（更快）
+        header_only: 已废弃，保留参数兼容性，不影响行为
 
     Returns:
-        Dict: {"name": ..., "description": ...} 或含 "content" 的完整字典，
+        Dict: {"name": ..., "description": ...}，
               缺少 name 字段或无 frontmatter 则返回 None
     """
-    try:
-        if header_only:
-            yaml_lines = []
-            with rule_md_path.open(encoding="utf-8") as f:
-                for lineno, line in enumerate(f):
-                    if lineno == 0:
-                        if line.rstrip("\n") != "---":
-                            return None
-                        continue
-                    if line.strip() == "---":
-                        break
-                    yaml_lines.append(line)
-                else:
-                    return None  # 未找到结束 ---
-            yaml_content = "".join(yaml_lines).strip()
-            markdown_body = None
-        else:
-            content = rule_md_path.read_text(encoding="utf-8")
-            if not content.startswith("---"):
-                return None
-            lines = content.split("\n")
-            end_idx = None
-            for i, line in enumerate(lines[1:], start=1):
-                if line.strip() == "---":
-                    end_idx = i
-                    break
-            if end_idx is None:
-                return None
-            yaml_content = "\n".join(lines[1:end_idx]).strip()
-            body_lines = lines[end_idx + 1:]
-            while body_lines and not body_lines[0].strip():
-                body_lines = body_lines[1:]
-            markdown_body = "\n".join(body_lines)
+    from driving_cli.utils.yaml_parser import parse_frontmatter
 
-        # 优先使用 PyYAML 解析
-        if HAS_YAML:
-            try:
-                yaml_data = yaml.safe_load(yaml_content)
-                if not yaml_data or "name" not in yaml_data:
-                    return None
-                result = {
-                    "name": str(yaml_data.get("name", "")),
-                    "description": str(yaml_data.get("description", "") or ""),
-                }
-                if not header_only:
-                    result["content"] = markdown_body
-                return result
-            except Exception as e:
-                log_warning(f"PyYAML 解析失败，尝试使用简化解析器: {e}")
-                parsed = _parse_frontmatter_simple(yaml_content)
-        else:
-            parsed = _parse_frontmatter_simple(yaml_content)
-
-        if parsed is None:
-            return None
-
-        result = {
-            "name": parsed["name"],
-            "description": parsed.get("description", ""),
-        }
-        if not header_only:
-            result["content"] = markdown_body
-        return result
-
-    except Exception as e:
-        log_warning(f"解析 {rule_md_path} 失败: {e}")
+    data = parse_frontmatter(rule_md_path, required_fields=["name"])
+    if data is None:
         return None
+    # 强制转为字符串，保留 falsy 值（如 "0"、"false"）
+    name_val = data.get("name")
+    desc_val = data.get("description")
+    return {
+        "name": str(name_val) if name_val is not None else "",
+        "description": str(desc_val) if desc_val is not None else "",
+    }
 
 
 def scan_rules_from_dir(repo_name: str, rules_dir: Path, quiet: bool = False, header_only: bool = False) -> List[Dict]:
@@ -167,10 +49,10 @@ def scan_rules_from_dir(repo_name: str, rules_dir: Path, quiet: bool = False, he
         repo_name: 仓库名称
         rules_dir: rules 目录路径
         quiet: 静默模式，不输出日志
-        header_only: True 时只解析 frontmatter，不读取正文（更快）
+        header_only: 已废弃，保留参数兼容性
 
     Returns:
-        List[Dict]: 规则列表，每条包含 name、description、path、content 字段
+        List[Dict]: 规则列表，每条包含 name、description、path 字段
     """
     rules = []
 
@@ -178,7 +60,7 @@ def scan_rules_from_dir(repo_name: str, rules_dir: Path, quiet: bool = False, he
         if not rule_file.is_file() or rule_file.suffix != ".md":
             continue
 
-        rule_info = parse_rule_yaml(rule_file, header_only=header_only)
+        rule_info = parse_rule_yaml(rule_file)
         if rule_info is None:
             if not quiet:
                 log_warning(f"跳过 {rule_file.name}：缺少 YAML frontmatter 或 name 字段")

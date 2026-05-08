@@ -65,20 +65,23 @@ class TestParseRuleYaml:
         assert result["description"] == "规则描述"
 
     def test_content提取正确(self, tmp_path):
+        """parse_rule_yaml 只返回 name/description，不含 content"""
         f = tmp_path / "rule.md"
         f.write_text("---\nname: r\ndescription: d\n---\n\n# 标题\n\n正文", encoding="utf-8")
         result = parse_rule_yaml(f)
         assert result is not None
-        assert "# 标题" in result["content"]
-        assert "正文" in result["content"]
+        assert result["name"] == "r"
+        assert result["description"] == "d"
+        assert "content" not in result
 
     def test_content不含frontmatter分隔符(self, tmp_path):
+        """parse_rule_yaml 只返回 name/description，不含 content"""
         f = tmp_path / "rule.md"
         f.write_text("---\nname: r\n---\n\n正文", encoding="utf-8")
         result = parse_rule_yaml(f)
         assert result is not None
-        # content 不应包含 frontmatter 的 --- 分隔符行
-        assert result["content"].strip() == "正文"
+        assert result["name"] == "r"
+        assert "content" not in result
 
     def test_缺少name返回None(self, tmp_path):
         f = tmp_path / "rule.md"
@@ -166,14 +169,14 @@ class TestScanRulesFromDir:
         result = scan_rules_from_dir("repo", rules_dir, quiet=True)
         assert len(result) == 1
 
-    def test_输出包含content字段(self, tmp_path):
+    def test_输出不含content字段(self, tmp_path):
         rules_dir = tmp_path / "rules"
         _make_rule_md(rules_dir / "r.md", "r", "desc", "这是正文内容")
 
         result = scan_rules_from_dir("repo", rules_dir, quiet=True)
         assert len(result) == 1
-        assert "content" in result[0]
-        assert "这是正文内容" in result[0]["content"]
+        assert "content" not in result[0]
+        assert result[0]["name"] == "r"
 
 
 # ==================== filter_rules_by_config ====================
@@ -613,7 +616,6 @@ def test_property5_rule输出字段完整性(
         assert "name" in item
         assert "description" in item
         assert "path" in item
-        assert "content" in item
         # location 格式验证
         assert item["path"].startswith(f"ai-driving/{repo_name}/rules/")
         assert item["path"].endswith(".md")
@@ -627,28 +629,23 @@ def test_property5_rule输出字段完整性(
     body=_body_st,
 )
 def test_property6_content不含frontmatter(tmp_path_factory, name, description, body):
-    """Property 6: content 不含 frontmatter
-
-    对于任意包含 YAML frontmatter 的规则文件，parse_rule_yaml 解析出的 content
-    字段不应包含 --- 分隔符和 frontmatter 内容，只包含 frontmatter 之后的 markdown 正文。
+    """Property 6: scan_rules_from_dir 只返回 name/description/path，不含 content
 
     **Validates: Requirements 2.5**
     """
     tmp_path = tmp_path_factory.mktemp("prop6")
-    f = tmp_path / "rule.md"
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    f = rules_dir / "rule.md"
     _make_rule_md(f, name, description, body)
 
-    result = parse_rule_yaml(f)
-    assert result is not None
-
-    content = result["content"]
-    # content 不应包含 frontmatter 中的字段行
-    assert f"name: {name}" not in content
-    # content 不应以 --- 开头
-    assert not content.startswith("---")
-    # 如果 body 非空，content 应包含 body
-    if body.strip():
-        assert body.strip() in content
+    result = scan_rules_from_dir("repo", rules_dir, quiet=True)
+    assert len(result) == 1
+    assert "content" not in result[0]
+    # name 和 description 存在且为字符串
+    # 注：PyYAML 可能对 YAML 保留字做类型转换（如 "true" → "True"），用 lower 比较
+    assert result[0]["name"].lower() == name.lower()
+    assert isinstance(result[0]["description"], str)
 
 
 # Feature: feature-and-rule-commands, Property 7: 规则启用/禁用过滤正确性

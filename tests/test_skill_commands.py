@@ -22,7 +22,6 @@ from driving_cli.commands.skill import (
     generate_available_skills_content,
     merge_skills_from_all_repos,
     parse_skill_yaml,
-    parse_yaml_simple,
     scan_skills_from_dir,
     update_agents_md,
 )
@@ -114,40 +113,47 @@ def config_manager(project_with_two_repos):
     return ConfigManager(project_with_two_repos)
 
 
-# ==================== parse_yaml_simple 测试 ====================
+# ==================== yaml_parser 测试 ====================
+
+from driving_cli.utils.yaml_parser import parse_frontmatter
 
 
-class TestParseYamlSimple:
-    """测试简化 YAML 解析器"""
+class TestYamlParser:
+    """测试统一 YAML 解析器"""
 
-    def test_解析基本name和description(self):
-        yaml_content = "name: my-skill\ndescription: 这是描述"
-        result = parse_yaml_simple(yaml_content)
+    def test_解析基本name和description(self, tmp_path):
+        f = tmp_path / "test.md"
+        f.write_text("---\nname: my-skill\ndescription: 这是描述\n---\n", encoding="utf-8")
+        result = parse_frontmatter(f)
         assert result is not None
         assert result["name"] == "my-skill"
         assert result["description"] == "这是描述"
 
-    def test_缺少name时返回None(self):
-        yaml_content = "description: 只有描述"
-        result = parse_yaml_simple(yaml_content)
+    def test_缺少name时required_fields校验(self, tmp_path):
+        f = tmp_path / "test.md"
+        f.write_text("---\ndescription: 只有描述\n---\n", encoding="utf-8")
+        result = parse_frontmatter(f, required_fields=["name"])
         assert result is None
 
-    def test_缺少description时默认为空字符串(self):
-        yaml_content = "name: my-skill"
-        result = parse_yaml_simple(yaml_content)
+    def test_缺少description时默认无该字段(self, tmp_path):
+        f = tmp_path / "test.md"
+        f.write_text("---\nname: my-skill\n---\n", encoding="utf-8")
+        result = parse_frontmatter(f)
         assert result is not None
-        assert result["description"] == ""
+        assert result["name"] == "my-skill"
 
-    def test_多行description(self):
-        yaml_content = "name: my-skill\ndescription: |\n  第一行\n  第二行"
-        result = parse_yaml_simple(yaml_content)
+    def test_多行description(self, tmp_path):
+        f = tmp_path / "test.md"
+        f.write_text("---\nname: my-skill\ndescription: |\n  第一行\n  第二行\n---\n", encoding="utf-8")
+        result = parse_frontmatter(f)
         assert result is not None
-        assert "第一行" in result["description"]
-        assert "第二行" in result["description"]
+        assert "第一行" in str(result["description"])
+        assert "第二行" in str(result["description"])
 
-    def test_跳过注释行(self):
-        yaml_content = "# 注释\nname: my-skill\n# 另一个注释\ndescription: 描述"
-        result = parse_yaml_simple(yaml_content)
+    def test_跳过注释行(self, tmp_path):
+        f = tmp_path / "test.md"
+        f.write_text("---\n# 注释\nname: my-skill\n# 另一个注释\ndescription: 描述\n---\n", encoding="utf-8")
+        result = parse_frontmatter(f)
         assert result is not None
         assert result["name"] == "my-skill"
 

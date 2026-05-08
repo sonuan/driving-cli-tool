@@ -13,12 +13,6 @@ import click
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.logger import log_error, log_info, log_warning
 
-try:
-    import yaml
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
-
 VALID_TYPES = ("skill", "rule", "agent", "framework")
 
 
@@ -31,31 +25,11 @@ def _parse_refine_frontmatter(file_path: Path) -> Optional[Dict]:
     Returns:
         Dict 或 None（无 frontmatter / 缺少必填字段）
     """
+    from driving_cli.utils.yaml_parser import parse_frontmatter
+
     try:
-        yaml_lines = []
-        with file_path.open(encoding="utf-8") as f:
-            for lineno, line in enumerate(f):
-                if lineno == 0:
-                    if line.rstrip("\n") != "---":
-                        return None
-                    continue
-                if line.strip() == "---":
-                    break
-                yaml_lines.append(line)
-            else:
-                return None
-
-        yaml_content = "".join(yaml_lines).strip()
-
-        if HAS_YAML:
-            try:
-                data = yaml.safe_load(yaml_content)
-            except Exception:
-                data = _parse_simple(yaml_content)
-        else:
-            data = _parse_simple(yaml_content)
-
-        if not data or "target_type" not in data:
+        data = parse_frontmatter(file_path, required_fields=["target_type"])
+        if data is None:
             return None
 
         return {
@@ -70,18 +44,6 @@ def _parse_refine_frontmatter(file_path: Path) -> Optional[Dict]:
     except Exception as e:
         log_warning(f"解析 {file_path.name} 失败: {e}")
         return None
-
-
-def _parse_simple(yaml_content: str) -> Optional[Dict]:
-    """简化 YAML 解析，仅支持单行 key: value。"""
-    result = {}
-    for line in yaml_content.split("\n"):
-        line = line.strip()
-        if not line or line.startswith("#") or ":" not in line:
-            continue
-        key, _, value = line.partition(":")
-        result[key.strip()] = value.strip()
-    return result or None
 
 
 def _scan_refines(repo_name: str, refines_dir: Path, type_filter: Optional[str] = None) -> List[Dict]:

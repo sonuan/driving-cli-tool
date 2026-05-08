@@ -17,12 +17,6 @@ from driving_cli.models.config import RepoConfig
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
 
-try:
-    import yaml
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
-
 
 # ---------------------------------------------------------------------------
 # YAML frontmatter 解析
@@ -34,66 +28,8 @@ def _parse_frontmatter(md_path: Path) -> Optional[Dict]:
     要求文件以 --- 开头，找到第二个 --- 后停止读取，避免加载大文件正文。
     缺少 name 字段时返回 None。
     """
-    try:
-        yaml_lines: List[str] = []
-        with md_path.open(encoding="utf-8") as f:
-            for lineno, line in enumerate(f):
-                if lineno == 0:
-                    if line.rstrip("\n") != "---":
-                        return None
-                    continue
-                if line.strip() == "---":
-                    break
-                yaml_lines.append(line)
-            else:
-                return None  # 未找到结束 ---
-
-        yaml_content = "".join(yaml_lines).strip()
-
-        if HAS_YAML:
-            try:
-                data = yaml.safe_load(yaml_content)
-                if not data or "name" not in data:
-                    return None
-                return data
-            except Exception:
-                pass
-
-        # 简化解析器（无 PyYAML 时降级）
-        result: Dict = {}
-        lines_list = yaml_content.splitlines()
-        i = 0
-        while i < len(lines_list):
-            line = lines_list[i]
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                i += 1
-                continue
-            if ":" in stripped:
-                k, _, v = stripped.partition(":")
-                k = k.strip()
-                v = v.strip()
-                if v:
-                    result[k] = v
-                else:
-                    # 可能是块序列，向后收集 "- item"
-                    items = []
-                    i += 1
-                    while i < len(lines_list):
-                        next_stripped = lines_list[i].strip()
-                        if next_stripped.startswith("- "):
-                            items.append(next_stripped[2:].strip())
-                            i += 1
-                        else:
-                            break
-                    result[k] = items if items else ""
-                    continue
-            i += 1
-        return result if "name" in result else None
-
-    except Exception as e:
-        log_warning(f"解析 {md_path} 失败: {e}")
-        return None
+    from driving_cli.utils.yaml_parser import parse_frontmatter
+    return parse_frontmatter(md_path, required_fields=["name"])
 
 
 # ---------------------------------------------------------------------------

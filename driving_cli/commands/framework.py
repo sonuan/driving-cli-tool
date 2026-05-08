@@ -492,28 +492,21 @@ def framework_sources(framework_name: str):
 
 
 
-def _parse_yaml_frontmatter(content: str) -> Dict[str, str]:
+def _parse_yaml_frontmatter(file_path: Path) -> Dict[str, str]:
     """解析 Markdown 文件的 YAML front-matter
 
-    只提取 --- 块内的顶层 key: value 字符串字段，不依赖 PyYAML。
-
     Args:
-        content: Markdown 文件内容
+        file_path: Markdown 文件路径
 
     Returns:
         Dict[str, str]: 解析出的字段字典，解析失败返回空字典
     """
-    match = re.match(r"^---\s*\n(.*?)\n---\s*\n", content, re.DOTALL)
-    if not match:
-        return {}
+    from driving_cli.utils.yaml_parser import parse_frontmatter
 
-    result: Dict[str, str] = {}
-    for line in match.group(1).splitlines():
-        # 只处理顶层 key: value（不以空格开头）
-        kv = re.match(r"^(\w[\w\-]*)\s*:\s*(.+)$", line)
-        if kv:
-            result[kv.group(1)] = kv.group(2).strip()
-    return result
+    data = parse_frontmatter(file_path)
+    if data is None:
+        return {}
+    return {k: str(v) if not isinstance(v, str) else v for k, v in data.items()}
 
 
 def collect_frameworks(keywords: tuple = ()) -> List[Dict]:
@@ -548,11 +541,7 @@ def collect_frameworks(keywords: tuple = ()) -> List[Dict]:
             framework_md = fw_dir / "FRAMEWORK.md"
             if not framework_md.exists():
                 continue
-            try:
-                content = framework_md.read_text(encoding="utf-8")
-            except OSError:
-                continue
-            meta = _parse_yaml_frontmatter(content)
+            meta = _parse_yaml_frontmatter(framework_md)
             repo_results.append({
                 "name": meta.get("name", fw_dir.name),
                 "description": meta.get("description", ""),
