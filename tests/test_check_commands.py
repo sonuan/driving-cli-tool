@@ -1,19 +1,20 @@
 """check 命令单元测试
 
 覆盖：
+- _compare_local_remote：behind>0 返回 True，only-ahead 返回 False，无法解析返回 None
 - _collect_updatable：无仓库、跳过未初始化仓库、跳过 local 仓库
 - check --json：输出结构、有/无可更新仓库
 """
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from click.testing import CliRunner
 
 from driving_cli.cli import cli
-from driving_cli.commands.check import _collect_updatable
+from driving_cli.commands.check import _collect_updatable, _compare_local_remote
 from driving_cli.utils.config_manager import ConfigManager
 
 
@@ -34,6 +35,45 @@ def _make_config(tmp_path: Path, repos: list) -> None:
 @pytest.fixture
 def runner():
     return CliRunner()
+
+
+# ==================== _compare_local_remote ====================
+
+class TestCompareLocalRemote:
+    def _mock_check_output(self, behind: int, ahead: int = 0):
+        """返回模拟 git rev-list --left-right --count 输出的 side_effect"""
+        return f"{ahead}\t{behind}\n"
+
+    def test_behind大于0时返回True(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        with patch("subprocess.check_output", return_value="0\t3\n"):
+            result = _compare_local_remote(tmp_path)
+        assert result is True
+
+    def test_仅ahead时返回False(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        with patch("subprocess.check_output", return_value="2\t0\n"):
+            result = _compare_local_remote(tmp_path)
+        assert result is False
+
+    def test_ahead和behind都为0时返回False(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        with patch("subprocess.check_output", return_value="0\t0\n"):
+            result = _compare_local_remote(tmp_path)
+        assert result is False
+
+    def test_ahead和behind都大于0时返回True(self, tmp_path):
+        """分叉情况：远端有新提交，仍需提醒"""
+        (tmp_path / ".git").mkdir()
+        with patch("subprocess.check_output", return_value="1\t2\n"):
+            result = _compare_local_remote(tmp_path)
+        assert result is True
+
+    def test_所有ref均失败时返回None(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        with patch("subprocess.check_output", side_effect=Exception("git error")):
+            result = _compare_local_remote(tmp_path)
+        assert result is None
 
 
 # ==================== _collect_updatable ====================

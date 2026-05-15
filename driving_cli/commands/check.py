@@ -26,28 +26,27 @@ def _get_repo_version(repo_dir: Path) -> str:
 
 
 def _compare_local_remote(repo_dir: Path) -> Optional[bool]:
-    """纯本地对比 HEAD 与上次 fetch 的远端引用，不联网"""
-    try:
-        local = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
-            cwd=str(repo_dir), stderr=subprocess.DEVNULL, text=True,
-        ).strip()
-        for ref in ("@{u}", "origin/HEAD", "origin/main", "origin/master"):
-            try:
-                remote = subprocess.check_output(
-                    ["git", "rev-parse", ref],
-                    cwd=str(repo_dir), stderr=subprocess.DEVNULL, text=True,
-                ).strip()
-                return local != remote
-            except Exception:
-                continue
-        return None
-    except Exception:
-        return None
+    """纯本地对比 HEAD 与上次 fetch 的远端引用，不联网。
+    只有远端有本地没有的提交（behind > 0）才返回 True，
+    仅本地超前（只有 ahead）返回 False，无法判断返回 None。
+    """
+    for ref in ("@{u}", "origin/HEAD", "origin/main", "origin/master"):
+        try:
+            output = subprocess.check_output(
+                ["git", "rev-list", "--left-right", "--count", f"HEAD...{ref}"],
+                cwd=str(repo_dir), stderr=subprocess.DEVNULL, text=True,
+            ).strip()
+            _ahead, behind = map(int, output.split())
+            return behind > 0
+        except Exception:
+            continue
+    return None
 
 
 def _has_new_version(repo_dir: Path) -> Optional[bool]:
-    """fetch 后对比本地与远端，返回 True/False/None（None 表示网络失败）"""
+    """fetch 后对比本地与远端，返回 True/False/None（None 表示网络失败）。
+    只有远端有新提交（behind > 0）才返回 True。
+    """
     try:
         subprocess.run(
             ["git", "fetch", "--quiet"],
