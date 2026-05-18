@@ -64,6 +64,7 @@ def build_result_json(
     action: str,
     next_text: str,
     note: str = "",
+    user_prompt: str = "按 next 字段执行后续动作",
 ) -> dict:
     """构建统一返回 JSON 结构
 
@@ -73,6 +74,7 @@ def build_result_json(
         action: 动作 key
         next_text: 下一步操作描述
         note: 备注（amend 时有值）
+        user_prompt: 用户提示语（来自 gates.json 顶层 user_prompt 字段）
 
     Returns:
         包含 gate_id, result, action, next, note, user_prompt 的 dict
@@ -83,5 +85,5 @@ def build_result_json(
         "action": action,
         "next": next_text,
         "note": note,
-        "user_prompt": "按 next 字段执行后续动作",
+        "user_prompt": user_prompt,
     }

@@ -144,6 +144,26 @@ def _collect_all_gates_data() -> Tuple[List[Dict], str]:
     return all_gates, "\n".join(system_prompts)
 
 
+def _get_user_prompt() -> str:
+    """从 gates.json 顶层读取 user_prompt 字段。
+
+    多仓库时取第一个非空值。未配置时返回默认值。
+    """
+    project_root = find_project_root()
+    config_manager = ConfigManager(project_root)
+
+    for repo in config_manager.get_all_repos():
+        repo_dir = config_manager.get_repo_dir(repo.name)
+        data = load_gates_file(repo.name, repo_dir)
+        if data is None:
+            continue
+        up = data.get("user_prompt", "")
+        if up:
+            return up
+
+    return "按 next 字段执行后续动作"
+
+
 @click.group(name="gate")
 def gate_group():
     """门禁规则管理
@@ -290,15 +310,9 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
             click.echo("错误：--context 参数不是有效的 JSON 格式", err=True)
             sys.exit(1)
 
-    # 2. GATE-R1 排除逻辑
-    if gate_id.upper() == "GATE-R1":
-        click.echo(
-            "错误：GATE-R1 已从 CLI 门禁流程中移除，由 AI 对话内直接处理", err=True
-        )
-        sys.exit(1)
-
-    # 3. 加载 gate 定义
+    # 2. 加载 gate 定义
     all_gates, _system_prompt = _collect_all_gates_data()
+    user_prompt = _get_user_prompt()
     gate = None
     for g in all_gates:
         if g.get("id", "").lower() == gate_id.lower():
@@ -361,6 +375,7 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
             result="blocked",
             action="门禁校验失败",
             next_text=requires_result.message,
+            user_prompt=user_prompt,
         )
         click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
         return
@@ -413,6 +428,7 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
             result="auto_pass",
             action=action_key,
             next_text=next_text,
+            user_prompt=user_prompt,
         )
 
         # 根据 mode 决定输出格式
@@ -460,6 +476,7 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
         action=action_key,
         next_text=next_text,
         note=note,
+        user_prompt=user_prompt,
     )
     click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
 
@@ -513,6 +530,7 @@ def gate_pass(gate_id: str, path: str, note: str):
     """手动通过门禁"""
     # 1. 加载所有 gate 定义
     all_gates, _system_prompt = _collect_all_gates_data()
+    user_prompt = _get_user_prompt()
 
     # 2. 查找 gate 定义（大小写不敏感）
     gate = None
@@ -525,14 +543,7 @@ def gate_pass(gate_id: str, path: str, note: str):
         click.echo(f"错误：未找到门禁 {gate_id}", err=True)
         sys.exit(1)
 
-    # 3. GATE-R1 排除逻辑
-    if gate_id.upper() == "GATE-R1":
-        click.echo(
-            "错误：GATE-R1 已从 CLI 门禁流程中移除，由 AI 对话内直接处理", err=True
-        )
-        sys.exit(1)
-
-    # 4. 初始化状态管理器和前置依赖校验器
+    # 3. 初始化状态管理器和前置依赖校验器
     state_manager = GateStateManager(path)
     requires_checker = RequiresChecker(state_manager, all_gates)
 
@@ -548,6 +559,7 @@ def gate_pass(gate_id: str, path: str, note: str):
             result="blocked",
             action="门禁校验失败",
             next_text=requires_result.message,
+            user_prompt=user_prompt,
         )
         click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
         return
@@ -587,5 +599,6 @@ def gate_pass(gate_id: str, path: str, note: str):
         action=action_key,
         next_text=next_text,
         note=note,
+        user_prompt=user_prompt,
     )
     click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))

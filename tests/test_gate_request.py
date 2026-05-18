@@ -132,38 +132,6 @@ class TestGateRequestInvalidContext:
         assert "错误：--context 参数不是有效的 JSON 格式" in result.output
 
 
-class TestGateRequestGateR1Exclusion:
-    """测试 GATE-R1 排除逻辑"""
-
-    def test_gate_r1_excluded(self, runner, tmp_path):
-        """Requirements 1.8: GATE-R1 被排除"""
-        mock_gate = {"id": "GATE-R1", "name": "Test", "level": "blocking", "requires": []}
-        with patch(
-            "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
-        ):
-            result = runner.invoke(
-                cli,
-                ["gate", "request", "GATE-R1", "--path", str(tmp_path)],
-            )
-        assert result.exit_code != 0
-        assert "GATE-R1 已从 CLI 门禁流程中移除" in result.output
-
-    def test_gate_r1_case_insensitive(self, runner, tmp_path):
-        """GATE-R1 排除应大小写不敏感"""
-        mock_gate = {"id": "GATE-R1", "name": "Test", "level": "blocking", "requires": []}
-        with patch(
-            "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
-        ):
-            result = runner.invoke(
-                cli,
-                ["gate", "request", "gate-r1", "--path", str(tmp_path)],
-            )
-        assert result.exit_code != 0
-        assert "GATE-R1 已从 CLI 门禁流程中移除" in result.output
-
-
 class TestGateRequestGateNotFound:
     """测试 gate-id 未找到"""
 
@@ -682,20 +650,6 @@ class TestGatePass:
             )
         assert result.exit_code != 0
         assert "错误：未找到门禁 GATE-NONEXIST" in result.output
-
-    def test_pass_gate_r1_excluded(self, runner, tmp_path):
-        """Requirements 12.1: GATE-R1 被排除"""
-        mock_gate = {"id": "GATE-R1", "name": "Test", "level": "blocking", "requires": []}
-        with patch(
-            "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
-        ):
-            result = runner.invoke(
-                cli,
-                ["gate", "pass", "GATE-R1", "--path", str(tmp_path)],
-            )
-        assert result.exit_code != 0
-        assert "GATE-R1 已从 CLI 门禁流程中移除" in result.output
 
     def test_pass_prerequisites_not_met(self, runner, tmp_path):
         """Requirements 12.6: 前置依赖未满足时输出 blocked"""
