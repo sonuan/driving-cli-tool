@@ -5,6 +5,7 @@
 """
 
 import json as json_module
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -12,6 +13,15 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from driving_cli.gate import (
+    AutoPassEngine,
+    ConditionChecker,
+    GateStateManager,
+    InteractiveRunner,
+    RequiresChecker,
+    TemplateRenderer,
+    build_result_json,
+)
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.logger import log_warning
 
@@ -262,3 +272,320 @@ def gate_load(gate_ids: tuple):
     if system_prompt:
         result = {"system_prompt": system_prompt, "gates": matched_gates}
     click.echo(json_module.dumps(result, ensure_ascii=False, indent=2))
+
+
+@gate_group.command(name="request")
+@click.argument("gate_id")
+@click.option("--path", required=True, help="feature 目录路径")
+@click.option("--context", default=None, help="JSON 字符串，用于模板变量渲染")
+@click.option("--dry-run", is_flag=True, default=False, help="仅展示模板，不执行交互")
+def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
+    """执行门禁请求"""
+    # 1. 解析 --context JSON
+    context_dict = {}
+    if context is not None:
+        try:
+            context_dict = json_module.loads(context)
+        except (json_module.JSONDecodeError, ValueError):
+            click.echo("错误：--context 参数不是有效的 JSON 格式", err=True)
+            sys.exit(1)
+
+    # 2. GATE-R1 排除逻辑
+    if gate_id.upper() == "GATE-R1":
+        click.echo(
+            "错误：GATE-R1 已从 CLI 门禁流程中移除，由 AI 对话内直接处理", err=True
+        )
+        sys.exit(1)
+
+    # 3. 加载 gate 定义
+    all_gates, _system_prompt = _collect_all_gates_data()
+    gate = None
+    for g in all_gates:
+        if g.get("id", "").lower() == gate_id.lower():
+            gate = g
+            break
+
+    if gate is None:
+        click.echo(f"错误：未找到门禁 {gate_id}", err=True)
+        sys.exit(1)
+
+    # 4. 初始化组件
+    state_manager = GateStateManager(path)
+    gate_state = state_manager.get_gate_state(gate_id)
+
+    gate_state_dict = {
+        "request_count": gate_state.request_count,
+        "auto_pass_count": gate_state.auto_pass_count,
+        "user_pass_count": gate_state.user_pass_count,
+        "user_amend_count": gate_state.user_amend_count,
+        "pass_rate": gate_state.pass_rate,
+        "last_result": gate_state.last_result,
+    }
+
+    renderer = TemplateRenderer(path, context_dict, gate_state_dict)
+    checker = ConditionChecker(renderer)
+    auto_pass_engine = AutoPassEngine(checker)
+    requires_checker = RequiresChecker(state_manager, all_gates)
+    interactive_runner = InteractiveRunner(renderer)
+
+    # 5. Dry-run 模式
+    if dry_run:
+        # 渲染并展示 template
+        template_lines = gate.get("template", [])
+        if template_lines:
+            rendered = renderer.render_lines(template_lines)
+            click.echo(rendered)
+            click.echo("")
+
+        # 展示 actions（不选择）
+        actions = gate.get("actions", {})
+        if actions:
+            click.echo("可用操作：")
+            for key, action_def in actions.items():
+                # 兼容 actions 值为字符串的旧格式
+                if isinstance(action_def, str):
+                    next_desc = action_def
+                else:
+                    next_desc = action_def.get("next", "")
+                click.echo(f"  - {key} — {next_desc}")
+        return
+
+    # 6. 正常模式
+    # 6a. Requires 校验
+    requires_result = requires_checker.check(
+        gate.get("requires", []), gate.get("level", "blocking")
+    )
+    if not requires_result.passed:
+        result_json = build_result_json(
+            gate_id=gate_id,
+            result="blocked",
+            action="门禁校验失败",
+            next_text=requires_result.message,
+        )
+        click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
+        return
+
+    # 6b. Auto_pass 检查
+    auto_pass_config = gate.get("auto_pass", {"mode": "human_only"})
+    auto_pass_result = auto_pass_engine.evaluate(
+        auto_pass_config, gate_state.user_amend_count
+    )
+
+    if auto_pass_result.passed:
+        # auto_pass 成功
+        on_pass = auto_pass_config.get("on_pass", {})
+        actions = gate.get("actions", {})
+
+        # 兼容 on_pass 为字符串的旧格式
+        if isinstance(on_pass, str):
+            on_pass_next = renderer.render(on_pass)
+            action_key = next(iter(actions), "")
+        else:
+            # 确定 action key
+            action_key = on_pass.get("action", "")
+            if not action_key:
+                action_key = next(iter(actions), "")
+            on_pass_next = renderer.render(on_pass.get("next", ""))
+
+        # 构建 next_text: on_pass.next + "。" + actions[action_key].next
+        action_next = ""
+        if action_key and action_key in actions:
+            action_def = actions[action_key]
+            # 兼容 actions 值为字符串的旧格式
+            if isinstance(action_def, str):
+                action_next = renderer.render(action_def)
+            else:
+                action_next = renderer.render(action_def.get("next", ""))
+
+        if on_pass_next and action_next:
+            next_text = f"{on_pass_next}。{action_next}"
+        elif on_pass_next:
+            next_text = on_pass_next
+        else:
+            next_text = action_next
+
+        # 记录状态
+        state_manager.record_result(gate_id, "auto_pass", action_key)
+
+        # 构建 Result_JSON
+        result_json = build_result_json(
+            gate_id=gate_id,
+            result="auto_pass",
+            action=action_key,
+            next_text=next_text,
+        )
+
+        # 根据 mode 决定输出格式
+        mode = auto_pass_config.get("mode", "human_only")
+        if mode == "full_auto":
+            click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
+        else:
+            # notify_pass
+            click.echo(f"✅ {on_pass_next}")
+            click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
+        return
+
+    # 6c. 交互模式（auto_pass 失败或跳过）
+    action_key, note = interactive_runner.run(
+        gate,
+        auto_pass_result.condition_results,
+        gate_state.user_amend_count,
+        auto_pass_result.forced_interactive,
+    )
+
+    # 确定 result_type
+    actions = gate.get("actions", {})
+    selected_action = actions.get(action_key, {})
+    # 兼容 actions 值为字符串的旧格式
+    if isinstance(selected_action, str):
+        # 字符串格式无 requires_note 字段，根据是否有 note 判断
+        result_type = "amend" if note else "pass"
+        next_text = renderer.render(selected_action)
+    else:
+        if selected_action.get("requires_note", False):
+            result_type = "amend"
+        else:
+            result_type = "pass"
+        next_text = renderer.render(selected_action.get("next", ""))
+
+    # 记录状态
+    state_manager.record_result(gate_id, result_type, action_key, note)
+
+    # 构建 next_text 已在上面完成
+
+    # 输出 Result_JSON
+    result_json = build_result_json(
+        gate_id=gate_id,
+        result=result_type,
+        action=action_key,
+        next_text=next_text,
+        note=note,
+    )
+    click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
+
+
+@gate_group.command(name="status")
+@click.argument("gate_id", required=False, default=None)
+@click.option("--path", required=True, help="feature 目录路径")
+def gate_status(gate_id: Optional[str], path: str):
+    """查看门禁状态"""
+    state_manager = GateStateManager(path)
+
+    # state 文件不存在时输出提示信息
+    if not state_manager.state_file.exists():
+        click.echo("尚未记录任何门禁状态")
+        return
+
+    data = state_manager.load()
+
+    if gate_id is not None:
+        # 输出指定 gate 的状态
+        gates = data.get("gates", {})
+        gate_data = gates.get(gate_id, {})
+        click.echo(json_module.dumps(gate_data, ensure_ascii=False, indent=2))
+    else:
+        # 输出所有 gate 状态
+        gates = data.get("gates", {})
+        click.echo(json_module.dumps(gates, ensure_ascii=False, indent=2))
+
+
+@gate_group.command(name="history")
+@click.argument("gate_id")
+@click.option("--path", required=True, help="feature 目录路径")
+def gate_history(gate_id: str, path: str):
+    """查看门禁历史"""
+    state_manager = GateStateManager(path)
+    gate_state = state_manager.get_gate_state(gate_id)
+
+    if not gate_state.history:
+        click.echo(f"门禁 {gate_id} 暂无历史记录")
+        return
+
+    for entry in gate_state.history:
+        click.echo(f"{entry.at}  {entry.action}  {entry.note}")
+
+
+@gate_group.command(name="pass")
+@click.argument("gate_id")
+@click.option("--path", required=True, help="feature 目录路径")
+@click.option("--note", default="", help="通过说明")
+def gate_pass(gate_id: str, path: str, note: str):
+    """手动通过门禁"""
+    # 1. 加载所有 gate 定义
+    all_gates, _system_prompt = _collect_all_gates_data()
+
+    # 2. 查找 gate 定义（大小写不敏感）
+    gate = None
+    for g in all_gates:
+        if g.get("id", "").lower() == gate_id.lower():
+            gate = g
+            break
+
+    if gate is None:
+        click.echo(f"错误：未找到门禁 {gate_id}", err=True)
+        sys.exit(1)
+
+    # 3. GATE-R1 排除逻辑
+    if gate_id.upper() == "GATE-R1":
+        click.echo(
+            "错误：GATE-R1 已从 CLI 门禁流程中移除，由 AI 对话内直接处理", err=True
+        )
+        sys.exit(1)
+
+    # 4. 初始化状态管理器和前置依赖校验器
+    state_manager = GateStateManager(path)
+    requires_checker = RequiresChecker(state_manager, all_gates)
+
+    # 5. 前置依赖校验
+    requires_result = requires_checker.check(
+        gate.get("requires", []), gate.get("level", "blocking")
+    )
+
+    if not requires_result.passed:
+        # 阻断时输出 blocked Result_JSON
+        result_json = build_result_json(
+            gate_id=gate_id,
+            result="blocked",
+            action="门禁校验失败",
+            next_text=requires_result.message,
+        )
+        click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
+        return
+
+    # 6. 通过：确定 action_key（actions 的第一个 key）
+    actions = gate.get("actions", {})
+    action_key = next(iter(actions), "")
+
+    # 7. 记录状态（user_pass）
+    state_manager.record_result(gate_id, "pass", action_key, note)
+
+    # 8. 构建 next_text
+    gate_state = state_manager.get_gate_state(gate_id)
+    gate_state_dict = {
+        "request_count": gate_state.request_count,
+        "auto_pass_count": gate_state.auto_pass_count,
+        "user_pass_count": gate_state.user_pass_count,
+        "user_amend_count": gate_state.user_amend_count,
+        "pass_rate": gate_state.pass_rate,
+        "last_result": gate_state.last_result,
+    }
+    renderer = TemplateRenderer(path, {}, gate_state_dict)
+    next_text = ""
+    if action_key and action_key in actions:
+        action_def = actions[action_key]
+        # 兼容 actions 值为字符串的旧格式
+        if isinstance(action_def, str):
+            next_text = renderer.render(action_def)
+        else:
+            next_text = renderer.render(action_def.get("next", ""))
+
+    # 9. 输出确认行 + Result_JSON
+    click.echo(f"✅ 已手动通过: {gate_id}")
+    result_json = build_result_json(
+        gate_id=gate_id,
+        result="pass",
+        action=action_key,
+        next_text=next_text,
+        note=note,
+    )
+    click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))

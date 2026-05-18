@@ -91,6 +91,14 @@ driving gate list --json                   # 以 JSON 数组格式输出（每�
 driving gate load                          # 加载所有 gate 的完整内容（JSON）
 driving gate load <gate-id>                # 加载指定 gate（大小写不敏感）
 driving gate load <gate-id> <gate-id> ...  # 加载多个指定 gate
+driving gate request <gate-id> --path <dir>                  # 执行门禁请求（auto_pass → 交互选择）
+driving gate request <gate-id> --path <dir> --context '{}'   # 附带 JSON 上下文变量
+driving gate request <gate-id> --path <dir> --dry-run        # 仅预览模板，不执行交互
+driving gate status --path <dir>           # 查看所有 gate 状态
+driving gate status <gate-id> --path <dir> # 查看指定 gate 状态
+driving gate history <gate-id> --path <dir>  # 查看指定 gate 历史记录
+driving gate pass <gate-id> --path <dir>   # 手动通过门禁
+driving gate pass <gate-id> --path <dir> --note "说明"  # 带说明手动通过
 ```
 
 `gate load` 输出格式：
