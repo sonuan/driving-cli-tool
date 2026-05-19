@@ -150,8 +150,10 @@ class GateStateManager:
             gate_data["history"] = []
         gate_data["history"].append(history_entry)
 
-        # 写回 gate 数据
-        data["gates"][gate_id] = gate_data
+        # 写回 gate 数据（name 始终排在第一位）
+        ordered = {"name": gate_data.get("name", "")}
+        ordered.update({k: v for k, v in gate_data.items() if k != "name"})
+        data["gates"][gate_id] = ordered
 
         # 更新顶层 updated 字段
         data["updated"] = timestamp

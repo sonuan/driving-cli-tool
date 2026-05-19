@@ -291,6 +291,24 @@ class TestRecordResult:
         data = manager.load()
         assert data["gates"]["GATE-R5"]["name"] == "已有名称"
 
+    def test_name字段始终排在第一位(self, tmp_path):
+        manager = GateStateManager(str(tmp_path))
+        manager.record_result("GATE-R5", "pass", "确认", "", gate_name="代码审查")
+
+        data = manager.load()
+        keys = list(data["gates"]["GATE-R5"].keys())
+        assert keys[0] == "name"
+
+    def test_多次记录后name字段仍排在第一位(self, tmp_path):
+        manager = GateStateManager(str(tmp_path))
+        manager.record_result("GATE-R5", "amend", "修改", "", gate_name="旧名称")
+        manager.record_result("GATE-R5", "pass", "确认", "", gate_name="新名称")
+
+        data = manager.load()
+        keys = list(data["gates"]["GATE-R5"].keys())
+        assert keys[0] == "name"
+        assert data["gates"]["GATE-R5"]["name"] == "新名称"
+
 
 class TestSave:
     """测试 save 方法 - Requirements 14.1, 14.2"""
