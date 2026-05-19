@@ -261,6 +261,36 @@ class TestRecordResult:
         assert data["gates"]["GATE-R5"]["user_amend_count"] == 1
         assert data["gates"]["GATE-R5"]["last_result"] == "amend"
 
+    def test_传入gate_name时写入name字段(self, tmp_path):
+        manager = GateStateManager(str(tmp_path))
+        manager.record_result("GATE-R5", "pass", "确认", "", gate_name="代码审查")
+
+        data = manager.load()
+        assert data["gates"]["GATE-R5"]["name"] == "代码审查"
+
+    def test_不传gate_name时name字段为空字符串(self, tmp_path):
+        manager = GateStateManager(str(tmp_path))
+        manager.record_result("GATE-R5", "pass", "确认", "")
+
+        data = manager.load()
+        assert data["gates"]["GATE-R5"]["name"] == ""
+
+    def test_gate_name更新以最新值为准(self, tmp_path):
+        manager = GateStateManager(str(tmp_path))
+        manager.record_result("GATE-R5", "amend", "修改", "", gate_name="旧名称")
+        manager.record_result("GATE-R5", "pass", "确认", "", gate_name="新名称")
+
+        data = manager.load()
+        assert data["gates"]["GATE-R5"]["name"] == "新名称"
+
+    def test_gate_name为空时不覆盖已有name(self, tmp_path):
+        manager = GateStateManager(str(tmp_path))
+        manager.record_result("GATE-R5", "amend", "修改", "", gate_name="已有名称")
+        manager.record_result("GATE-R5", "pass", "确认", "", gate_name="")
+
+        data = manager.load()
+        assert data["gates"]["GATE-R5"]["name"] == "已有名称"
+
 
 class TestSave:
     """测试 save 方法 - Requirements 14.1, 14.2"""

@@ -85,6 +85,7 @@ class GateStateManager:
         result_type: str,
         action: str,
         note: str = "",
+        gate_name: str = "",
     ) -> None:
         """记录一次 gate 执行结果
 
@@ -97,6 +98,7 @@ class GateStateManager:
             result_type: 结果类型（auto_pass / pass / amend）
             action: 动作 key
             note: 备注
+            gate_name: 门禁名称（来自 gate 定义的 name 字段）
         """
         data = self.load()
 
@@ -106,6 +108,7 @@ class GateStateManager:
 
         # 获取或初始化 gate 数据
         gate_data = data["gates"].get(gate_id, {
+            "name": "",
             "request_count": 0,
             "auto_pass_count": 0,
             "user_pass_count": 0,
@@ -114,6 +117,10 @@ class GateStateManager:
             "last_result": "",
             "history": [],
         })
+
+        # 更新 name（始终以最新定义为准）
+        if gate_name:
+            gate_data["name"] = gate_name
 
         # 更新计数
         gate_data["request_count"] = gate_data.get("request_count", 0) + 1

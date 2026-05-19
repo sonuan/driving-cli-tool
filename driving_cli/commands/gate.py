@@ -420,7 +420,7 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
             next_text = action_next
 
         # 记录状态
-        state_manager.record_result(gate_id, "auto_pass", action_key)
+        state_manager.record_result(gate_id, "auto_pass", action_key, gate_name=gate.get("name", ""))
 
         # 构建 Result_JSON
         result_json = build_result_json(
@@ -465,7 +465,7 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
         next_text = renderer.render(selected_action.get("next", ""))
 
     # 记录状态
-    state_manager.record_result(gate_id, result_type, action_key, note)
+    state_manager.record_result(gate_id, result_type, action_key, note, gate_name=gate.get("name", ""))
 
     # 构建 next_text 已在上面完成
 
@@ -569,7 +569,7 @@ def gate_pass(gate_id: str, path: str, note: str):
     action_key = next(iter(actions), "")
 
     # 7. 记录状态（user_pass）
-    state_manager.record_result(gate_id, "pass", action_key, note)
+    state_manager.record_result(gate_id, "pass", action_key, note, gate_name=gate.get("name", ""))
 
     # 8. 构建 next_text
     gate_state = state_manager.get_gate_state(gate_id)
