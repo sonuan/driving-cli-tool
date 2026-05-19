@@ -19,10 +19,10 @@ class ConditionChecker:
     支持 10 种验证类型 + 6 种操作符。
     """
 
-    # 路径合法性检查：中文字符范围
-    _CHINESE_PATTERN = re.compile(r"[\u4e00-\u9fff]")
-    # 连续特殊字符模式（如 //、--、__、.. 等）
-    _CONSECUTIVE_SPECIAL_PATTERN = re.compile(r"[/\-_.]{2,}")
+    # 路径合法性检查：未渲染的模板变量标记
+    _UNRENDERED_TEMPLATE_PATTERN = re.compile(r"\{\{|\}\}")
+    # 连续斜杠（// 等）
+    _CONSECUTIVE_SLASH_PATTERN = re.compile(r"/{2,}")
 
     def __init__(self, renderer: TemplateRenderer):
         """
@@ -170,20 +170,17 @@ class ConditionChecker:
             return False
 
     def _check_path_valid(self, target: str) -> bool:
-        """验证路径不含空格、中文、..、连续特殊字符"""
+        """验证路径格式合法：非空、无未渲染模板变量、无 ..、无连续斜杠"""
         if not target:
             return False
-        # 检查空格
-        if " " in target:
+        # 检查未渲染的模板变量（{{ 或 }}）
+        if self._UNRENDERED_TEMPLATE_PATTERN.search(target):
             return False
-        # 检查中文字符
-        if self._CHINESE_PATTERN.search(target):
-            return False
-        # 检查 .. 序列
+        # 检查 .. 序列（路径穿越）
         if ".." in target:
             return False
-        # 检查连续特殊字符
-        if self._CONSECUTIVE_SPECIAL_PATTERN.search(target):
+        # 检查连续斜杠
+        if self._CONSECUTIVE_SLASH_PATTERN.search(target):
             return False
         return True
 

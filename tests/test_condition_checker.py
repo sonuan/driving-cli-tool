@@ -108,16 +108,18 @@ class TestPathValid:
         assert result.passed is True
 
     def test_包含空格(self, checker):
+        # 空格在文件系统中合法，path_valid 不再拒绝
         result = checker.check(
             {"type": "path_valid", "label": "路径合法", "target": "features/login page"}
         )
-        assert result.passed is False
+        assert result.passed is True
 
     def test_包含中文(self, checker):
+        # 中文目录名在 macOS/Linux 上合法，path_valid 不再拒绝
         result = checker.check(
             {"type": "path_valid", "label": "路径合法", "target": "features/登录页面"}
         )
-        assert result.passed is False
+        assert result.passed is True
 
     def test_包含双点(self, checker):
         result = checker.check(
@@ -132,10 +134,11 @@ class TestPathValid:
         assert result.passed is False
 
     def test_包含连续横线(self, checker):
+        # -- 不再被视为非法字符
         result = checker.check(
             {"type": "path_valid", "label": "路径合法", "target": "features/--login"}
         )
-        assert result.passed is False
+        assert result.passed is True
 
     def test_空路径(self, checker):
         result = checker.check(
@@ -661,7 +664,7 @@ class TestCheckGeneral:
 
     def test_失败时detail非空(self, checker):
         result = checker.check(
-            {"type": "path_valid", "label": "测试", "target": "invalid path"}
+            {"type": "path_valid", "label": "测试", "target": "features/../secret"}
         )
         assert result.detail != ""
 

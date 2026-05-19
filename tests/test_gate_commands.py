@@ -522,25 +522,25 @@ def test_property3_4_gate_list输出字段完整性(tmp_path_factory, repo_name,
 
     runner = _Runner()
 
-    # Property 3: 表格模式字段完整性
+    # Property 3: 表格模式字段完整性（只验证 id，name 可能被 Rich 截断）
     with _patch("driving_cli.commands.gate.find_project_root", return_value=tmp_path):
         result = runner.invoke(_cli, ["gate", "list"])
     assert result.exit_code == 0
     for gate in gates:
         assert gate["id"] in result.output
-        assert gate["name"] in result.output
 
-    # Property 4: --json 模式字段完整性
+    # Property 4: --json 模式字段完整性（验证 id、name 等所有字段完整输出）
     with _patch("driving_cli.commands.gate.find_project_root", return_value=tmp_path):
         result_json = runner.invoke(_cli, ["gate", "list", "--json"])
     assert result_json.exit_code == 0
     data = _json.loads(result_json.output)
     assert isinstance(data, list)
     assert len(data) == len(gates)
-    for item in data:
+    for item, gate in zip(data, gates):
         for field in ("id", "name", "type", "location", "repo"):
             assert field in item
         assert item["repo"] == repo_name
+        assert item["name"] == gate["name"]
 
 
 # Feature: driving-gate-command, Property 5 & 8 & 9: round-trip 属性
