@@ -24,6 +24,7 @@ from driving_cli.gate import (
 )
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.logger import log_warning
+from driving_cli.utils.gate_reporter import report_gate_event
 
 # Rich console（输出到 stdout）
 _console = Console()
@@ -373,11 +374,22 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
         result_json = build_result_json(
             gate_id=gate_id,
             result="blocked",
-            action="门禁校验失败",
+            action="requires_not_met",
             next_text=requires_result.message,
             user_prompt=user_prompt,
         )
         click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
+        # 上报：blocked
+        report_gate_event(
+            gate_id=gate_id,
+            gate_name=gate.get("name", ""),
+            gate_level=gate.get("level", "blocking"),
+            result="blocked",
+            action="requires_not_met",
+            note=requires_result.message,
+            feature_path=path,
+            context=context_dict or None,
+        )
         return
 
     # 6b. Auto_pass 检查
@@ -439,6 +451,19 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
             # notify_pass
             click.echo(f"✅ {on_pass_next}")
             click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
+
+        # 上报：auto_pass（record_result 之后读取最新 stats）
+        updated_state = state_manager.get_gate_state(gate_id)
+        report_gate_event(
+            gate_id=gate_id,
+            gate_name=gate.get("name", ""),
+            gate_level=gate.get("level", "blocking"),
+            result="auto_pass",
+            action=action_key,
+            feature_path=path,
+            context=context_dict or None,
+            gate_state=updated_state,
+        )
         return
 
     # 6c. 交互模式（auto_pass 失败或跳过）
@@ -479,6 +504,20 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
         user_prompt=user_prompt,
     )
     click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
+
+    # 上报：pass / amend（record_result 之后读取最新 stats）
+    updated_state = state_manager.get_gate_state(gate_id)
+    report_gate_event(
+        gate_id=gate_id,
+        gate_name=gate.get("name", ""),
+        gate_level=gate.get("level", "blocking"),
+        result=result_type,
+        action=action_key,
+        note=note,
+        feature_path=path,
+        context=context_dict or None,
+        gate_state=updated_state,
+    )
 
 
 @gate_group.command(name="status")
@@ -557,11 +596,21 @@ def gate_pass(gate_id: str, path: str, note: str):
         result_json = build_result_json(
             gate_id=gate_id,
             result="blocked",
-            action="门禁校验失败",
+            action="requires_not_met",
             next_text=requires_result.message,
             user_prompt=user_prompt,
         )
         click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
+        # 上报：blocked
+        report_gate_event(
+            gate_id=gate_id,
+            gate_name=gate.get("name", ""),
+            gate_level=gate.get("level", "blocking"),
+            result="blocked",
+            action="requires_not_met",
+            note=requires_result.message,
+            feature_path=path,
+        )
         return
 
     # 6. 通过：确定 action_key（actions 的第一个 key）
@@ -602,3 +651,15 @@ def gate_pass(gate_id: str, path: str, note: str):
         user_prompt=user_prompt,
     )
     click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
+
+    # 上报：pass（record_result 之后读取最新 stats）
+    report_gate_event(
+        gate_id=gate_id,
+        gate_name=gate.get("name", ""),
+        gate_level=gate.get("level", "blocking"),
+        result="pass",
+        action=action_key,
+        note=note,
+        feature_path=path,
+        gate_state=gate_state,
+    )

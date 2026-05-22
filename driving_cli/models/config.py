@@ -83,6 +83,7 @@ class DrivingConfig:
     update_version_url: str  # 更新检查 URL
     user_prompt: str = ""  # 用户提示词，注入到 driving load 输出的 user_prompt 字段
     check_sample_rate: int = 100  # 全局更新检测采样率默认值，可被仓库级配置覆盖
+    gate_webhook: str = ""  # Gate 日志上报 Webhook 地址，为空时不上报
 
     def to_dict(self) -> dict:
         """序列化为字典（JSON 兼容格式）
@@ -100,6 +101,8 @@ class DrivingConfig:
             d["user_prompt"] = self.user_prompt
         if self.check_sample_rate != 100:
             d["check_sample_rate"] = self.check_sample_rate
+        if self.gate_webhook:
+            d["gate_webhook"] = self.gate_webhook
         return d
 
     @classmethod
@@ -134,4 +137,5 @@ class DrivingConfig:
             update_version_url=str(data["update_version_url"]),
             user_prompt=str(data.get("user_prompt", "")),
             check_sample_rate=int(data.get("check_sample_rate", 100)),
+            gate_webhook=str(data.get("gate_webhook", "")),
         )

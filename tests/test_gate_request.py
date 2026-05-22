@@ -232,7 +232,7 @@ class TestGateRequestBlocked:
         assert result.exit_code == 0
         output_json = json.loads(result.output)
         assert output_json["result"] == "blocked"
-        assert output_json["action"] == "门禁校验失败"
+        assert output_json["action"] == "requires_not_met"
         assert "GATE-R2" in output_json["next"]
 
     def test_blocked_result_json_structure(self, runner, tmp_path):
@@ -250,6 +250,7 @@ class TestGateRequestBlocked:
         output_json = json.loads(result.output)
         # 验证 6 个必需字段
         assert set(output_json.keys()) == {"gate_id", "result", "action", "next", "note", "user_prompt"}
+        assert output_json["action"] == "requires_not_met"
         assert output_json["user_prompt"] == "按 next 字段执行后续动作"
         assert output_json["note"] == ""
 
@@ -768,3 +769,328 @@ class TestGatePass:
             )
         assert result.exit_code == 0
         assert "✅ 已手动通过: GATE-R5" in result.output
+
+
+# ==================== gate_reporter 上报测试 ====================
+
+
+class TestGateReporter:
+    """gate_reporter 上报模块单元测试"""
+
+    def test_build_report_payload_基本结构(self):
+        """build_report_payload 输出包含所有必需字段"""
+        from driving_cli.utils.gate_reporter import build_report_payload
+
+        payload = build_report_payload(
+            gate_id="GATE-R5",
+            gate_name="需求拆解文档确认",
+            gate_level="blocking",
+            result="pass",
+            action="确认",
+            feature_path="features/test",
+        )
+        assert payload["gate_id"] == "GATE-R5"
+        assert payload["gate_name"] == "需求拆解文档确认"
+        assert payload["gate_level"] == "blocking"
+        assert payload["feature"] == "features/test"
+        assert payload["last_event"]["result"] == "pass"
+        assert payload["last_event"]["action"] == "确认"
+        assert "triggered_at" in payload["last_event"]
+        assert isinstance(payload["last_event"]["triggered_at"], str)
+        # 格式：2026/05/21 21:39
+        import re
+        assert re.match(r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}", payload["last_event"]["triggered_at"])
+
+    def test_build_report_payload_context原样上报(self):
+        """context 原样上报，--context 传什么就上报什么"""
+        from driving_cli.utils.gate_reporter import build_report_payload
+
+        payload = build_report_payload(
+            gate_id="GATE-R5",
+            gate_name="需求拆解文档确认",
+            gate_level="blocking",
+            result="pass",
+            action="确认",
+            context={"review_score": 92, "unanswered_count": 0},
+        )
+        assert "context" in payload
+        assert payload["context"]["review_score"] == 92
+        assert payload["context"]["unanswered_count"] == 0
+
+    def test_build_report_payload_无context时不含context字段(self):
+        """context 为 None 时 payload 不含 context 字段"""
+        from driving_cli.utils.gate_reporter import build_report_payload
+
+        payload = build_report_payload(
+            gate_id="GATE-R5",
+            gate_name="需求拆解文档确认",
+            gate_level="blocking",
+            result="pass",
+            action="确认",
+        )
+        assert "context" not in payload
+
+    def test_build_report_payload_stats来自gate_state(self):
+        """stats 字段从 gate_state 正确提取"""
+        from driving_cli.utils.gate_reporter import build_report_payload, report_gate_event
+        from driving_cli.gate.models import GateState
+
+        gate_state = GateState(
+            request_count=3,
+            auto_pass_count=1,
+            user_pass_count=1,
+            user_amend_count=1,
+            pass_rate=0.67,
+            last_result="pass",
+        )
+        payload = build_report_payload(
+            gate_id="GATE-R5",
+            gate_name="需求拆解文档确认",
+            gate_level="blocking",
+            result="pass",
+            action="确认",
+            stats={
+                "request_count": gate_state.request_count,
+                "auto_pass_count": gate_state.auto_pass_count,
+                "user_pass_count": gate_state.user_pass_count,
+                "user_amend_count": gate_state.user_amend_count,
+            },
+        )
+        assert payload["stats"]["request_count"] == 3
+        assert payload["stats"]["user_amend_count"] == 1
+        assert payload["stats"]["auto_pass_count"] == 1
+        assert payload["stats"]["user_pass_count"] == 1
+
+    def test_build_report_payload_blocked时note填入原因(self):
+        """blocked 时 note 字段包含阻断原因"""
+        from driving_cli.utils.gate_reporter import build_report_payload
+
+        payload = build_report_payload(
+            gate_id="GATE-R5",
+            gate_name="需求拆解文档确认",
+            gate_level="blocking",
+            result="blocked",
+            action="requires_not_met",
+            note="GATE-R2 尚未通过",
+        )
+        assert payload["last_event"]["result"] == "blocked"
+        assert payload["last_event"]["action"] == "requires_not_met"
+        assert payload["last_event"]["note"] == "GATE-R2 尚未通过"
+
+    def test_build_report_payload_actor字段来自git(self):
+        """actor 字段从 git config 读取 name 和 email"""
+        from driving_cli.utils.gate_reporter import build_report_payload
+        from unittest.mock import patch
+
+        with patch(
+            "driving_cli.utils.gate_reporter.get_git_user",
+            return_value={"name": "张三", "email": "zhangsan@example.com"},
+        ):
+            payload = build_report_payload(
+                gate_id="GATE-R5",
+                gate_name="需求拆解文档确认",
+                gate_level="blocking",
+                result="pass",
+                action="确认",
+            )
+        assert "actor" in payload
+        assert payload["actor"] == "张三"
+
+    def test_build_report_payload_git读取失败时无actor字段(self):
+        """git 读取失败（name 和 email 均为空）时不含 actor 字段"""
+        from driving_cli.utils.gate_reporter import build_report_payload
+        from unittest.mock import patch
+
+        with patch(
+            "driving_cli.utils.gate_reporter.get_git_user",
+            return_value={"name": "", "email": ""},
+        ):
+            payload = build_report_payload(
+                gate_id="GATE-R5",
+                gate_name="需求拆解文档确认",
+                gate_level="blocking",
+                result="pass",
+                action="确认",
+            )
+        assert "actor" not in payload
+
+    def test_report_gate_event_异步不阻塞(self, runner, tmp_path):
+        """report_gate_event 调用后在合理时间内返回（join timeout=3s）"""
+        from driving_cli.utils.gate_reporter import report_gate_event
+        from unittest.mock import patch
+        import time
+
+        # mock _do_report 避免真实网络请求
+        with patch("driving_cli.utils.gate_reporter._do_report"):
+            start = time.time()
+            report_gate_event(
+                gate_id="GATE-R5",
+                gate_name="需求拆解文档确认",
+                gate_level="blocking",
+                result="pass",
+                action="确认",
+                feature_path=str(tmp_path),
+            )
+            elapsed = time.time() - start
+        # join(timeout=3)，mock 下应远小于 1 秒
+        assert elapsed < 1.0
+
+    def test_gate_request_上报被调用_auto_pass(self, runner, tmp_path):
+        """gate request auto_pass 时 report_gate_event 被调用"""
+        mock_gate = _mock_gate_full_auto()
+        with patch(
+            "driving_cli.commands.gate._collect_all_gates_data",
+            return_value=([mock_gate], ""),
+        ), patch(
+            "driving_cli.commands.gate.report_gate_event"
+        ) as mock_report:
+            result = runner.invoke(
+                cli,
+                ["gate", "request", "GATE-R5", "--path", str(tmp_path)],
+            )
+        assert result.exit_code == 0
+        mock_report.assert_called_once()
+        call_kwargs = mock_report.call_args.kwargs
+        assert call_kwargs["gate_id"] == "GATE-R5"
+        assert call_kwargs["result"] == "auto_pass"
+        assert call_kwargs["action"] == "确认"
+
+    def test_gate_request_上报被调用_blocked(self, runner, tmp_path):
+        """gate request blocked 时 report_gate_event 被调用"""
+        mock_gate = _mock_gate_with_requires(["GATE-R2"])
+        mock_r2 = _mock_gate_r2()
+        with patch(
+            "driving_cli.commands.gate._collect_all_gates_data",
+            return_value=([mock_gate, mock_r2], ""),
+        ), patch(
+            "driving_cli.commands.gate.report_gate_event"
+        ) as mock_report:
+            result = runner.invoke(
+                cli,
+                ["gate", "request", "GATE-R5", "--path", str(tmp_path)],
+            )
+        assert result.exit_code == 0
+        mock_report.assert_called_once()
+        call_kwargs = mock_report.call_args.kwargs
+        assert call_kwargs["result"] == "blocked"
+        assert call_kwargs["action"] == "requires_not_met"
+
+    def test_gate_pass_上报被调用_pass(self, runner, tmp_path):
+        """gate pass 成功时 report_gate_event 被调用"""
+        mock_gate = {
+            "id": "GATE-R5",
+            "name": "需求拆解文档确认",
+            "level": "blocking",
+            "requires": [],
+            "template": ["模板"],
+            "actions": {"确认": {"next": "通过", "requires_note": False}},
+            "auto_pass": {"mode": "human_only"},
+        }
+        with patch(
+            "driving_cli.commands.gate._collect_all_gates_data",
+            return_value=([mock_gate], ""),
+        ), patch(
+            "driving_cli.commands.gate.report_gate_event"
+        ) as mock_report:
+            result = runner.invoke(
+                cli,
+                ["gate", "pass", "GATE-R5", "--path", str(tmp_path)],
+            )
+        assert result.exit_code == 0
+        mock_report.assert_called_once()
+        call_kwargs = mock_report.call_args.kwargs
+        assert call_kwargs["gate_id"] == "GATE-R5"
+        assert call_kwargs["result"] == "pass"
+
+    def test_gate_pass_上报被调用_blocked(self, runner, tmp_path):
+        """gate pass blocked 时 report_gate_event 被调用"""
+        mock_gate = _mock_gate_with_requires(["GATE-R2"])
+        mock_r2 = _mock_gate_r2()
+        with patch(
+            "driving_cli.commands.gate._collect_all_gates_data",
+            return_value=([mock_gate, mock_r2], ""),
+        ), patch(
+            "driving_cli.commands.gate.report_gate_event"
+        ) as mock_report:
+            result = runner.invoke(
+                cli,
+                ["gate", "pass", "GATE-R5", "--path", str(tmp_path)],
+            )
+        assert result.exit_code == 0
+        mock_report.assert_called_once()
+        call_kwargs = mock_report.call_args.kwargs
+        assert call_kwargs["result"] == "blocked"
+        assert call_kwargs["action"] == "requires_not_met"
+
+
+class TestGateWebhookConfig:
+    """gate_webhook 配置控制上报行为"""
+
+    def test_有webhook配置时发送请求(self, tmp_path):
+        """gate_webhook 非空时 _do_report 发送 HTTP 请求"""
+        from driving_cli.utils.gate_reporter import _do_report
+
+        with patch(
+            "driving_cli.utils.gate_reporter._get_webhook_url",
+            return_value="https://example.com/webhook",
+        ), patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.return_value.__enter__ = lambda s: s
+            mock_urlopen.return_value.__exit__ = lambda s, *a: False
+            mock_urlopen.return_value.read = lambda: b""
+            _do_report({"gate_id": "GATE-R5"})
+        mock_urlopen.assert_called_once()
+
+    def test_无webhook配置时不发送请求(self, tmp_path):
+        """gate_webhook 为空时 _do_report 直接返回，不发请求"""
+        from driving_cli.utils.gate_reporter import _do_report
+
+        with patch(
+            "driving_cli.utils.gate_reporter._get_webhook_url",
+            return_value="",
+        ), patch("urllib.request.urlopen") as mock_urlopen:
+            _do_report({"gate_id": "GATE-R5"})
+        mock_urlopen.assert_not_called()
+
+    def test_get_webhook_url_从config读取(self, tmp_path):
+        """_get_webhook_url 从 driving.config.json 的 gate_webhook 字段读取"""
+        from driving_cli.utils.gate_reporter import _get_webhook_url
+        from driving_cli.models.config import DrivingConfig
+
+        mock_config = DrivingConfig(
+            version="2",
+            repos=[],
+            default_commit_message="update",
+            update_version_url="",
+            gate_webhook="https://example.com/my-webhook",
+        )
+        with patch(
+            "driving_cli.utils.gate_reporter.find_project_root",
+            return_value=tmp_path,
+        ), patch(
+            "driving_cli.utils.gate_reporter.ConfigManager"
+        ) as mock_cm:
+            mock_cm.return_value.load.return_value = mock_config
+            url = _get_webhook_url()
+        assert url == "https://example.com/my-webhook"
+
+    def test_get_webhook_url_未配置时返回空字符串(self, tmp_path):
+        """gate_webhook 未配置时 _get_webhook_url 返回空字符串"""
+        from driving_cli.utils.gate_reporter import _get_webhook_url
+        from driving_cli.models.config import DrivingConfig
+
+        mock_config = DrivingConfig(
+            version="2",
+            repos=[],
+            default_commit_message="update",
+            update_version_url="",
+            gate_webhook="",
+        )
+        with patch(
+            "driving_cli.utils.gate_reporter.find_project_root",
+            return_value=tmp_path,
+        ), patch(
+            "driving_cli.utils.gate_reporter.ConfigManager"
+        ) as mock_cm:
+            mock_cm.return_value.load.return_value = mock_config
+            url = _get_webhook_url()
+        assert url == ""

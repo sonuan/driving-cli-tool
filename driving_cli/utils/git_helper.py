@@ -71,6 +71,33 @@ def find_git_root(path: Union[str, Path] = None) -> Path:
         raise git.exc.InvalidGitRepositoryError(f"未找到 Git 仓库: {path}")
 
 
+def get_git_user() -> dict:
+    """获取当前 Git 用户信息（name 和 email）
+
+    从当前工作目录的 Git 配置中读取 user.name 和 user.email。
+    读取失败时对应字段返回空字符串，不抛出异常。
+
+    Returns:
+        dict: {"name": "...", "email": "..."}
+    """
+    name = ""
+    email = ""
+    try:
+        repo = git.Repo(Path.cwd(), search_parent_directories=True)
+        with repo.config_reader() as cfg:
+            try:
+                name = cfg.get_value("user", "name", default="")
+            except Exception:
+                pass
+            try:
+                email = cfg.get_value("user", "email", default="")
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return {"name": str(name), "email": str(email)}
+
+
 def is_local_framework(framework: dict) -> bool:
     """检查框架是否为本地项目
 
