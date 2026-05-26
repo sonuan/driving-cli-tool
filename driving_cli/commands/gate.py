@@ -21,6 +21,7 @@ from driving_cli.gate import (
     RequiresChecker,
     TemplateRenderer,
     build_result_json,
+    build_self_refine,
 )
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.logger import log_warning
@@ -119,17 +120,24 @@ def collect_gates() -> List[Dict]:
     return all_gates
 
 
-def _collect_all_gates_data() -> Tuple[List[Dict], str]:
-    """扫描所有仓库，返回 (完整 gate 列表, 拼接后的 system_prompt)。
+_DEFAULT_SELF_REFINE_THRESHOLD = 2
+
+
+def _collect_all_gates_data() -> Tuple[List[Dict], str, str, int]:
+    """扫描所有仓库，返回 (完整 gate 列表, system_prompt, user_prompt, self_refine_threshold)。
 
     gate 列表中每条记录为原始字段（不含 repo）。
     system_prompt 为各仓库 gates.json 顶层 system_prompt 字段的非空值拼接。
+    user_prompt 取第一个非空值，未配置时返回默认值。
+    self_refine_threshold 取第一个非空值，未配置时返回默认值 2。
     """
     project_root = find_project_root()
     config_manager = ConfigManager(project_root)
 
     all_gates: List[Dict] = []
     system_prompts: List[str] = []
+    user_prompt: str = ""
+    self_refine_threshold: Optional[int] = None
 
     for repo in config_manager.get_all_repos():
         repo_dir = config_manager.get_repo_dir(repo.name)
@@ -139,30 +147,32 @@ def _collect_all_gates_data() -> Tuple[List[Dict], str]:
         sp = data.get("system_prompt", "")
         if sp:
             system_prompts.append(sp)
+        if not user_prompt:
+            up = data.get("user_prompt", "")
+            if up:
+                user_prompt = up
+        if self_refine_threshold is None:
+            t = data.get("self_refine_threshold")
+            if isinstance(t, int) and t > 0:
+                self_refine_threshold = t
         gates = data.get("gates") or []
         all_gates.extend(gates)
 
-    return all_gates, "\n".join(system_prompts)
+    return (
+        all_gates,
+        "\n".join(system_prompts),
+        user_prompt or "按 next 字段执行后续动作",
+        self_refine_threshold if self_refine_threshold is not None else _DEFAULT_SELF_REFINE_THRESHOLD,
+    )
 
 
 def _get_user_prompt() -> str:
-    """从 gates.json 顶层读取 user_prompt 字段。
+    """从 gates.json 顶层读取 user_prompt 字段（向后兼容接口）。
 
     多仓库时取第一个非空值。未配置时返回默认值。
     """
-    project_root = find_project_root()
-    config_manager = ConfigManager(project_root)
-
-    for repo in config_manager.get_all_repos():
-        repo_dir = config_manager.get_repo_dir(repo.name)
-        data = load_gates_file(repo.name, repo_dir)
-        if data is None:
-            continue
-        up = data.get("user_prompt", "")
-        if up:
-            return up
-
-    return "按 next 字段执行后续动作"
+    _, _, user_prompt, _ = _collect_all_gates_data()
+    return user_prompt
 
 
 @click.group(name="gate")
@@ -240,7 +250,7 @@ def gate_load(gate_ids: tuple):
         driving gate load GATE-R1            # 加载单个
         driving gate load GATE-R1 GATE-D1   # 加载多个
     """
-    all_gates, system_prompt = _collect_all_gates_data()
+    all_gates, system_prompt, _user_prompt, _threshold = _collect_all_gates_data()
 
     if not gate_ids:
         # 不传 ID：返回全部
@@ -312,8 +322,7 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
             sys.exit(1)
 
     # 2. 加载 gate 定义
-    all_gates, _system_prompt = _collect_all_gates_data()
-    user_prompt = _get_user_prompt()
+    all_gates, _system_prompt, user_prompt, self_refine_threshold = _collect_all_gates_data()
     gate = None
     for g in all_gates:
         if g.get("id", "").lower() == gate_id.lower():
@@ -378,6 +387,8 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
             next_text=requires_result.message,
             user_prompt=user_prompt,
         )
+        click.echo("")
+        click.echo("门禁结果：")
         click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
         # 上报：blocked
         report_gate_event(
@@ -434,26 +445,43 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
         # 记录状态
         state_manager.record_result(gate_id, "auto_pass", action_key, gate_name=gate.get("name", ""))
 
+        # 读取最新状态，构建 self_refine（user_amend_count >= threshold 时触发）
+        updated_state = state_manager.get_gate_state(gate_id)
+        self_refine = build_self_refine(updated_state, threshold=self_refine_threshold)
+
+        # 构建 user_prompt（触发 self-refine 时追加动态提示）
+        effective_user_prompt = user_prompt
+        if self_refine is not None:
+            effective_user_prompt = (
+                f"{user_prompt}\n\n"
+                f"⚠️ 本次通过前共返工 {updated_state.user_amend_count} 次，"
+                f"请优先执行 self_refine.next 进行自我反思，完成后再执行 next"
+            )
+
         # 构建 Result_JSON
         result_json = build_result_json(
             gate_id=gate_id,
             result="auto_pass",
             action=action_key,
             next_text=next_text,
-            user_prompt=user_prompt,
+            user_prompt=effective_user_prompt,
+            self_refine=self_refine,
         )
 
         # 根据 mode 决定输出格式
         mode = auto_pass_config.get("mode", "human_only")
         if mode == "full_auto":
+            click.echo("")
+            click.echo("门禁结果：")
             click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
         else:
             # notify_pass
             click.echo(f"✅ {on_pass_next}")
+            click.echo("")
+            click.echo("门禁结果：")
             click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
 
         # 上报：auto_pass（record_result 之后读取最新 stats）
-        updated_state = state_manager.get_gate_state(gate_id)
         report_gate_event(
             gate_id=gate_id,
             gate_name=gate.get("name", ""),
@@ -492,7 +520,20 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
     # 记录状态
     state_manager.record_result(gate_id, result_type, action_key, note, gate_name=gate.get("name", ""))
 
-    # 构建 next_text 已在上面完成
+    # 读取最新状态
+    updated_state = state_manager.get_gate_state(gate_id)
+
+    # 构建 self_refine（仅 pass 时触发，amend 不触发）
+    self_refine = build_self_refine(updated_state, threshold=self_refine_threshold) if result_type == "pass" else None
+
+    # 构建 user_prompt（触发 self-refine 时追加动态提示）
+    effective_user_prompt = user_prompt
+    if self_refine is not None:
+        effective_user_prompt = (
+            f"{user_prompt}\n\n"
+            f"⚠️ 本次通过前共返工 {updated_state.user_amend_count} 次，"
+            f"请优先执行 self_refine.next 进行自我反思，完成后再执行 next"
+        )
 
     # 输出 Result_JSON
     result_json = build_result_json(
@@ -501,12 +542,13 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
         action=action_key,
         next_text=next_text,
         note=note,
-        user_prompt=user_prompt,
+        user_prompt=effective_user_prompt,
+        self_refine=self_refine,
     )
+    click.echo("门禁结果：")
     click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
 
     # 上报：pass / amend（record_result 之后读取最新 stats）
-    updated_state = state_manager.get_gate_state(gate_id)
     report_gate_event(
         gate_id=gate_id,
         gate_name=gate.get("name", ""),
@@ -568,8 +610,7 @@ def gate_history(gate_id: str, path: str):
 def gate_pass(gate_id: str, path: str, note: str):
     """手动通过门禁"""
     # 1. 加载所有 gate 定义
-    all_gates, _system_prompt = _collect_all_gates_data()
-    user_prompt = _get_user_prompt()
+    all_gates, _system_prompt, user_prompt, self_refine_threshold = _collect_all_gates_data()
 
     # 2. 查找 gate 定义（大小写不敏感）
     gate = None
@@ -600,6 +641,8 @@ def gate_pass(gate_id: str, path: str, note: str):
             next_text=requires_result.message,
             user_prompt=user_prompt,
         )
+        click.echo("")
+        click.echo("门禁结果：")
         click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
         # 上报：blocked
         report_gate_event(
@@ -642,14 +685,29 @@ def gate_pass(gate_id: str, path: str, note: str):
 
     # 9. 输出确认行 + Result_JSON
     click.echo(f"✅ 已手动通过: {gate_id}")
+
+    # 构建 self_refine（user_amend_count >= threshold 时触发）
+    self_refine = build_self_refine(gate_state, threshold=self_refine_threshold)
+
+    # 构建 user_prompt（触发 self-refine 时追加动态提示）
+    effective_user_prompt = user_prompt
+    if self_refine is not None:
+        effective_user_prompt = (
+            f"{user_prompt}\n\n"
+            f"⚠️ 本次通过前共返工 {gate_state.user_amend_count} 次，"
+            f"请优先执行 self_refine.next 进行自我反思，完成后再执行 next"
+        )
+
     result_json = build_result_json(
         gate_id=gate_id,
         result="pass",
         action=action_key,
         next_text=next_text,
         note=note,
-        user_prompt=user_prompt,
+        user_prompt=effective_user_prompt,
+        self_refine=self_refine,
     )
+    click.echo("门禁结果：")
     click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
 
     # 上报：pass（record_result 之后读取最新 stats）

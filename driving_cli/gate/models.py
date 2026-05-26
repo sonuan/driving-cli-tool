@@ -4,7 +4,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -65,6 +65,7 @@ def build_result_json(
     next_text: str,
     note: str = "",
     user_prompt: str = "按 next 字段执行后续动作",
+    self_refine: Optional[Dict] = None,
 ) -> dict:
     """构建统一返回 JSON 结构
 
@@ -75,15 +76,52 @@ def build_result_json(
         next_text: 下一步操作描述
         note: 备注（amend 时有值）
         user_prompt: 用户提示语（来自 gates.json 顶层 user_prompt 字段）
+        self_refine: self-refine 上下文（pass/auto_pass 且 user_amend_count >= 阈值时有值）
 
     Returns:
-        包含 gate_id, result, action, next, note, user_prompt 的 dict
+        包含 gate_id, result, action, next, note, user_prompt 的 dict，
+        触发 self-refine 时额外包含 self_refine 字段。
     """
-    return {
+    output: Dict = {
         "gate_id": gate_id,
         "result": result,
         "action": action,
         "next": next_text,
         "note": note,
         "user_prompt": user_prompt,
+    }
+    if self_refine is not None:
+        output["self_refine"] = self_refine
+    return output
+
+
+def build_self_refine(gate_state: "GateState", threshold: int = 2) -> Optional[Dict]:
+    """当 user_amend_count >= threshold 时构建 self_refine 上下文，否则返回 None。
+
+    从 gate_state.history 中提取所有历史记录（at、action、note），
+    供 AI 进行自我反思和改进提案。
+
+    Args:
+        gate_state: 当前 gate 状态（record_result 之后的最新状态）
+        threshold: 触发阈值，默认 2
+
+    Returns:
+        self_refine dict，包含 amend_count、history、next 字段；
+        未达阈值时返回 None。
+    """
+    if gate_state.user_amend_count < threshold:
+        return None
+
+    history = [
+        {"at": entry.at, "action": entry.action, "note": entry.note}
+        for entry in gate_state.history
+    ]
+
+    return {
+        "amend_count": gate_state.user_amend_count,
+        "history": history,
+        "next": (
+            "在继续执行前，请先根据 self_refine.history 中的历史返工记录进行自我反思，"
+            "分析反复返工的根本原因，输出改进提案后再执行 next"
+        ),
     }

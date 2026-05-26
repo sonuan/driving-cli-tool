@@ -112,7 +112,37 @@ driving gate pass <gate-id> --path <dir> --note "说明"  # 带说明手动通�
 - 任一 ID 找不到时，`gates` 返回空数组 `[]`，不报错退出
 - 多仓库存在相同 ID 时，返回 `driving.config.json` 中排在最前的仓库的 gate，并输出警告
 
+`gate request` / `gate pass` 返回结构（pass/auto_pass 且返工次数达到阈值时，额外包含 `self_refine` 字段）：
+```json
+{
+  "gate_id": "GATE-R1",
+  "result": "pass",
+  "action": "确认",
+  "next": "继续下一步",
+  "note": "",
+  "user_prompt": "...",
+  "self_refine": {               // 仅在 pass/auto_pass 且 user_amend_count >= self_refine_threshold 时出现
+    "amend_count": 3,
+    "history": [
+      { "at": "2026-05-21T18:00:00+08:00", "action": "修改", "note": "接口命名不规范" }
+    ],
+    "next": "在继续执行前，请先根据 self_refine.history 中的历史返工记录进行自我反思，分析反复返工的根本原因，输出改进提案后再执行 next"
+  }
+}
+```
+
 **gate 配置文件：** 仓库 `manifest.json` 中通过 `"gates": "rules/gates.json"` 指向门禁定义文件。
+
+`gates.json` 顶层支持字段：
+```json
+{
+  "version": "1.0.0",
+  "system_prompt": "...",          // 注入 AI 会话的系统提示
+  "user_prompt": "...",            // 每次门禁结果的行动指引
+  "self_refine_threshold": 2,      // 触发 self-refine 的最低返工次数，默认 2
+  "gates": [ { ...gate 对象... } ]
+}
+```
 
 ## feature — 需求功能管理
 

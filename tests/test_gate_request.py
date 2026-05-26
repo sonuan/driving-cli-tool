@@ -122,7 +122,7 @@ class TestGateRequestInvalidContext:
         mock_gate = _mock_gate_full_auto()
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
@@ -139,7 +139,7 @@ class TestGateRequestGateNotFound:
         """Requirements 1.7: 未找到门禁输出错误"""
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([], ""),
+            return_value=([], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
@@ -157,7 +157,7 @@ class TestGateRequestDryRun:
         mock_gate = _mock_gate_full_auto()
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
@@ -171,7 +171,7 @@ class TestGateRequestDryRun:
         mock_gate = _mock_gate_full_auto()
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
@@ -188,7 +188,7 @@ class TestGateRequestDryRun:
         state_file = tmp_path / "docs" / "gate-state.json"
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
@@ -202,7 +202,7 @@ class TestGateRequestDryRun:
         mock_gate = _mock_gate_full_auto()
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
@@ -223,14 +223,14 @@ class TestGateRequestBlocked:
         # 不创建 state 文件，GATE-R2 不存在于 state 中 → blocked
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate, mock_r2], ""),
+            return_value=([mock_gate, mock_r2], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
                 ["gate", "request", "GATE-R5", "--path", str(tmp_path)],
             )
         assert result.exit_code == 0
-        output_json = json.loads(result.output)
+        output_json = json.loads(result.output[result.output.index("{"):])
         assert output_json["result"] == "blocked"
         assert output_json["action"] == "requires_not_met"
         assert "GATE-R2" in output_json["next"]
@@ -241,13 +241,13 @@ class TestGateRequestBlocked:
         mock_r2 = _mock_gate_r2()
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate, mock_r2], ""),
+            return_value=([mock_gate, mock_r2], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
                 ["gate", "request", "GATE-R5", "--path", str(tmp_path)],
             )
-        output_json = json.loads(result.output)
+        output_json = json.loads(result.output[result.output.index("{"):])
         # 验证 6 个必需字段
         assert set(output_json.keys()) == {"gate_id", "result", "action", "next", "note", "user_prompt"}
         assert output_json["action"] == "requires_not_met"
@@ -264,14 +264,14 @@ class TestGateRequestAutoPassFullAuto:
         mock_gate = _mock_gate_full_auto(path_target="{{path}}")
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
                 ["gate", "request", "GATE-R5", "--path", str(tmp_path)],
             )
         assert result.exit_code == 0
-        output_json = json.loads(result.output)
+        output_json = json.loads(result.output[result.output.index("{"):])
         assert output_json["result"] == "auto_pass"
         assert output_json["action"] == "确认"
         assert output_json["gate_id"] == "GATE-R5"
@@ -283,13 +283,13 @@ class TestGateRequestAutoPassFullAuto:
         mock_gate = _mock_gate_full_auto()
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
                 ["gate", "request", "GATE-R5", "--path", str(tmp_path)],
             )
-        output_json = json.loads(result.output)
+        output_json = json.loads(result.output[result.output.index("{"):])
         assert "自动通过" in output_json["next"]
         assert "通过，进入下一阶段" in output_json["next"]
 
@@ -298,7 +298,7 @@ class TestGateRequestAutoPassFullAuto:
         mock_gate = _mock_gate_full_auto()
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
@@ -322,7 +322,7 @@ class TestGateRequestAutoPassNotifyPass:
         mock_gate = _mock_gate_notify_pass()
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
@@ -333,8 +333,9 @@ class TestGateRequestAutoPassNotifyPass:
         # 第一行应该是通知行
         assert "✅" in lines[0]
         assert "自动通过" in lines[0]
-        # 后续应该是 JSON
-        json_text = "\n".join(lines[1:])
+        # 空行 + "门禁结果：" + JSON
+        assert lines[2].strip() == "门禁结果："
+        json_text = "\n".join(lines[3:])
         output_json = json.loads(json_text)
         assert output_json["result"] == "auto_pass"
 
@@ -348,7 +349,7 @@ class TestGateRequestInteractive:
         mock_gate = _mock_gate_full_auto(path_target="{{path}}/nonexistent")
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ), patch(
             "click.prompt",
             side_effect=[1],  # 选择第一个操作（确认）
@@ -376,7 +377,7 @@ class TestGateRequestInteractive:
         mock_gate = _mock_gate_full_auto(path_target="{{path}}/nonexistent")
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ), patch(
             "click.prompt",
             side_effect=[2, "需要修改边界条件"],  # 选择第二个操作（修改），输入 note
@@ -428,7 +429,7 @@ class TestGateRequestReworkThreshold:
 
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ), patch(
             "click.prompt",
             side_effect=[1],  # 选择确认
@@ -463,7 +464,7 @@ class TestGateStatus:
         """Requirements 10.5: state 文件不存在时输出提示"""
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([], ""),
+            return_value=([], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
@@ -496,7 +497,7 @@ class TestGateStatus:
             ["gate", "status", "GATE-R5", "--path", str(tmp_path)],
         )
         assert result.exit_code == 0
-        output_json = json.loads(result.output)
+        output_json = json.loads(result.output[result.output.index("{"):])
         assert output_json["request_count"] == 3
         assert output_json["auto_pass_count"] == 2
         assert output_json["last_result"] == "auto_pass"
@@ -534,7 +535,7 @@ class TestGateStatus:
             ["gate", "status", "--path", str(tmp_path)],
         )
         assert result.exit_code == 0
-        output_json = json.loads(result.output)
+        output_json = json.loads(result.output[result.output.index("{"):])
         assert "GATE-R2" in output_json
         assert "GATE-R5" in output_json
 
@@ -552,7 +553,7 @@ class TestGateStatus:
             ["gate", "status", "GATE-NONEXIST", "--path", str(tmp_path)],
         )
         assert result.exit_code == 0
-        output_json = json.loads(result.output)
+        output_json = json.loads(result.output[result.output.index("{"):])
         assert output_json == {}
 
 
@@ -643,7 +644,7 @@ class TestGatePass:
         """Requirements 12.1: gate 未找到时输出错误"""
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([], ""),
+            return_value=([], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
@@ -658,14 +659,14 @@ class TestGatePass:
         mock_r2 = _mock_gate_r2()
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate, mock_r2], ""),
+            return_value=([mock_gate, mock_r2], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
                 ["gate", "pass", "GATE-R5", "--path", str(tmp_path)],
             )
         assert result.exit_code == 0
-        output_json = json.loads(result.output)
+        output_json = json.loads(result.output[result.output.index("{"):])
         assert output_json["result"] == "blocked"
         assert "GATE-R2" in output_json["next"]
 
@@ -693,7 +694,7 @@ class TestGatePass:
 
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate, mock_r2], ""),
+            return_value=([mock_gate, mock_r2], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
@@ -730,7 +731,7 @@ class TestGatePass:
         }
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
@@ -761,7 +762,7 @@ class TestGatePass:
         }
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,
@@ -940,7 +941,7 @@ class TestGateReporter:
         mock_gate = _mock_gate_full_auto()
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ), patch(
             "driving_cli.commands.gate.report_gate_event"
         ) as mock_report:
@@ -961,7 +962,7 @@ class TestGateReporter:
         mock_r2 = _mock_gate_r2()
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate, mock_r2], ""),
+            return_value=([mock_gate, mock_r2], "", "按 next 字段执行后续动作", 2),
         ), patch(
             "driving_cli.commands.gate.report_gate_event"
         ) as mock_report:
@@ -988,7 +989,7 @@ class TestGateReporter:
         }
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ), patch(
             "driving_cli.commands.gate.report_gate_event"
         ) as mock_report:
@@ -1008,7 +1009,7 @@ class TestGateReporter:
         mock_r2 = _mock_gate_r2()
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate, mock_r2], ""),
+            return_value=([mock_gate, mock_r2], "", "按 next 字段执行后续动作", 2),
         ), patch(
             "driving_cli.commands.gate.report_gate_event"
         ) as mock_report:

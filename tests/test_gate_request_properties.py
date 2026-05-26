@@ -624,7 +624,7 @@ def test_property10_dry_run_no_side_effects(gate_id, path_suffix):
 
         with patch(
             "driving_cli.commands.gate._collect_all_gates_data",
-            return_value=([mock_gate], ""),
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ):
             result = runner.invoke(
                 cli,

@@ -13,6 +13,7 @@ from driving_cli.gate.models import (
     GateState,
     RequiresResult,
     build_result_json,
+    build_self_refine,
 )
 from driving_cli.gate.requires_checker import RequiresChecker
 from driving_cli.gate.state_manager import GateStateManager
@@ -30,5 +31,6 @@ __all__ = [
     "GateState",
     "GateStateManager",
     "build_result_json",
+    "build_self_refine",
     "TemplateRenderer",
 ]
