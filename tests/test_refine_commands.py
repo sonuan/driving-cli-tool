@@ -133,8 +133,10 @@ class TestRefineList:
     def test_列出所有refine(self, tmp_path):
         self._setup(tmp_path)
         runner = CliRunner()
+        refines_dir = tmp_path / "ai-driving" / "driving" / "refines"
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
-            result = runner.invoke(cli, ["refine", "list"])
+            with patch("driving_cli.commands.refine._get_all_refines_dirs", return_value=[("driving", refines_dir)]):
+                result = runner.invoke(cli, ["refine", "list"])
         assert result.exit_code == 0
         assert "skill" in result.output
         assert "rule" in result.output
@@ -143,8 +145,10 @@ class TestRefineList:
     def test_type过滤只显示skill(self, tmp_path):
         self._setup(tmp_path)
         runner = CliRunner()
+        refines_dir = tmp_path / "ai-driving" / "driving" / "refines"
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
-            result = runner.invoke(cli, ["refine", "list", "--type", "skill"])
+            with patch("driving_cli.commands.refine._get_all_refines_dirs", return_value=[("driving", refines_dir)]):
+                result = runner.invoke(cli, ["refine", "list", "--type", "skill"])
         assert result.exit_code == 0
         assert "skill" in result.output
         assert "rule" not in result.output
@@ -153,11 +157,11 @@ class TestRefineList:
     def test_description显示在输出中(self, tmp_path):
         self._setup(tmp_path)
         runner = CliRunner()
+        refines_dir = tmp_path / "ai-driving" / "driving" / "refines"
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
-            result = runner.invoke(cli, ["refine", "list"])
-        # description 字段应出现在输出中（非空）
+            with patch("driving_cli.commands.refine._get_all_refines_dirs", return_value=[("driving", refines_dir)]):
+                result = runner.invoke(cli, ["refine", "list"])
         assert "(pending)" in result.output
-        # 输出中应包含 description 内容（不只是 target_name）
         lines = [l for l in result.output.splitlines() if "(pending)" in l]
         assert len(lines) > 0
         for line in lines:
@@ -176,11 +180,15 @@ class TestRefineLoad:
         _make_refine_md(refines_dir / "2026-04-10-rule-bar.md", target_type="rule", target_name="bar", description="规则描述")
         return tmp_path
 
+    def _refines_dir(self, tmp_path):
+        return tmp_path / "ai-driving" / "driving" / "refines"
+
     def test_全量输出两条(self, tmp_path):
         self._setup(tmp_path)
         runner = CliRunner()
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
-            result = runner.invoke(cli, ["refine", "load"])
+            with patch("driving_cli.commands.refine._get_all_refines_dirs", return_value=[("driving", self._refines_dir(tmp_path))]):
+                result = runner.invoke(cli, ["refine", "load"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert len(data) == 2
@@ -189,7 +197,8 @@ class TestRefineLoad:
         self._setup(tmp_path)
         runner = CliRunner()
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
-            result = runner.invoke(cli, ["refine", "load"])
+            with patch("driving_cli.commands.refine._get_all_refines_dirs", return_value=[("driving", self._refines_dir(tmp_path))]):
+                result = runner.invoke(cli, ["refine", "load"])
         data = json.loads(result.output)
         for item in data:
             assert "name" in item
@@ -200,7 +209,8 @@ class TestRefineLoad:
         self._setup(tmp_path)
         runner = CliRunner()
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
-            result = runner.invoke(cli, ["refine", "load", "skill"])
+            with patch("driving_cli.commands.refine._get_all_refines_dirs", return_value=[("driving", self._refines_dir(tmp_path))]):
+                result = runner.invoke(cli, ["refine", "load", "skill"])
         data = json.loads(result.output)
         assert len(data) == 1
         assert "skill" in data[0]["name"]
@@ -209,7 +219,8 @@ class TestRefineLoad:
         self._setup(tmp_path)
         runner = CliRunner()
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
-            result = runner.invoke(cli, ["refine", "load", "--type", "rule"])
+            with patch("driving_cli.commands.refine._get_all_refines_dirs", return_value=[("driving", self._refines_dir(tmp_path))]):
+                result = runner.invoke(cli, ["refine", "load", "--type", "rule"])
         data = json.loads(result.output)
         assert len(data) == 1
         assert "rule" in data[0]["name"]
@@ -218,6 +229,197 @@ class TestRefineLoad:
         self._setup(tmp_path)
         runner = CliRunner()
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
-            result = runner.invoke(cli, ["refine", "load", "nonexistent"])
+            with patch("driving_cli.commands.refine._get_all_refines_dirs", return_value=[("driving", self._refines_dir(tmp_path))]):
+                result = runner.invoke(cli, ["refine", "load", "nonexistent"])
         data = json.loads(result.output)
         assert data == []
+
+
+# ==================== driving refine commit ====================
+
+
+class TestRefineCommit:
+    """driving refine commit 命令测试
+
+    覆盖场景：
+    - 仓库不存在时报错
+    - local 类型仓库跳过
+    - 无 refines 目录时提示并退出
+    - 无 pending refine 时提示并退出
+    - 用户取消确认时退出
+    - 正常流程：git add + commit（mock git）
+    - --no-push 跳过 push
+    - --file 过滤只提交匹配文件
+    - commit message 格式正确
+    """
+
+    def _setup(self, tmp_path, repo_type: str = "remote"):
+        _make_config(
+            tmp_path,
+            [{"name": "driving", "type": repo_type, "path": "ai-driving/driving"}],
+        )
+        refines_dir = tmp_path / "ai-driving" / "driving" / "refines"
+        _make_refine_md(
+            refines_dir / "2026-04-10-skill-foo.md",
+            target_type="skill",
+            target_name="foo",
+            description="补充技能描述",
+        )
+        _make_refine_md(
+            refines_dir / "2026-04-10-rule-bar.md",
+            target_type="rule",
+            target_name="bar",
+            description="新增规则条目",
+        )
+        return tmp_path
+
+    def _refines_dir(self, tmp_path):
+        return tmp_path / "ai-driving" / "driving" / "refines"
+
+    def _make_mock_repo(self, has_changes=True):
+        """创建标准 mock git.Repo 对象"""
+        from unittest.mock import MagicMock
+        mock_repo = MagicMock()
+        mock_repo.index.diff.return_value = ["change"] if has_changes else []
+        mock_repo.untracked_files = []
+        mock_repo.remotes.__bool__ = lambda self: True
+        mock_repo.remotes.__len__ = lambda self: 1
+        return mock_repo
+
+    def test_仓库不存在时报错(self, tmp_path):
+        _make_config(tmp_path, [])
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["refine", "commit", "nonexistent"])
+        assert result.exit_code != 0
+
+    def test_local仓库跳过(self, tmp_path):
+        self._setup(tmp_path, repo_type="local")
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                mock_cm = mock_cm_cls.return_value
+                mock_cm.get_repo.return_value = type("R", (), {"type": "local", "name": "driving"})()
+                result = runner.invoke(cli, ["refine", "commit", "driving"])
+        # local 仓库跳过，输出警告并以非零退出（Abort）
+        assert "本地仓库" in result.output or result.exit_code != 0
+
+    def test_无refines目录时提示退出(self, tmp_path):
+        _make_config(tmp_path, [{"name": "driving", "type": "remote", "path": "ai-driving/driving"}])
+        # 不创建 refines 目录
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                mock_cm = mock_cm_cls.return_value
+                mock_cm.get_repo.return_value = type("R", (), {"type": "remote", "name": "driving"})()
+                mock_cm.get_repo_dir.return_value = tmp_path / "ai-driving" / "driving"
+                result = runner.invoke(cli, ["refine", "commit", "driving"])
+        assert result.exit_code == 0
+        assert "没有 refines/" in result.output or "无需提交" in result.output
+
+    def test_用户取消确认时退出(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine._get_all_refines_dirs",
+                       return_value=[("driving", self._refines_dir(tmp_path))]):
+                with patch("driving_cli.commands.refine.git.Repo"):
+                    result = runner.invoke(cli, ["refine", "commit", "driving"], input="n\n")
+        assert result.exit_code == 0
+        assert "已取消" in result.output
+
+    def test_正常流程执行git操作(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                mock_cm = mock_cm_cls.return_value
+                mock_cm.get_repo.return_value = type("R", (), {"type": "remote", "name": "driving"})()
+                mock_cm.get_repo_dir.return_value = tmp_path / "ai-driving" / "driving"
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    result = runner.invoke(cli, ["refine", "commit", "driving"], input="y\n")
+
+        assert result.exit_code == 0
+        mock_repo.index.add.assert_called_once()
+        mock_repo.index.commit.assert_called_once()
+        added_files = mock_repo.index.add.call_args[0][0]
+        assert len(added_files) == 2
+
+    def test_commit_message格式正确(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                runner.invoke(cli, ["refine", "commit", "driving"], input="y\n")
+
+        commit_call = mock_repo.index.commit.call_args
+        assert commit_call is not None
+        message = commit_call[0][0]
+        assert message.startswith("refine(driving):")
+
+    def test_no_push跳过推送(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                result = runner.invoke(
+                    cli, ["refine", "commit", "driving", "--no-push"], input="y\n"
+                )
+
+        assert result.exit_code == 0
+        assert "跳过 push" in result.output
+        mock_repo.remotes.origin.push.assert_not_called()
+
+    def test_file过滤只提交匹配文件(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                result = runner.invoke(
+                    cli, ["refine", "commit", "driving", "--file", "skill"], input="y\n"
+                )
+
+        assert result.exit_code == 0
+        added_files = mock_repo.index.add.call_args[0][0]
+        assert len(added_files) == 1
+        assert "skill" in added_files[0]
+
+    def test_无匹配file时提示退出(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            result = runner.invoke(
+                cli, ["refine", "commit", "driving", "--file", "nonexistent"]
+            )
+        assert result.exit_code == 0
+        assert "没有符合条件" in result.output or "无需提交" in result.output
+
+    def test_file多值取并集(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                mock_cm = mock_cm_cls.return_value
+                mock_cm.get_repo.return_value = type("R", (), {"type": "remote", "name": "driving"})()
+                mock_cm.get_repo_dir.return_value = tmp_path / "ai-driving" / "driving"
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    result = runner.invoke(
+                        cli,
+                        ["refine", "commit", "driving", "--file", "skill", "--file", "rule"],
+                        input="y\n",
+                    )
+
+        assert result.exit_code == 0
+        added_files = mock_repo.index.add.call_args[0][0]
+        # skill 和 rule 各一个，共 2 条
+        assert len(added_files) == 2

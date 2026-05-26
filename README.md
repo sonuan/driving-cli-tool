@@ -192,6 +192,9 @@ driving refine list --repo <name>            # 只显示指定仓库的 refine
 driving refine load                          # 输出所有 pending refine 内容（JSON，供 AI 检索）
 driving refine load <name...>                # 按文件名模糊匹配（包含即命中），支持多个，name可以是skill-name、rule-name、agent-name、framework-name
 driving refine load --type rule              # 只加载指定类型的 refine
+driving refine commit <repo>                 # 提交 pending refine 到 git（add + commit + push）
+driving refine commit <repo> --no-push       # 只 commit，不 push（离线场景）
+driving refine commit <repo> --file <name>   # 只提交文件名包含 name 的 refine（可多次指定，取并集）
 ```
 
 ## update — 更新管理

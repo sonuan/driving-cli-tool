@@ -1,6 +1,6 @@
 """Refine 子命令组
 
-提供 `driving refine list` 和 `driving refine load` 命令，
+提供 `driving refine list`、`driving refine load` 和 `driving refine commit` 命令，
 扫描所有已安装仓库的 refines/ 目录，管理和加载 pending 状态的优化提案。
 """
 
@@ -9,9 +9,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import click
+import git
 
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
-from driving_cli.utils.logger import log_error, log_info, log_warning
+from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
 
 VALID_TYPES = ("skill", "rule", "agent", "framework")
 
@@ -85,7 +86,8 @@ def refine_group():
     """Refine 提案管理
 
     - 列出所有仓库的 pending refine 提案\n
-    - 加载 refine 内容供 AI 检索历史优化经验
+    - 加载 refine 内容供 AI 检索历史优化经验\n
+    - 提交 pending refine 到 git（add + commit + push）
     """
     pass
 
@@ -192,4 +194,128 @@ def refine_load(names: tuple, type_filter: Optional[str]):
 
     except Exception as e:
         log_error(f"加载 refine 失败: {e}")
+        raise click.Abort()
+
+
+@refine_group.command(name="commit")
+@click.argument("repo_name")
+@click.option("--no-push", is_flag=True, default=False, help="只 commit，不执行 push（离线场景）")
+@click.option("--file", "file_filters", multiple=True, help="只提交文件名包含关键词的 refine（模糊匹配，可多次指定）")
+def refine_commit(repo_name: str, no_push: bool, file_filters: tuple):
+    """提交 pending refine 到 git（add + commit + push）
+
+    扫描指定仓库的 refines/ 目录，列出所有 pending 提案，
+    用户确认后执行 git add + commit，默认同时 push 到远端。
+
+    示例：
+        driving refine commit driving
+        driving refine commit driving --no-push
+        driving refine commit driving --file code-style
+        driving refine commit driving --file code-style --file self-refine
+    """
+    try:
+        project_root = find_project_root()
+        config_manager = ConfigManager(project_root)
+
+        # 校验仓库
+        repo_cfg = config_manager.get_repo(repo_name)
+        if repo_cfg is None:
+            log_error(f"仓库 '{repo_name}' 不存在，使用 'driving repo list' 查看已安装仓库")
+            raise click.Abort()
+
+        if repo_cfg.type == "local":
+            log_warning(f"仓库 '{repo_name}' 是本地仓库，跳过 git 操作")
+            raise click.Abort()
+
+        refines_dir = config_manager.get_repo_dir(repo_name) / "refines"
+        if not refines_dir.exists():
+            log_info(f"仓库 '{repo_name}' 没有 refines/ 目录，无需提交")
+            return
+
+        # 扫描 pending refines
+        items = _scan_refines(repo_name, refines_dir)
+        if file_filters:
+            items = [item for item in items if any(f in item["name"] for f in file_filters)]
+
+        if not items:
+            log_info(f"仓库 '{repo_name}' 没有符合条件的 pending refine，无需提交")
+            return
+
+        # 展示待提交清单
+        click.echo(f"\n待提交的 refine（共 {len(items)} 条）：")
+        for item in items:
+            desc = item["description"] or "-"
+            click.echo(f"  [{item['target_type']}] {item['date']}  {item['target_name']}  {desc}")
+
+        click.echo("")
+        confirmed = click.confirm("确认提交以上 refine？", default=True)
+        if not confirmed:
+            log_info("已取消")
+            return
+
+        # 自动生成 commit message
+        descriptions = [item["description"] for item in items if item["description"]]
+        if descriptions:
+            # 最多取前 3 条描述，避免 message 过长
+            summary = "; ".join(descriptions[:3])
+            if len(descriptions) > 3:
+                summary += f" 等 {len(descriptions)} 条"
+        else:
+            summary = f"新增 {len(items)} 条 refine 提案"
+        commit_message = f"refine({repo_name}): {summary}"
+
+        # 执行 git 操作
+        repo_dir = config_manager.get_repo_dir(repo_name)
+        try:
+            repo = git.Repo(repo_dir)
+        except git.exc.InvalidGitRepositoryError:
+            log_error(f"仓库 '{repo_name}' 目录不是有效的 git 仓库：{repo_dir}")
+            raise click.Abort()
+
+        # git add refines/
+        refine_files = [str(item["_file"].relative_to(repo_dir)) for item in items]
+        try:
+            repo.index.add(refine_files)
+            log_info(f"已暂存 {len(refine_files)} 个文件")
+        except Exception as e:
+            log_error(f"git add 失败: {e}")
+            raise click.Abort()
+
+        # 检查是否有内容可提交
+        if not repo.index.diff("HEAD") and not repo.untracked_files:
+            log_info("没有需要提交的变更（文件可能已提交过），跳过 commit")
+            return
+
+        # git commit
+        try:
+            repo.index.commit(commit_message)
+            log_success(f"已提交：{commit_message}")
+        except Exception as e:
+            log_error(f"git commit 失败: {e}")
+            raise click.Abort()
+
+        # git push
+        if no_push:
+            log_info("已跳过 push（--no-push）")
+            return
+
+        if not repo.remotes:
+            log_warning(f"仓库 '{repo_name}' 未配置远程仓库，跳过 push")
+            return
+
+        try:
+            log_info(f"正在推送仓库 '{repo_name}'...")
+            repo.remotes.origin.push()
+            log_success(f"仓库 '{repo_name}' 推送成功")
+        except git.exc.GitCommandError as e:
+            if "rejected" in str(e):
+                log_error(f"推送失败：存在冲突，请先执行 'driving repo pull {repo_name}'")
+            else:
+                log_error(f"推送失败: {e}")
+            raise click.Abort()
+
+    except click.Abort:
+        raise
+    except Exception as e:
+        log_error(f"refine commit 失败: {e}")
         raise click.Abort()
