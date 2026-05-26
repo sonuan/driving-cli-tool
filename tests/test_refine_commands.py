@@ -331,7 +331,9 @@ class TestRefineCommit:
     def test_文件已追踪时跳过(self, tmp_path):
         self._setup(tmp_path)
         runner = CliRunner()
-        mock_repo = self._make_mock_repo(untracked=[])  # 无 untracked 文件
+        # 文件存在但既不在 untracked 也不在 unstaged/staged（已追踪且无修改）
+        mock_repo = self._make_mock_repo(untracked=[])
+        mock_repo.index.diff.return_value = []  # unstaged 和 staged 都为空
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
             with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
                 self._mock_cm(mock_cm_cls, tmp_path)
@@ -340,6 +342,35 @@ class TestRefineCommit:
                                                  "--file", "refines/2026-04-10-skill-foo.md"])
         assert result.exit_code == 0
         assert "没有需要提交" in result.output
+
+    def test_已追踪有修改的文件正常提交(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        # 文件已追踪（不在 untracked），但在 unstaged 列表中（有修改）
+        mock_repo = self._make_mock_repo(untracked=[])
+        # index.diff(None) 返回 unstaged 修改，index.diff("HEAD") 返回 staged 修改
+        unstaged_item = type("D", (), {"a_path": "agents/android-review-workflow/MEMORY.md"})()
+        mock_repo.index.diff.side_effect = lambda ref: (
+            [unstaged_item] if ref is None else []
+        )
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                # 创建测试文件
+                memory_file = tmp_path / "ai-driving" / "driving" / "agents" / "android-review-workflow" / "MEMORY.md"
+                memory_file.parent.mkdir(parents=True, exist_ok=True)
+                memory_file.write_text("updated", encoding="utf-8")
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    result = runner.invoke(
+                        cli,
+                        ["refine", "commit", "driving",
+                         "--file", "agents/android-review-workflow/MEMORY.md"],
+                        input="y\ny\n",
+                    )
+        assert result.exit_code == 0
+        mock_repo.index.add.assert_called_once()
+        added_files = mock_repo.index.add.call_args[0][0]
+        assert "agents/android-review-workflow/MEMORY.md" in added_files
 
     def test_用户取消确认时退出(self, tmp_path):
         self._setup(tmp_path)

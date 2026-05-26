@@ -235,16 +235,23 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
             log_error(f"仓库 '{repo_name}' 目录不是有效的 git 仓库：{repo_dir}")
             raise click.Abort()
 
-        # 校验文件存在，并过滤掉已被 git 追踪的文件
+        # 校验文件存在，并过滤掉无变更的文件
+        # 有效文件 = 未追踪的新文件 OR 已追踪但有修改的文件
         untracked = set(repo.untracked_files)
+        # 已追踪且工作区有修改（unstaged）
+        unstaged = {item.a_path for item in repo.index.diff(None)}
+        # 已暂存但未提交（staged）
+        staged = {item.a_path for item in repo.index.diff("HEAD")}
+        changed = untracked | unstaged | staged
+
         valid_files = []
         for fp in file_paths:
             abs_path = repo_dir / fp
             if not abs_path.exists():
                 log_warning(f"文件不存在，跳过：{fp}")
                 continue
-            if fp not in untracked:
-                log_warning(f"文件已被 git 追踪（无变更），跳过：{fp}")
+            if fp not in changed:
+                log_warning(f"文件无变更，跳过：{fp}")
                 continue
             valid_files.append(fp)
 

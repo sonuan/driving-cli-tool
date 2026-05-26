@@ -18,3 +18,4 @@ driving load
 
 - 使用中文输出
 - 前端页面内容使用英文
+- driving-cli 基于 `python3`
