@@ -200,18 +200,19 @@ def refine_load(names: tuple, type_filter: Optional[str]):
 @refine_group.command(name="commit")
 @click.argument("repo_name")
 @click.option("--no-push", is_flag=True, default=False, help="只 commit，不执行 push（离线场景）")
-@click.option("--file", "file_filters", multiple=True, help="只提交文件名包含关键词的 refine（模糊匹配，可多次指定）")
-def refine_commit(repo_name: str, no_push: bool, file_filters: tuple):
-    """提交 pending refine 到 git（add + commit + push）
+@click.option("--file", "file_paths", multiple=True, required=True,
+              help="要提交的文件路径（相对于仓库根目录），可多次指定")
+def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
+    """提交指定文件到 git（add + commit + push）
 
-    扫描指定仓库的 refines/ 目录，列出所有 pending 提案，
-    用户确认后执行 git add + commit，默认同时 push 到远端。
+    --file 为必填项，接受相对于仓库根目录的路径，可多次指定。
+    只提交未被 git 追踪的文件（新增未提交），已追踪文件自动跳过。
 
     示例：
-        driving refine commit driving
-        driving refine commit driving --no-push
-        driving refine commit driving --file code-style
-        driving refine commit driving --file code-style --file self-refine
+        driving refine commit driving --file refines/2026-05-xx-rule-foo.md
+        driving refine commit driving --file REFINE_LOG.md
+        driving refine commit driving --file agents/xxx/MEMORY.md --file refines/2026-05-xx-rule-foo.md
+        driving refine commit driving --file refines/2026-05-xx-rule-foo.md --no-push
     """
     try:
         project_root = find_project_root()
@@ -227,21 +228,6 @@ def refine_commit(repo_name: str, no_push: bool, file_filters: tuple):
             log_warning(f"仓库 '{repo_name}' 是本地仓库，跳过 git 操作")
             raise click.Abort()
 
-        refines_dir = config_manager.get_repo_dir(repo_name) / "refines"
-        if not refines_dir.exists():
-            log_info(f"仓库 '{repo_name}' 没有 refines/ 目录，无需提交")
-            return
-
-        # 扫描 pending refines
-        items = _scan_refines(repo_name, refines_dir)
-        if file_filters:
-            items = [item for item in items if any(f in item["name"] for f in file_filters)]
-
-        if not items:
-            log_info(f"仓库 '{repo_name}' 没有符合条件的 pending refine，无需提交")
-            return
-
-        # 过滤掉已被 git 追踪的文件，只保留新增未提交的
         repo_dir = config_manager.get_repo_dir(repo_name)
         try:
             repo = git.Repo(repo_dir)
@@ -249,44 +235,45 @@ def refine_commit(repo_name: str, no_push: bool, file_filters: tuple):
             log_error(f"仓库 '{repo_name}' 目录不是有效的 git 仓库：{repo_dir}")
             raise click.Abort()
 
+        # 校验文件存在，并过滤掉已被 git 追踪的文件
         untracked = set(repo.untracked_files)
-        items = [
-            item for item in items
-            if str(item["_file"].relative_to(repo_dir)) in untracked
-        ]
+        valid_files = []
+        for fp in file_paths:
+            abs_path = repo_dir / fp
+            if not abs_path.exists():
+                log_warning(f"文件不存在，跳过：{fp}")
+                continue
+            if fp not in untracked:
+                log_warning(f"文件已被 git 追踪（无变更），跳过：{fp}")
+                continue
+            valid_files.append(fp)
 
-        if not items:
-            log_info(f"仓库 '{repo_name}' 没有新增未提交的 refine，无需提交")
+        if not valid_files:
+            log_info("没有需要提交的新增文件，退出")
             return
 
         # 展示待提交清单
-        click.echo(f"\n待提交的 refine（共 {len(items)} 条）：")
-        for item in items:
-            desc = item["description"] or "-"
-            click.echo(f"  [{item['target_type']}] {item['date']}  {item['target_name']}  {desc}")
+        click.echo(f"\n待提交文件（共 {len(valid_files)} 个）：")
+        for fp in valid_files:
+            click.echo(f"  {fp}")
 
         click.echo("")
-        confirmed = click.confirm("确认提交以上 refine？", default=True)
+        confirmed = click.confirm("确认提交以上文件？", default=True)
         if not confirmed:
             log_info("已取消")
             return
 
         # 自动生成 commit message
-        descriptions = [item["description"] for item in items if item["description"]]
-        if descriptions:
-            # 最多取前 3 条描述，避免 message 过长
-            summary = "; ".join(descriptions[:3])
-            if len(descriptions) > 3:
-                summary += f" 等 {len(descriptions)} 条"
-        else:
-            summary = f"新增 {len(items)} 条 refine 提案"
+        file_names = [Path(fp).name for fp in valid_files]
+        summary = "; ".join(file_names[:3])
+        if len(file_names) > 3:
+            summary += f" 等 {len(file_names)} 个文件"
         commit_message = f"refine({repo_name}): {summary}"
 
-        # git add refines/
-        refine_files = [str(item["_file"].relative_to(repo_dir)) for item in items]
+        # git add
         try:
-            repo.index.add(refine_files)
-            log_info(f"已暂存 {len(refine_files)} 个文件")
+            repo.index.add(valid_files)
+            log_info(f"已暂存 {len(valid_files)} 个文件")
         except Exception as e:
             log_error(f"git add 失败: {e}")
             raise click.Abort()
