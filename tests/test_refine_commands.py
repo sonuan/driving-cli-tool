@@ -526,3 +526,113 @@ class TestRefineCommit:
         assert result.exit_code == 0
         added_files = mock_repo.index.add.call_args[0][0]
         assert "REFINE_LOG.md" in added_files
+
+
+# ==================== driving refine log ====================
+
+
+class TestRefineLog:
+    """driving refine log append / get 命令测试
+
+    覆盖场景：
+    - append：首次创建文件（自动写入文件头）
+    - append：追加到已有文件
+    - append：仓库不存在时报错
+    - get：文件存在时输出内容
+    - get：文件不存在时输出空
+    - get：仓库不存在时报错
+    """
+
+    def _setup(self, tmp_path, repo_type: str = "local"):
+        _make_config(
+            tmp_path,
+            [{"name": "driving", "type": repo_type, "path": "ai-driving/driving"}],
+        )
+        repo_dir = tmp_path / "ai-driving" / "driving"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        return tmp_path
+
+    def _mock_cm(self, mock_cm_cls, tmp_path):
+        mock_cm = mock_cm_cls.return_value
+        mock_cm.get_repo.return_value = type("R", (), {"type": "local", "name": "driving"})()
+        mock_cm.get_repo_dir.return_value = tmp_path / "ai-driving" / "driving"
+        return mock_cm
+
+    # ---------- append ----------
+
+    def test_append_首次创建文件并写入文件头(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        entry = "[2026-05-26] [即时] agent:test MEMORY — 测试条目 (operator: test)"
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                result = runner.invoke(cli, ["refine", "log", "append", "driving", entry])
+        assert result.exit_code == 0
+        log_file = tmp_path / "ai-driving" / "driving" / "REFINE_LOG.md"
+        assert log_file.exists()
+        content = log_file.read_text(encoding="utf-8")
+        assert "# Refine Log" in content
+        assert entry in content
+        assert "file: REFINE_LOG.md" in result.output
+
+    def test_append_追加到已有文件(self, tmp_path):
+        self._setup(tmp_path)
+        log_file = tmp_path / "ai-driving" / "driving" / "REFINE_LOG.md"
+        log_file.write_text(
+            "# Refine Log\n# 记录所有已生效的规范变更，refines 合并后由 AI 追加。\n\n"
+            "[2026-05-25] [即时] agent:foo MEMORY — 第一条 (operator: a)\n",
+            encoding="utf-8",
+        )
+        runner = CliRunner()
+        entry2 = "[2026-05-26] [合并] rule:code-style — 第二条 (operator: AI)"
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                result = runner.invoke(cli, ["refine", "log", "append", "driving", entry2])
+        assert result.exit_code == 0
+        content = log_file.read_text(encoding="utf-8")
+        assert "第一条" in content
+        assert "第二条" in content
+        # 两条记录各占一行，不应有多余空行
+        lines = [l for l in content.splitlines() if l.strip().startswith("[")]
+        assert len(lines) == 2
+
+    def test_append_仓库不存在时报错(self, tmp_path):
+        _make_config(tmp_path, [])
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["refine", "log", "append", "nonexistent", "entry"])
+        assert result.exit_code != 0
+
+    # ---------- get ----------
+
+    def test_get_文件存在时输出内容(self, tmp_path):
+        self._setup(tmp_path)
+        log_file = tmp_path / "ai-driving" / "driving" / "REFINE_LOG.md"
+        log_file.write_text("# Refine Log\n\n[2026-05-26] [即时] agent:foo — 测试\n", encoding="utf-8")
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                result = runner.invoke(cli, ["refine", "log", "get", "driving"])
+        assert result.exit_code == 0
+        assert "# Refine Log" in result.output
+        assert "[2026-05-26]" in result.output
+
+    def test_get_文件不存在时输出空(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                result = runner.invoke(cli, ["refine", "log", "get", "driving"])
+        assert result.exit_code == 0
+        assert result.output.strip() == ""
+
+    def test_get_仓库不存在时报错(self, tmp_path):
+        _make_config(tmp_path, [])
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["refine", "log", "get", "nonexistent"])
+        assert result.exit_code != 0

@@ -195,6 +195,15 @@ driving refine load --type rule              # 只加载指定类型的 refine
 driving refine commit <repo>                 # 提交 pending refine 到 git（add + commit + push）
 driving refine commit <repo> --no-push       # 只 commit，不 push（离线场景）
 driving refine commit <repo> --file <path>   # 提交指定文件（相对于仓库根目录的路径，必填，可多次指定）
+
+# REFINE_LOG.md 变更记录管理
+driving refine log append <repo> "<entry>"   # 追加一条已生效的变更记录（文件不存在时自动创建）
+driving refine log get <repo>                # 读取当前变更记录内容
+```
+
+`refine log append` 条目格式：
+```
+[YYYY-MM-DD] [即时|合并] <target_type>:<target_name> — <描述> (operator: <触发者>)
 ```
 
 ## update — 更新管理

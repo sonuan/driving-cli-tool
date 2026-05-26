@@ -1,7 +1,8 @@
 """Refine 子命令组
 
-提供 `driving refine list`、`driving refine load` 和 `driving refine commit` 命令，
-扫描所有已安装仓库的 refines/ 目录，管理和加载 pending 状态的优化提案。
+提供 `driving refine list`、`driving refine load`、`driving refine commit`
+和 `driving refine log` 命令，扫描所有已安装仓库的 refines/ 目录，
+管理和加载 pending 状态的优化提案，以及维护 REFINE_LOG.md 变更记录。
 """
 
 import json as json_module
@@ -81,13 +82,22 @@ def _get_all_refines_dirs(config_manager: ConfigManager) -> List[Tuple[str, Path
     return result
 
 
+_REFINE_LOG_HEADER = "# Refine Log\n# 记录所有已生效的规范变更，refines 合并后由 AI 追加。\n"
+
+
+def _get_refine_log_path(config_manager: ConfigManager, repo_name: str) -> Path:
+    """返回指定仓库的 REFINE_LOG.md 绝对路径。"""
+    return config_manager.get_repo_dir(repo_name) / "REFINE_LOG.md"
+
+
 @click.group(name="refine")
 def refine_group():
     """Refine 提案管理
 
     - 列出所有仓库的 pending refine 提案\n
     - 加载 refine 内容供 AI 检索历史优化经验\n
-    - 提交 pending refine 到 git（add + commit + push）
+    - 提交 pending refine 到 git（add + commit + push）\n
+    - 维护 REFINE_LOG.md 变更记录
     """
     pass
 
@@ -346,4 +356,102 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
         raise
     except Exception as e:
         log_error(f"refine commit 失败: {e}")
+        raise click.Abort()
+
+
+# ---------------------------------------------------------------------------
+# refine log 子命令组
+# ---------------------------------------------------------------------------
+
+@refine_group.group(name="log")
+def refine_log_group():
+    """管理 REFINE_LOG.md 变更记录
+
+    - 追加一条已生效的变更记录\n
+    - 读取当前记录内容
+    """
+    pass
+
+
+@refine_log_group.command(name="append")
+@click.argument("repo_name")
+@click.argument("entry")
+def refine_log_append(repo_name: str, entry: str):
+    """追加一条变更记录到 REFINE_LOG.md。
+
+    若文件不存在则自动创建并写入文件头。
+    ENTRY 格式建议：
+
+        [YYYY-MM-DD] [即时|合并] <target_type>:<target_name> — <描述> (operator: <触发者>)
+
+    示例：
+
+        driving refine log append driving "[2026-05-26] [即时] agent:android-review-workflow MEMORY — 沉淀 RecyclerView 嵌套滚动冲突处理经验 (operator: 张三)"
+
+        driving refine log append driving-base "[2026-05-26] [合并] rule:code-style — 新增 Kotlin 协程异常处理规范 (operator: AI 自主发现)"
+    """
+    try:
+        project_root = find_project_root()
+        config_manager = ConfigManager(project_root)
+
+        repo_cfg = config_manager.get_repo(repo_name)
+        if repo_cfg is None:
+            log_error(f"仓库 '{repo_name}' 不存在，使用 'driving repo list' 查看已安装仓库")
+            raise click.Abort()
+
+        log_file = _get_refine_log_path(config_manager, repo_name)
+
+        if log_file.exists():
+            existing = log_file.read_text(encoding="utf-8")
+            # 保证条目之间有换行分隔
+            separator = "" if existing.endswith("\n") else "\n"
+            log_file.write_text(existing + separator + entry.rstrip() + "\n", encoding="utf-8")
+        else:
+            # 首次创建：写入文件头再追加条目
+            log_file.write_text(
+                _REFINE_LOG_HEADER + "\n" + entry.rstrip() + "\n",
+                encoding="utf-8",
+            )
+            log_info(f"已创建 {repo_name}/REFINE_LOG.md")
+
+        log_success(f"已追加到 {repo_name}/REFINE_LOG.md")
+        click.echo(f"file: REFINE_LOG.md")
+
+    except click.Abort:
+        raise
+    except Exception as e:
+        log_error(f"追加 refine log 失败: {e}")
+        raise click.Abort()
+
+
+@refine_log_group.command(name="get")
+@click.argument("repo_name")
+def refine_log_get(repo_name: str):
+    """读取指定仓库的 REFINE_LOG.md 内容。
+
+    示例：
+        driving refine log get driving
+        driving refine log get driving-base
+    """
+    try:
+        project_root = find_project_root()
+        config_manager = ConfigManager(project_root)
+
+        repo_cfg = config_manager.get_repo(repo_name)
+        if repo_cfg is None:
+            log_error(f"仓库 '{repo_name}' 不存在，使用 'driving repo list' 查看已安装仓库")
+            raise click.Abort()
+
+        log_file = _get_refine_log_path(config_manager, repo_name)
+
+        if not log_file.exists():
+            click.echo("")
+            return
+
+        click.echo(log_file.read_text(encoding="utf-8"))
+
+    except click.Abort:
+        raise
+    except Exception as e:
+        log_error(f"读取 refine log 失败: {e}")
         raise click.Abort()
