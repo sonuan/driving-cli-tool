@@ -241,6 +241,24 @@ def refine_commit(repo_name: str, no_push: bool, file_filters: tuple):
             log_info(f"仓库 '{repo_name}' 没有符合条件的 pending refine，无需提交")
             return
 
+        # 过滤掉已被 git 追踪的文件，只保留新增未提交的
+        repo_dir = config_manager.get_repo_dir(repo_name)
+        try:
+            repo = git.Repo(repo_dir)
+        except git.exc.InvalidGitRepositoryError:
+            log_error(f"仓库 '{repo_name}' 目录不是有效的 git 仓库：{repo_dir}")
+            raise click.Abort()
+
+        untracked = set(repo.untracked_files)
+        items = [
+            item for item in items
+            if str(item["_file"].relative_to(repo_dir)) in untracked
+        ]
+
+        if not items:
+            log_info(f"仓库 '{repo_name}' 没有新增未提交的 refine，无需提交")
+            return
+
         # 展示待提交清单
         click.echo(f"\n待提交的 refine（共 {len(items)} 条）：")
         for item in items:
@@ -264,14 +282,6 @@ def refine_commit(repo_name: str, no_push: bool, file_filters: tuple):
             summary = f"新增 {len(items)} 条 refine 提案"
         commit_message = f"refine({repo_name}): {summary}"
 
-        # 执行 git 操作
-        repo_dir = config_manager.get_repo_dir(repo_name)
-        try:
-            repo = git.Repo(repo_dir)
-        except git.exc.InvalidGitRepositoryError:
-            log_error(f"仓库 '{repo_name}' 目录不是有效的 git 仓库：{repo_dir}")
-            raise click.Abort()
-
         # git add refines/
         refine_files = [str(item["_file"].relative_to(repo_dir)) for item in items]
         try:
@@ -280,11 +290,6 @@ def refine_commit(repo_name: str, no_push: bool, file_filters: tuple):
         except Exception as e:
             log_error(f"git add 失败: {e}")
             raise click.Abort()
-
-        # 检查是否有内容可提交
-        if not repo.index.diff("HEAD") and not repo.untracked_files:
-            log_info("没有需要提交的变更（文件可能已提交过），跳过 commit")
-            return
 
         # git commit
         try:

@@ -276,14 +276,16 @@ class TestRefineCommit:
     def _refines_dir(self, tmp_path):
         return tmp_path / "ai-driving" / "driving" / "refines"
 
-    def _make_mock_repo(self, has_changes=True):
+    def _make_mock_repo(self, untracked=None):
         """创建标准 mock git.Repo 对象"""
         from unittest.mock import MagicMock
         mock_repo = MagicMock()
-        mock_repo.index.diff.return_value = ["change"] if has_changes else []
-        mock_repo.untracked_files = []
-        mock_repo.remotes.__bool__ = lambda self: True
-        mock_repo.remotes.__len__ = lambda self: 1
+        mock_repo.index.diff.return_value = ["change"]
+        # 默认把两个测试 refine 文件都标记为 untracked
+        mock_repo.untracked_files = untracked if untracked is not None else [
+            "refines/2026-04-10-skill-foo.md",
+            "refines/2026-04-10-rule-bar.md",
+        ]
         return mock_repo
 
     def test_仓库不存在时报错(self, tmp_path):
@@ -320,10 +322,13 @@ class TestRefineCommit:
     def test_用户取消确认时退出(self, tmp_path):
         self._setup(tmp_path)
         runner = CliRunner()
+        mock_repo = self._make_mock_repo()
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
-            with patch("driving_cli.commands.refine._get_all_refines_dirs",
-                       return_value=[("driving", self._refines_dir(tmp_path))]):
-                with patch("driving_cli.commands.refine.git.Repo"):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                mock_cm = mock_cm_cls.return_value
+                mock_cm.get_repo.return_value = type("R", (), {"type": "remote", "name": "driving"})()
+                mock_cm.get_repo_dir.return_value = tmp_path / "ai-driving" / "driving"
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
                     result = runner.invoke(cli, ["refine", "commit", "driving"], input="n\n")
         assert result.exit_code == 0
         assert "已取消" in result.output
@@ -353,8 +358,12 @@ class TestRefineCommit:
         mock_repo = self._make_mock_repo()
 
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
-            with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
-                runner.invoke(cli, ["refine", "commit", "driving"], input="y\n")
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                mock_cm = mock_cm_cls.return_value
+                mock_cm.get_repo.return_value = type("R", (), {"type": "remote", "name": "driving"})()
+                mock_cm.get_repo_dir.return_value = tmp_path / "ai-driving" / "driving"
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    runner.invoke(cli, ["refine", "commit", "driving"], input="y\n")
 
         commit_call = mock_repo.index.commit.call_args
         assert commit_call is not None
@@ -367,10 +376,14 @@ class TestRefineCommit:
         mock_repo = self._make_mock_repo()
 
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
-            with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
-                result = runner.invoke(
-                    cli, ["refine", "commit", "driving", "--no-push"], input="y\n"
-                )
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                mock_cm = mock_cm_cls.return_value
+                mock_cm.get_repo.return_value = type("R", (), {"type": "remote", "name": "driving"})()
+                mock_cm.get_repo_dir.return_value = tmp_path / "ai-driving" / "driving"
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    result = runner.invoke(
+                        cli, ["refine", "commit", "driving", "--no-push"], input="y\n"
+                    )
 
         assert result.exit_code == 0
         assert "跳过 push" in result.output
@@ -382,10 +395,14 @@ class TestRefineCommit:
         mock_repo = self._make_mock_repo()
 
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
-            with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
-                result = runner.invoke(
-                    cli, ["refine", "commit", "driving", "--file", "skill"], input="y\n"
-                )
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                mock_cm = mock_cm_cls.return_value
+                mock_cm.get_repo.return_value = type("R", (), {"type": "remote", "name": "driving"})()
+                mock_cm.get_repo_dir.return_value = tmp_path / "ai-driving" / "driving"
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    result = runner.invoke(
+                        cli, ["refine", "commit", "driving", "--file", "skill"], input="y\n"
+                    )
 
         assert result.exit_code == 0
         added_files = mock_repo.index.add.call_args[0][0]
