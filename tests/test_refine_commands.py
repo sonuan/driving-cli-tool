@@ -279,6 +279,9 @@ class TestRefineCommit:
             "refines/2026-04-10-rule-bar.md",
             "REFINE_LOG.md",
         ]
+        mock_repo.head.is_detached = False
+        mock_repo.active_branch.name = "main"
+        mock_repo.iter_commits.return_value = []  # 默认无新提交
         return mock_repo
 
     def _mock_cm(self, mock_cm_cls, tmp_path, repo_type="remote"):
@@ -356,13 +359,15 @@ class TestRefineCommit:
         self._setup(tmp_path)
         runner = CliRunner()
         mock_repo = self._make_mock_repo()
+        # iter_commits 返回空（无需 pull），两次确认：提交 + push
+        mock_repo.iter_commits.return_value = []
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
             with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
                 self._mock_cm(mock_cm_cls, tmp_path)
                 with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
                     result = runner.invoke(cli, ["refine", "commit", "driving",
                                                  "--file", "refines/2026-04-10-skill-foo.md"],
-                                           input="y\n")
+                                           input="y\ny\n")
         assert result.exit_code == 0
         mock_repo.index.add.assert_called_once()
         mock_repo.index.commit.assert_called_once()
@@ -373,13 +378,14 @@ class TestRefineCommit:
         self._setup(tmp_path)
         runner = CliRunner()
         mock_repo = self._make_mock_repo()
+        mock_repo.iter_commits.return_value = []
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
             with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
                 self._mock_cm(mock_cm_cls, tmp_path)
                 with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
                     runner.invoke(cli, ["refine", "commit", "driving",
                                         "--file", "refines/2026-04-10-skill-foo.md"],
-                                  input="y\n")
+                                  input="y\ny\n")
         message = mock_repo.index.commit.call_args[0][0]
         assert message.startswith("refine(driving):")
         assert "2026-04-10-skill-foo.md" in message
@@ -400,10 +406,63 @@ class TestRefineCommit:
         assert "跳过 push" in result.output
         mock_repo.remotes.origin.push.assert_not_called()
 
+    def test_push前用户选择不push(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        mock_repo.iter_commits.return_value = []
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    # 第一个 y 确认提交，第二个 n 拒绝 push
+                    result = runner.invoke(cli, ["refine", "commit", "driving",
+                                                 "--file", "refines/2026-04-10-skill-foo.md"],
+                                           input="y\nn\n")
+        assert result.exit_code == 0
+        assert "跳过 push" in result.output
+        mock_repo.remotes.origin.push.assert_not_called()
+
+    def test_远端有新提交时提示pull(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        # 模拟远端有 2 个新提交
+        mock_repo.iter_commits.return_value = ["commit1", "commit2"]
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    # 确认提交 y，选择 pull y，确认 push y
+                    result = runner.invoke(cli, ["refine", "commit", "driving",
+                                                 "--file", "refines/2026-04-10-skill-foo.md"],
+                                           input="y\ny\ny\n")
+        assert result.exit_code == 0
+        assert "远端有" in result.output
+        mock_repo.remotes.origin.pull.assert_called_once()
+
+    def test_远端有新提交用户跳过pull(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        mock_repo.iter_commits.return_value = ["commit1"]
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    # 确认提交 y，跳过 pull n，确认 push y
+                    result = runner.invoke(cli, ["refine", "commit", "driving",
+                                                 "--file", "refines/2026-04-10-skill-foo.md"],
+                                           input="y\nn\ny\n")
+        assert result.exit_code == 0
+        assert "跳过 pull" in result.output
+        mock_repo.remotes.origin.pull.assert_not_called()
+
     def test_多file全部提交(self, tmp_path):
         self._setup(tmp_path)
         runner = CliRunner()
         mock_repo = self._make_mock_repo()
+        mock_repo.iter_commits.return_value = []
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
             with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
                 self._mock_cm(mock_cm_cls, tmp_path)
@@ -413,7 +472,7 @@ class TestRefineCommit:
                         ["refine", "commit", "driving",
                          "--file", "refines/2026-04-10-skill-foo.md",
                          "--file", "REFINE_LOG.md"],
-                        input="y\n",
+                        input="y\ny\n",
                     )
         assert result.exit_code == 0
         added_files = mock_repo.index.add.call_args[0][0]
@@ -425,13 +484,14 @@ class TestRefineCommit:
         self._setup(tmp_path)
         runner = CliRunner()
         mock_repo = self._make_mock_repo()
+        mock_repo.iter_commits.return_value = []
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
             with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
                 self._mock_cm(mock_cm_cls, tmp_path)
                 with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
                     result = runner.invoke(cli, ["refine", "commit", "driving",
                                                  "--file", "REFINE_LOG.md"],
-                                           input="y\n")
+                                           input="y\ny\n")
         assert result.exit_code == 0
         added_files = mock_repo.index.add.call_args[0][0]
         assert "REFINE_LOG.md" in added_files

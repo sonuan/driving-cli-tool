@@ -295,6 +295,35 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
             log_warning(f"仓库 '{repo_name}' 未配置远程仓库，跳过 push")
             return
 
+        # push 前检查远端是否有新提交，提示用户选择是否先 pull
+        try:
+            repo.remotes.origin.fetch()
+            current_branch = repo.active_branch.name if not repo.head.is_detached else None
+            if current_branch:
+                local_commit = repo.head.commit
+                remote_ref = f"origin/{current_branch}"
+                try:
+                    remote_commit = repo.commit(remote_ref)
+                    # 检查远端是否有本地没有的提交
+                    behind_commits = list(repo.iter_commits(f"{local_commit}..{remote_ref}"))
+                    if behind_commits:
+                        click.echo(f"\n远端有 {len(behind_commits)} 个新提交，建议先 pull 再 push。")
+                        do_pull = click.confirm("是否先执行 pull？", default=True)
+                        if do_pull:
+                            repo.remotes.origin.pull(current_branch)
+                            log_success(f"pull 成功")
+                        else:
+                            log_info("跳过 pull，继续 push（可能产生冲突）")
+                except Exception:
+                    pass  # 无法获取远端引用（如首次推送），忽略
+        except git.exc.GitCommandError:
+            log_warning("fetch 失败，跳过远端检查，直接 push")
+
+        do_push = click.confirm("\n确认 push 到远端？", default=True)
+        if not do_push:
+            log_info("已跳过 push")
+            return
+
         try:
             log_info(f"正在推送仓库 '{repo_name}'...")
             repo.remotes.origin.push()
