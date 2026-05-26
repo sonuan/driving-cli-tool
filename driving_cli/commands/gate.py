@@ -453,9 +453,9 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
         effective_user_prompt = user_prompt
         if self_refine is not None:
             effective_user_prompt = (
-                f"{user_prompt}\n\n"
                 f"⚠️ 本次通过前共返工 {updated_state.user_amend_count} 次，"
-                f"请优先执行 self_refine.next 进行自我反思，完成后再执行 next"
+                f"请先根据 self_refine.history 中的历史返工记录进行自我反思，分析根本原因并使用 `self-refine` 技能输出改进提案；完成后"
+                f"{user_prompt}"
             )
 
         # 构建 Result_JSON
@@ -530,9 +530,9 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
     effective_user_prompt = user_prompt
     if self_refine is not None:
         effective_user_prompt = (
-            f"{user_prompt}\n\n"
             f"⚠️ 本次通过前共返工 {updated_state.user_amend_count} 次，"
-            f"请优先执行 self_refine.next 进行自我反思，完成后再执行 next"
+            f"请先根据 self_refine.history 中的历史返工记录进行自我反思，分析根本原因并使用 `self-refine` 技能输出改进提案；完成后"
+            f"{user_prompt}"
         )
 
     # 输出 Result_JSON
@@ -693,9 +693,9 @@ def gate_pass(gate_id: str, path: str, note: str):
     effective_user_prompt = user_prompt
     if self_refine is not None:
         effective_user_prompt = (
-            f"{user_prompt}\n\n"
             f"⚠️ 本次通过前共返工 {gate_state.user_amend_count} 次，"
-            f"请优先执行 self_refine.next 进行自我反思，完成后再执行 next"
+            f"请先根据 self_refine.history 中的历史返工记录进行自我反思，分析根本原因并使用 `self-refine` 技能输出改进提案；完成后"
+            f"{user_prompt}"
         )
 
     result_json = build_result_json(

@@ -106,7 +106,7 @@ def build_self_refine(gate_state: "GateState", threshold: int = 2) -> Optional[D
         threshold: 触发阈值，默认 2
 
     Returns:
-        self_refine dict，包含 amend_count、history、next 字段；
+        self_refine dict，包含 amend_count、history 字段；
         未达阈值时返回 None。
     """
     if gate_state.user_amend_count < threshold:
@@ -115,13 +115,10 @@ def build_self_refine(gate_state: "GateState", threshold: int = 2) -> Optional[D
     history = [
         {"at": entry.at, "action": entry.action, "note": entry.note}
         for entry in gate_state.history
+        if entry.note
     ]
 
     return {
         "amend_count": gate_state.user_amend_count,
         "history": history,
-        "next": (
-            "在继续执行前，请先根据 self_refine.history 中的历史返工记录进行自我反思，"
-            "分析反复返工的根本原因，输出改进提案后再执行 next"
-        ),
     }

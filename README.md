@@ -125,8 +125,7 @@ driving gate pass <gate-id> --path <dir> --note "说明"  # 带说明手动通�
     "amend_count": 3,
     "history": [
       { "at": "2026-05-21T18:00:00+08:00", "action": "修改", "note": "接口命名不规范" }
-    ],
-    "next": "在继续执行前，请先根据 self_refine.history 中的历史返工记录进行自我反思，分析反复返工的根本原因，输出改进提案后再执行 next"
+    ]
   }
 }
 ```
