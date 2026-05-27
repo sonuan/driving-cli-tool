@@ -4,6 +4,11 @@ import click
 
 from driving_cli import __version__
 from driving_cli.commands import agent, check, feature, framework, gate, ide, load, refine, repo, rule, skill, update
+from driving_cli.utils.help_formatter import patch_click_help
+
+
+# 全局替换 Click 的 help 渲染，所有命令自动生效
+patch_click_help()
 
 
 @click.group()
