@@ -43,13 +43,13 @@ def sample_gate():
 class TestActionSelection:
     """Requirement 6.2: action 选择菜单展示"""
 
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
     def test_select_first_action_no_note(
-        self, mock_echo, mock_prompt, runner, sample_gate
+        self, mock_echo, mock_input, runner, sample_gate
     ):
         """选择第一个 action（requires_note=False）时返回空 note"""
-        mock_prompt.return_value = 1
+        mock_input.return_value = "1"
 
         action_key, note = runner.run(
             gate=sample_gate,
@@ -61,14 +61,14 @@ class TestActionSelection:
         assert action_key == "确认"
         assert note == ""
 
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
     def test_select_second_action_with_note(
-        self, mock_echo, mock_prompt, runner, sample_gate
+        self, mock_echo, mock_input, runner, sample_gate
     ):
         """Requirement 6.3: 选择 requires_note=True 的 action 时提示输入 note"""
-        # 第一次 prompt 返回选择 2，第二次 prompt 返回 note 内容
-        mock_prompt.side_effect = [2, "缺少边界条件"]
+        # 第一次 input 返回选择 "2"，第二次 input 返回 note 内容
+        mock_input.side_effect = ["2", "缺少边界条件"]
 
         action_key, note = runner.run(
             gate=sample_gate,
@@ -80,13 +80,13 @@ class TestActionSelection:
         assert action_key == "修改"
         assert note == "缺少边界条件"
 
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
     def test_action_choices_format(
-        self, mock_echo, mock_prompt, runner, sample_gate
+        self, mock_echo, mock_input, runner, sample_gate
     ):
         """验证 action 选择菜单格式为 'action_key — next_description'"""
-        mock_prompt.return_value = 1
+        mock_input.return_value = "1"
 
         runner.run(
             gate=sample_gate,
@@ -96,7 +96,6 @@ class TestActionSelection:
         )
 
         # 检查 echo 调用中包含正确格式的选项
-        echo_calls = [str(call) for call in mock_echo.call_args_list]
         echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
         assert any(
             "确认 — 通过，进入「技术方案设计」阶段" in text for text in echo_texts
@@ -105,13 +104,13 @@ class TestActionSelection:
             "修改 — 修改拆解文档后重新确认" in text for text in echo_texts
         )
 
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
     def test_prompt_text_is_correct(
-        self, mock_echo, mock_prompt, runner, sample_gate
+        self, mock_echo, mock_input, runner, sample_gate
     ):
         """验证 prompt 文本为 '请选择操作'"""
-        mock_prompt.return_value = 1
+        mock_input.return_value = "1"
 
         runner.run(
             gate=sample_gate,
@@ -120,42 +119,18 @@ class TestActionSelection:
             forced_interactive=False,
         )
 
-        # 第一次 prompt 调用应该是 "请选择操作"
-        first_call = mock_prompt.call_args_list[0]
-        assert first_call[0][0] == "请选择操作"
+        # 验证 input 被调用，且提示文本包含 "请选择操作"
+        first_call = mock_input.call_args_list[0]
+        assert "请选择操作" in first_call[0][0]
+        assert "输入序号或名称" in first_call[0][0]
 
-
-class TestNoteInput:
-    """Requirement 6.3, 6.4: note 输入逻辑"""
-
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
-    def test_requires_note_true_prompts_for_note(
-        self, mock_echo, mock_prompt, runner, sample_gate
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
+    def test_select_action_by_name(
+        self, mock_echo, mock_input, runner, sample_gate
     ):
-        """requires_note=True 时应提示输入修改说明"""
-        mock_prompt.side_effect = [2, "需要修改的内容"]
-
-        action_key, note = runner.run(
-            gate=sample_gate,
-            condition_results=[],
-            user_amend_count=0,
-            forced_interactive=False,
-        )
-
-        assert action_key == "修改"
-        assert note == "需要修改的内容"
-        # 验证第二次 prompt 是 "修改说明"
-        second_call = mock_prompt.call_args_list[1]
-        assert second_call[0][0] == "修改说明"
-
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
-    def test_requires_note_false_returns_empty_note(
-        self, mock_echo, mock_prompt, runner, sample_gate
-    ):
-        """Requirement 6.4: requires_note=False 时 note 为空字符串"""
-        mock_prompt.return_value = 1
+        """支持通过 action 名称选择操作"""
+        mock_input.return_value = "确认"
 
         action_key, note = runner.run(
             gate=sample_gate,
@@ -166,20 +141,98 @@ class TestNoteInput:
 
         assert action_key == "确认"
         assert note == ""
-        # 只应有一次 prompt 调用（选择操作）
-        assert mock_prompt.call_count == 1
+
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
+    def test_select_action_by_name_case_insensitive(
+        self, mock_echo, mock_input, runner, sample_gate
+    ):
+        """action 名称匹配大小写不敏感"""
+        mock_input.return_value = "修改"
+
+        action_key, note = runner.run(
+            gate=sample_gate,
+            condition_results=[],
+            user_amend_count=0,
+            forced_interactive=False,
+        )
+
+        assert action_key == "修改"
+
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
+    def test_invalid_input_retries(
+        self, mock_echo, mock_input, runner, sample_gate
+    ):
+        """无效输入时提示错误并重试"""
+        mock_input.side_effect = ["99", "abc", "1"]
+
+        action_key, note = runner.run(
+            gate=sample_gate,
+            condition_results=[],
+            user_amend_count=0,
+            forced_interactive=False,
+        )
+
+        assert action_key == "确认"
+        assert mock_input.call_count == 3
+
+
+class TestNoteInput:
+    """Requirement 6.3, 6.4: note 输入逻辑"""
+
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
+    def test_requires_note_true_prompts_for_note(
+        self, mock_echo, mock_input, runner, sample_gate
+    ):
+        """requires_note=True 时应提示输入修改说明"""
+        mock_input.side_effect = ["2", "需要修改的内容"]
+
+        action_key, note = runner.run(
+            gate=sample_gate,
+            condition_results=[],
+            user_amend_count=0,
+            forced_interactive=False,
+        )
+
+        assert action_key == "修改"
+        assert note == "需要修改的内容"
+        # 验证提示文字通过 _echo 单独输出
+        echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
+        assert any("修改说明" in text for text in echo_texts)
+
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
+    def test_requires_note_false_returns_empty_note(
+        self, mock_echo, mock_input, runner, sample_gate
+    ):
+        """Requirement 6.4: requires_note=False 时 note 为空字符串"""
+        mock_input.return_value = "1"
+
+        action_key, note = runner.run(
+            gate=sample_gate,
+            condition_results=[],
+            user_amend_count=0,
+            forced_interactive=False,
+        )
+
+        assert action_key == "确认"
+        assert note == ""
+        # 只应有一次 input 调用（选择操作）
+        assert mock_input.call_count == 1
 
 
 class TestReworkHint:
     """Requirement 6.5, 13.1: 返工提示展示"""
 
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
     def test_rework_hint_displayed_when_amend_count_gte_2(
-        self, mock_echo, mock_prompt, runner, sample_gate
+        self, mock_echo, mock_input, runner, sample_gate
     ):
         """Requirement 6.5: user_amend_count >= 2 时展示返工提示"""
-        mock_prompt.return_value = 1
+        mock_input.return_value = "1"
 
         runner.run(
             gate=sample_gate,
@@ -191,13 +244,13 @@ class TestReworkHint:
         echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
         assert any("已返工 2 次" in text for text in echo_texts)
 
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
     def test_rework_hint_displayed_when_amend_count_3(
-        self, mock_echo, mock_prompt, runner, sample_gate
+        self, mock_echo, mock_input, runner, sample_gate
     ):
         """user_amend_count=3 时也展示返工提示"""
-        mock_prompt.return_value = 1
+        mock_input.return_value = "1"
 
         runner.run(
             gate=sample_gate,
@@ -209,13 +262,13 @@ class TestReworkHint:
         echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
         assert any("已返工 3 次" in text for text in echo_texts)
 
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
     def test_no_rework_hint_when_amend_count_below_2(
-        self, mock_echo, mock_prompt, runner, sample_gate
+        self, mock_echo, mock_input, runner, sample_gate
     ):
         """user_amend_count < 2 时不展示返工提示"""
-        mock_prompt.return_value = 1
+        mock_input.return_value = "1"
 
         runner.run(
             gate=sample_gate,
@@ -231,13 +284,13 @@ class TestReworkHint:
 class TestForcedInteractive:
     """Requirement 13.3: 阈值警告展示"""
 
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
     def test_forced_interactive_shows_warning(
-        self, mock_echo, mock_prompt, runner, sample_gate
+        self, mock_echo, mock_input, runner, sample_gate
     ):
         """forced_interactive=True 时展示阈值警告"""
-        mock_prompt.return_value = 1
+        mock_input.return_value = "1"
 
         runner.run(
             gate=sample_gate,
@@ -249,13 +302,13 @@ class TestForcedInteractive:
         echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
         assert any("返工次数已达阈值，强制进入交互模式" in text for text in echo_texts)
 
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
     def test_no_warning_when_not_forced(
-        self, mock_echo, mock_prompt, runner, sample_gate
+        self, mock_echo, mock_input, runner, sample_gate
     ):
         """forced_interactive=False 时不展示阈值警告"""
-        mock_prompt.return_value = 1
+        mock_input.return_value = "1"
 
         runner.run(
             gate=sample_gate,
@@ -271,13 +324,13 @@ class TestForcedInteractive:
 class TestConditionResultsDisplay:
     """Requirement 3.5 (related): 未通过 condition 结果展示"""
 
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
     def test_failed_conditions_displayed_with_cross_prefix(
-        self, mock_echo, mock_prompt, runner, sample_gate
+        self, mock_echo, mock_input, runner, sample_gate
     ):
         """未通过的 condition 以 ✗ 前缀展示"""
-        mock_prompt.return_value = 1
+        mock_input.return_value = "1"
         condition_results = [
             ConditionResult(passed=True, label="路径合法"),
             ConditionResult(passed=False, label="文件存在", detail="文件不存在: /tmp/x"),
@@ -297,13 +350,13 @@ class TestConditionResultsDisplay:
         # 通过的 condition 不应展示
         assert not any("路径合法" in text for text in echo_texts if "✗" in text or "✓" in text)
 
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
     def test_no_failed_conditions_no_output(
-        self, mock_echo, mock_prompt, runner, sample_gate
+        self, mock_echo, mock_input, runner, sample_gate
     ):
         """所有 condition 通过时不展示 condition 结果"""
-        mock_prompt.return_value = 1
+        mock_input.return_value = "1"
         condition_results = [
             ConditionResult(passed=True, label="路径合法"),
             ConditionResult(passed=True, label="文件存在"),
@@ -319,13 +372,13 @@ class TestConditionResultsDisplay:
         echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
         assert not any("✗" in text for text in echo_texts)
 
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
     def test_failed_condition_without_detail(
-        self, mock_echo, mock_prompt, runner, sample_gate
+        self, mock_echo, mock_input, runner, sample_gate
     ):
         """失败 condition 无 detail 时只展示 label"""
-        mock_prompt.return_value = 1
+        mock_input.return_value = "1"
         condition_results = [
             ConditionResult(passed=False, label="路径合法"),
         ]
@@ -344,13 +397,13 @@ class TestConditionResultsDisplay:
 class TestTemplateRendering:
     """Requirement 6.1: 渲染并展示 template 内容"""
 
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
     def test_template_rendered_and_displayed(
-        self, mock_echo, mock_prompt, runner, sample_gate, mock_renderer
+        self, mock_echo, mock_input, runner, sample_gate, mock_renderer
     ):
         """template 内容应通过 renderer 渲染后展示"""
-        mock_prompt.return_value = 1
+        mock_input.return_value = "1"
 
         runner.run(
             gate=sample_gate,
@@ -365,13 +418,13 @@ class TestTemplateRendering:
         echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
         assert any("渲染后的模板内容" in text for text in echo_texts)
 
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
     def test_empty_template_not_displayed(
-        self, mock_echo, mock_prompt, runner, mock_renderer
+        self, mock_echo, mock_input, runner, mock_renderer
     ):
         """空 template 时不展示模板内容"""
-        mock_prompt.return_value = 1
+        mock_input.return_value = "1"
         gate = {
             "id": "GATE-R5",
             "template": [],
@@ -393,13 +446,13 @@ class TestTemplateRendering:
 class TestCompleteFlow:
     """完整交互流程测试"""
 
-    @patch("driving_cli.gate.interactive_runner.click.prompt")
-    @patch("driving_cli.gate.interactive_runner.click.echo")
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
     def test_full_flow_with_forced_interactive_and_failed_conditions(
-        self, mock_echo, mock_prompt, runner, sample_gate
+        self, mock_echo, mock_input, runner, sample_gate
     ):
         """完整流程：阈值警告 + 返工提示 + 失败条件 + 模板 + 选择 + note"""
-        mock_prompt.side_effect = [2, "修改原因"]
+        mock_input.side_effect = ["2", "修改原因"]
         condition_results = [
             ConditionResult(passed=True, label="路径合法"),
             ConditionResult(passed=False, label="文件存在", detail="文件缺失"),
