@@ -1,19 +1,19 @@
 {
-  "version": "1.1.7",
-  "build_date": "2026-05-22T11:09:28+08:00",
+  "version": "1.1.8",
+  "build_date": "2026-05-27T17:58:48+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
-      "v1.1.7",
-      "feat：门禁质量度量上报",
-      "feat：优化仓库更新提示",
-      "feat：gate命令 --path 校验支持中文路径",
-      "feat：写入gate-state.json时保留门禁名称，放在第一位",
-      "feat：写入gate-state.json时保留门禁名称",
-      "feat：门禁cli优化部分错误问题",
-      "feat：新增门禁cli工具",
-      "feat：检查repo更新只检查pull状态，不检查push状态",
-      "统一markdown yaml解析方法"
+      "v1.1.8",
+      "feat：优化 driving gate request 输入信息的操作体验",
+      "feat：新增refine log命令行，管理REFINE_LOG.md",
+      "feat：refine commit 要包含修改文件",
+      "feat：refine commit 在push前先确认是否可pull",
+      "feat：refine commit --file调整为指定路径",
+      "feat：refine commit 只提交未提交部分",
+      "feat：refine命令行新增commit自动提交git",
+      "feat：优化self-refine引导文案",
+      "feat：添加自动触发 self-refine 的能力"
   ]
 }
