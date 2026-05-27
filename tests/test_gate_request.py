@@ -351,8 +351,8 @@ class TestGateRequestInteractive:
             "driving_cli.commands.gate._collect_all_gates_data",
             return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ), patch(
-            "click.prompt",
-            side_effect=[1],  # 选择第一个操作（确认）
+            "driving_cli.gate.interactive_runner._prompt",
+            side_effect=["1"],  # 选择第一个操作（确认）
         ):
             result = runner.invoke(
                 cli,
@@ -379,8 +379,8 @@ class TestGateRequestInteractive:
             "driving_cli.commands.gate._collect_all_gates_data",
             return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ), patch(
-            "click.prompt",
-            side_effect=[2, "需要修改边界条件"],  # 选择第二个操作（修改），输入 note
+            "driving_cli.gate.interactive_runner._prompt",
+            side_effect=["2", "需要修改边界条件"],  # 选择第二个操作（修改），输入 note
         ):
             result = runner.invoke(
                 cli,
@@ -431,8 +431,8 @@ class TestGateRequestReworkThreshold:
             "driving_cli.commands.gate._collect_all_gates_data",
             return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
         ), patch(
-            "click.prompt",
-            side_effect=[1],  # 选择确认
+            "driving_cli.gate.interactive_runner._prompt",
+            side_effect=["1"],  # 选择确认
         ):
             result = runner.invoke(
                 cli,
@@ -921,8 +921,8 @@ class TestGateReporter:
         from unittest.mock import patch
         import time
 
-        # mock _do_report 避免真实网络请求
-        with patch("driving_cli.utils.gate_reporter._do_report"):
+        # mock do_post 避免真实网络请求
+        with patch("driving_cli.utils.reporter_utils.do_post"):
             start = time.time()
             report_gate_event(
                 gate_id="GATE-R5",
@@ -1028,28 +1028,22 @@ class TestGateWebhookConfig:
     """gate_webhook 配置控制上报行为"""
 
     def test_有webhook配置时发送请求(self, tmp_path):
-        """gate_webhook 非空时 _do_report 发送 HTTP 请求"""
-        from driving_cli.utils.gate_reporter import _do_report
+        """gate_webhook 非空时 do_post 发送 HTTP 请求"""
+        from driving_cli.utils.reporter_utils import do_post
 
-        with patch(
-            "driving_cli.utils.gate_reporter._get_webhook_url",
-            return_value="https://example.com/webhook",
-        ), patch("urllib.request.urlopen") as mock_urlopen:
+        with patch("urllib.request.urlopen") as mock_urlopen:
             mock_urlopen.return_value.__enter__ = lambda s: s
             mock_urlopen.return_value.__exit__ = lambda s, *a: False
             mock_urlopen.return_value.read = lambda: b""
-            _do_report({"gate_id": "GATE-R5"})
+            do_post("https://example.com/webhook", {"gate_id": "GATE-R5"})
         mock_urlopen.assert_called_once()
 
     def test_无webhook配置时不发送请求(self, tmp_path):
-        """gate_webhook 为空时 _do_report 直接返回，不发请求"""
-        from driving_cli.utils.gate_reporter import _do_report
+        """webhook 为空时 do_post 直接返回，不发请求"""
+        from driving_cli.utils.reporter_utils import do_post
 
-        with patch(
-            "driving_cli.utils.gate_reporter._get_webhook_url",
-            return_value="",
-        ), patch("urllib.request.urlopen") as mock_urlopen:
-            _do_report({"gate_id": "GATE-R5"})
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            do_post("", {"gate_id": "GATE-R5"})
         mock_urlopen.assert_not_called()
 
     def test_get_webhook_url_从config读取(self, tmp_path):

@@ -842,3 +842,55 @@ class TestAgentExportCommand:
                    return_value=project_with_full_agent):
             result = runner.invoke(cli, ["agent", "export", "nonexistent", "--tool", "kiro"])
         assert result.exit_code != 0
+
+
+# ==================== agent report ====================
+
+
+class TestAgentReport:
+    """driving agent report 命令测试"""
+
+    def test_agent存在时正常上报(self, runner, project_with_agents):
+        """agent 存在时命令正常退出，不报错"""
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
+            with patch("driving_cli.utils.agent_reporter.report_agent_event") as mock_report:
+                result = runner.invoke(cli, [
+                    "agent", "report", "agent-a",
+                    "--path", "features/login",
+                    "--source", "dev-review 阶段，由 dev-workflow 触发",
+                ])
+        assert result.exit_code == 0
+        mock_report.assert_called_once_with(
+            agent_name="agent-a",
+            feature_path="features/login",
+            source="dev-review 阶段，由 dev-workflow 触发",
+        )
+
+    def test_agent不存在时打印警告但不退出(self, runner, project_with_agents):
+        """agent 找不到时打印警告，exit_code 仍为 0，不阻断流程"""
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
+            with patch("driving_cli.utils.agent_reporter.report_agent_event"):
+                result = runner.invoke(cli, [
+                    "agent", "report", "nonexistent-agent",
+                    "--path", "features/login",
+                ])
+        assert result.exit_code == 0
+        assert "nonexistent-agent" in result.output
+
+    def test_source默认为空字符串(self, runner, project_with_agents):
+        """不传 --source 时默认为空字符串"""
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
+            with patch("driving_cli.utils.agent_reporter.report_agent_event") as mock_report:
+                result = runner.invoke(cli, [
+                    "agent", "report", "agent-a",
+                    "--path", "features/login",
+                ])
+        assert result.exit_code == 0
+        _, kwargs = mock_report.call_args
+        assert kwargs["source"] == ""
+
+    def test_缺少path参数报错(self, runner, project_with_agents):
+        """--path 为必填参数，缺少时命令报错"""
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
+            result = runner.invoke(cli, ["agent", "report", "agent-a"])
+        assert result.exit_code != 0

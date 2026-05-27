@@ -744,3 +744,39 @@ def agent_export(agent_name: str, tool: str, output: Optional[str], force: bool)
     except Exception as e:
         log_error(f"导出失败: {e}")
         raise click.Abort()
+
+
+# ---------------------------------------------------------------------------
+# agent report
+# ---------------------------------------------------------------------------
+
+@agent_group.command(name="report")
+@click.argument("agent_name")
+@click.option("--path", "feature_path", required=True, help="需求目录路径")
+@click.option("--source", default="", help="触发来源（来自 agent-dispatcher 构建 prompt 时的触发来源描述）")
+def agent_report(agent_name: str, feature_path: str, source: str):
+    """上报子 agent 启动事件（由子 agent 在加载步骤第 0 步调用）。
+
+    上报内容：agent 名称、需求目录、触发来源、触发时间、执行者（git user.name）。
+    agent 找不到时打印提示但不影响后续执行。
+    上报失败静默处理，不阻塞主流程。
+
+    示例：
+        driving agent report android-reviewer --path features/login --source "dev-review 阶段，由 dev-workflow 触发"
+    """
+    from driving_cli.utils.agent_reporter import report_agent_event
+
+    try:
+        project_root = find_project_root()
+        config_manager = ConfigManager(project_root)
+        agent_dir = _resolve_agent_dir(config_manager, agent_name)
+        if agent_dir is None:
+            log_warning(f"未找到 agent '{agent_name}'，跳过上报")
+    except Exception:
+        log_warning(f"查找 agent '{agent_name}' 时出错，跳过上报")
+
+    report_agent_event(
+        agent_name=agent_name,
+        feature_path=feature_path,
+        source=source,
+    )

@@ -181,6 +181,9 @@ driving agent export <name> --tool claude-code       # → .claude/agents/<name>
 driving agent export <name> --tool cursor            # → .cursor/rules/<name>.mdc（需含 alwaysApply 字段）
 driving agent export <name> --tool windsurf          # → .windsurf/rules/<name>.md（需含 trigger 字段）
 driving agent export <name> --tool kiro --force      # 强制重建软链接
+
+# 上报子 agent 启动事件（由子 agent 在加载步骤第 0 步调用）
+driving agent report <name> --path <feature-dir> --source "<触发来源描述>"
 ```
 
 ## refine — Refine 自我完善提案管理
@@ -294,7 +297,9 @@ trigger: manual                 # Windsurf 所需
   ],
   "default_commit_message": "update by driving",
   "update_version_url": "",
-  "check_sample_rate": 100
+  "check_sample_rate": 100,
+  "gate_webhook": "https://...",
+  "agent_webhook": "https://..."
 }
 ```
 

@@ -4,22 +4,11 @@
 异步向飞书 Webhook 上报结构化日志，失败静默处理，不阻塞主流程。
 """
 
-import datetime
-import json
-import threading
 from typing import Any, Dict, Optional
-
-import urllib.request
-import urllib.error
 
 from driving_cli.utils.git_helper import get_git_user
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
-
-# 飞书 Webhook 地址（兜底默认值，优先使用 driving.config.json 中的 gate_webhook）
-_WEBHOOK_URL = (
-    "https://www.feishu.cn/flow/api/trigger-webhook/"
-    "7c3111a459a7c5b7f6f141af8eb9a232"
-)
+from driving_cli.utils.reporter_utils import now_timestamp, report_async
 
 
 def _get_webhook_url() -> str:
@@ -30,12 +19,6 @@ def _get_webhook_url() -> str:
         return config.gate_webhook or ""
     except Exception:
         return ""
-
-
-def _now_timestamp() -> str:
-    """返回当前北京时间，格式：2026/05/21 21:39"""
-    tz_beijing = datetime.timezone(datetime.timedelta(hours=8))
-    return datetime.datetime.now(tz_beijing).strftime("%Y/%m/%d %H:%M")
 
 
 def build_report_payload(
@@ -53,7 +36,7 @@ def build_report_payload(
     context: Optional[Dict[str, Any]] = None,
     stats: Optional[Dict[str, Any]] = None,
 ) -> dict:
-    """构建上报 payload
+    """构建 gate 上报 payload
 
     Args:
         gate_id:       门禁 ID，如 GATE-R5
@@ -62,7 +45,7 @@ def build_report_payload(
         result:        结果类型：pass / auto_pass / amend / blocked
         action:        用户选择的操作 key
         note:          修改说明（amend / blocked 时有值）
-        triggered_at:  触发时间戳（秒级 Unix timestamp），默认取当前时间
+        triggered_at:  触发时间，默认取当前北京时间
         feature_path:  --path 参数值
         repo:          所属仓库名
         cli_version:   CLI 版本号
@@ -81,7 +64,7 @@ def build_report_payload(
             "result": result,
             "action": action,
             "note": note,
-            "triggered_at": triggered_at or _now_timestamp(),
+            "triggered_at": triggered_at or now_timestamp(),
         },
     }
 
@@ -110,33 +93,6 @@ def build_report_payload(
     return payload
 
 
-def _do_report(payload: dict) -> None:
-    """执行 HTTP POST，失败静默处理"""
-    webhook_url = _get_webhook_url()
-    if not webhook_url:
-        return
-    try:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(
-            webhook_url,
-            data=body,
-            headers={"Content-Type": "application/json; charset=utf-8"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            resp.read()
-    except Exception:
-        # 上报失败不影响主流程，静默处理
-        pass
-
-
-def report_async(payload: dict) -> None:
-    """异步上报（后台线程），最多等待 3 秒，不阻塞 CLI 主输出"""
-    t = threading.Thread(target=_do_report, args=(payload,), daemon=True)
-    t.start()
-    t.join(timeout=3)
-
-
 def report_gate_event(
     *,
     gate_id: str,
@@ -152,7 +108,7 @@ def report_gate_event(
     context: Optional[Dict[str, Any]] = None,
     gate_state=None,  # GateState 对象，用于提取 stats
 ) -> None:
-    """构建 payload 并异步上报
+    """构建 payload 并异步上报到 gate_webhook。
 
     这是对外的主入口，在每个门禁结果输出后调用。
 
@@ -183,4 +139,4 @@ def report_gate_event(
         context=context,
         stats=stats,
     )
-    report_async(payload)
+    report_async(_get_webhook_url(), payload)
