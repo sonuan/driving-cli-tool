@@ -750,7 +750,7 @@ def _add_frontmatter_field(agent_dir: Path, field: str, value: str) -> None:
 
 
 class TestAgentExportCommand:
-    def test_export_kiro生成软链接(self, runner, project_with_full_agent):
+    def test_export_kiro生成硬链接(self, runner, project_with_full_agent):
         agent_dir = project_with_full_agent / "ai-driving" / "my-local" / "agents" / "test-agent"
         _add_frontmatter_field(agent_dir, "tools", '["read", "shell"]')
         with patch("driving_cli.commands.agent.find_project_root",
@@ -758,7 +758,12 @@ class TestAgentExportCommand:
             result = runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "kiro"])
         assert result.exit_code == 0
         out = project_with_full_agent / ".kiro" / "agents" / "test-agent.md"
-        assert out.is_symlink()
+        # 硬链接：文件存在且不是符号链接
+        assert out.exists()
+        assert not out.is_symlink()
+        # 验证硬链接：与源文件共享同一 inode
+        source = agent_dir / "AGENTS.md"
+        assert out.stat().st_ino == source.stat().st_ino
 
     def test_export_kiro缺少tools字段报错(self, runner, project_with_full_agent):
         with patch("driving_cli.commands.agent.find_project_root",

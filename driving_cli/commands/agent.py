@@ -575,7 +575,7 @@ SUPPORTED_TOOLS = ["kiro", "claude-code", "cursor", "windsurf"]
 
 def _export_kiro(agent_name: str, data: Dict, agent_dir: Path,
                  output_dir: Path) -> Path:
-    """生成 Kiro custom agent 软链接。
+    """生成 Kiro custom agent 硬链接。
 
     AGENTS.md frontmatter 需包含 tools 字段，Kiro 才能正确识别。
     参考：https://kiro.dev/docs/chat/subagents/
@@ -594,7 +594,9 @@ def _export_kiro(agent_name: str, data: Dict, agent_dir: Path,
     agents_md = agent_dir / "AGENTS.md"
     if out_file.exists() or out_file.is_symlink():
         out_file.unlink()
-    out_file.symlink_to(agents_md.resolve())
+    
+    import os
+    os.link(agents_md.resolve(), out_file)
     return out_file
 
 
@@ -737,7 +739,10 @@ def agent_export(agent_name: str, tool: str, output: Optional[str], force: bool)
         )
 
         log_success(f"已生成：{out_file.relative_to(output_dir)}")
-        log_info("软链接模式：AGENTS.md 更新后自动生效，无需重新导出")
+        if tool.lower() == "kiro":
+            log_info("硬链接模式：AGENTS.md 更新后自动生效，无需重新导出")
+        else:
+            log_info("软链接模式：AGENTS.md 更新后自动生效，无需重新导出")
 
     except click.Abort:
         raise

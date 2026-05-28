@@ -175,12 +175,12 @@ driving agent memory set <name> <content>        # 覆盖写入（会提示确�
 driving agent memory set <name> <content> --force  # 强制覆盖
 driving agent memory clear <name>                # 清空 MEMORY.md
 
-# 导出到外部 AI 工具（软链接模式，AGENTS.md 更新后自动生效；文件已存在时自动跳过）
-driving agent export <name> --tool kiro              # → .kiro/agents/<name>.md（需含 tools 字段）
-driving agent export <name> --tool claude-code       # → .claude/agents/<name>.md
-driving agent export <name> --tool cursor            # → .cursor/rules/<name>.mdc（需含 alwaysApply 字段）
-driving agent export <name> --tool windsurf          # → .windsurf/rules/<name>.md（需含 trigger 字段）
-driving agent export <name> --tool kiro --force      # 强制重建软链接
+# 导出到外部 AI 工具（kiro 使用硬链接，其他工具使用软链接；文件已存在时自动跳过）
+driving agent export <name> --tool kiro              # → .kiro/agents/<name>.md（硬链接，需含 tools 字段）
+driving agent export <name> --tool claude-code       # → .claude/agents/<name>.md（软链接）
+driving agent export <name> --tool cursor            # → .cursor/rules/<name>.mdc（软链接，需含 alwaysApply 字段）
+driving agent export <name> --tool windsurf          # → .windsurf/rules/<name>.md（软链接，需含 trigger 字段）
+driving agent export <name> --tool kiro --force      # 强制重建硬链接
 
 # 上报子 agent 启动事件（由子 agent 在加载步骤第 0 步调用）
 driving agent report <name> --path <feature-dir> --source "<触发来源描述>"
