@@ -1,10 +1,12 @@
 {
-  "version": "1.1.9",
-  "build_date": "2026-05-27T21:07:57+08:00",
+  "version": "1.2.0",
+  "build_date": "2026-05-28T14:27:03+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
+      "v1.2.0",
+      "feat：agent export导出kiro时使用硬链接",
       "v1.1.9",
       "feat：新增agent触发上报，用于统计agent的启动率",
       "feat：优化--help不换行的问题",
@@ -12,8 +14,6 @@
       "feat：优化 driving gate request 输入信息的操作体验",
       "feat：新增refine log命令行，管理REFINE_LOG.md",
       "feat：refine commit 要包含修改文件",
-      "feat：refine commit 在push前先确认是否可pull",
-      "feat：refine commit --file调整为指定路径",
-      "feat：refine commit 只提交未提交部分"
+      "feat：refine commit 在push前先确认是否可pull"
   ]
 }
