@@ -1,19 +1,19 @@
 {
-  "version": "1.2.4",
-  "build_date": "2026-06-01T20:41:08+08:00",
+  "version": "1.2.5",
+  "build_date": "2026-06-01T21:18:12+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
+      "v1.2.5",
+      "feat：优化refine webhook的at和actor字段",
+      "feat：refine merge 支持触发来源和原因的传入，不是通过提案文件的tigger",
       "v1.2.4",
       "feat：优化当前分支没有track时，无法push问题",
       "v1.2.3",
       "feat: 优化 driving power add 的逻辑判断，增强体验",
       "v1.2.2",
       "feat: 新增driving power命令组，为了方便管理多分支上的配置，可以通过git下发driving.config.json，达到不需要合并代码的效果",
-      "v1.2.1",
-      "feat：新增提案合并命令行 driving refine merge，并上报webhook",
-      "v1.2.0",
-      "feat：agent export导出kiro时使用硬链接"
+      "v1.2.1"
   ]
 }
