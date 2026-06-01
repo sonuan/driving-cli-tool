@@ -18,10 +18,52 @@ from driving_cli.utils.logger import log_error, log_info, log_success, log_warni
 VALID_TYPES = ("skill", "rule", "agent", "framework")
 
 
+def _parse_trigger_block(file_path: Path) -> Optional[Dict]:
+    """从 refine 文件 frontmatter 中手动提取 trigger 嵌套字典。
+
+    用于 PyYAML 不可用时 _parse_simple 无法解析嵌套字典的兜底处理。
+    只提取 source 和 reason 两个字段。
+
+    Returns:
+        {"source": ..., "reason": ...} 或 None（trigger 块不存在时）
+    """
+    try:
+        in_frontmatter = False
+        in_trigger = False
+        result: Dict = {}
+        with file_path.open(encoding="utf-8") as f:
+            for lineno, line in enumerate(f):
+                stripped = line.rstrip("\n")
+                if lineno == 0:
+                    if stripped.strip() == "---":
+                        in_frontmatter = True
+                    continue
+                if not in_frontmatter:
+                    break
+                if stripped.strip() == "---":
+                    break
+                if stripped.strip() == "trigger:":
+                    in_trigger = True
+                    continue
+                if in_trigger:
+                    # 缩进行属于 trigger 块
+                    if stripped.startswith("  ") or stripped.startswith("\t"):
+                        kv = stripped.strip()
+                        if ":" in kv:
+                            k, _, v = kv.partition(":")
+                            result[k.strip()] = v.strip()
+                    else:
+                        # 非缩进行，trigger 块结束
+                        in_trigger = False
+        return result if result else None
+    except Exception:
+        return None
+
+
 def _parse_refine_frontmatter(file_path: Path) -> Optional[Dict]:
     """解析 refine 文件的 YAML frontmatter。
 
-    提取 date、target_type、target_name、target_file、description、operator、status 字段。
+    提取 date、target_type、target_name、target_file、description、operator、trigger、status 字段。
     逐行读取到第二个 --- 即停止，避免读取大文件正文。
 
     Returns:
@@ -41,6 +83,7 @@ def _parse_refine_frontmatter(file_path: Path) -> Optional[Dict]:
             "target_file": str(data.get("target_file", "")),
             "description": str(data.get("description", "")),
             "operator": str(data.get("operator", "")),
+            "trigger": data.get("trigger") if isinstance(data.get("trigger"), dict) else _parse_trigger_block(file_path),
             "status": str(data.get("status", "pending")),
         }
     except Exception as e:
@@ -83,6 +126,58 @@ def _get_all_refines_dirs(config_manager: ConfigManager) -> List[Tuple[str, Path
 
 
 _REFINE_LOG_HEADER = "# Refine Log\n# 记录所有已生效的规范变更，refines 合并后由 AI 追加。\n"
+
+
+def _report_to_webhook(
+    webhook_url: str,
+    repo_name: str,
+    file_path: Path,
+    meta: dict,
+    event: str = "refine.committed",
+) -> None:
+    """上报 refine 提案事件到 webhook。
+
+    失败时静默处理，不影响主流程。
+
+    Args:
+        webhook_url: 目标 webhook 地址
+        repo_name: 仓库名称
+        file_path: refine 文件路径（用于取文件名）
+        meta: 由 _parse_refine_frontmatter 返回的 frontmatter 字典
+        event: 事件类型，refine.committed（提交）或 refine.merged（合并）
+    """
+    import urllib.error
+    import urllib.request
+    from datetime import datetime, timezone
+
+    payload: Dict = {
+        "event": event,
+        "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "repo": repo_name,
+        "file": file_path.name,
+        "date": meta.get("date", ""),
+        "target_type": meta.get("target_type", ""),
+        "target_name": meta.get("target_name", ""),
+        "target_file": meta.get("target_file", ""),
+        "description": meta.get("description", ""),
+        "operator": meta.get("operator", ""),
+        "status": meta.get("status", "pending"),
+    }
+    # trigger 字段缺省时省略，不写入 payload
+    if meta.get("trigger"):
+        payload["trigger"] = meta["trigger"]
+
+    try:
+        data = json_module.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            webhook_url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception:
+        pass  # 静默失败，不影响主流程
 
 
 def _get_refine_log_path(config_manager: ConfigManager, repo_name: str) -> Path:
@@ -306,6 +401,8 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
         # git push
         if no_push:
             log_info("已跳过 push（--no-push）")
+            # commit 成功即上报
+            _trigger_refine_webhook(config_manager, repo_name, repo_dir, valid_files, "refine.committed")
             return
 
         if not repo.remotes:
@@ -345,6 +442,8 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
             log_info(f"正在推送仓库 '{repo_name}'...")
             repo.remotes.origin.push()
             log_success(f"仓库 '{repo_name}' 推送成功")
+            # push 成功后上报 webhook
+            _trigger_refine_webhook(config_manager, repo_name, repo_dir, valid_files, "refine.committed")
         except git.exc.GitCommandError as e:
             if "rejected" in str(e):
                 log_error(f"推送失败：存在冲突，请先执行 'driving repo pull {repo_name}'")
@@ -360,8 +459,272 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
 
 
 # ---------------------------------------------------------------------------
-# refine log 子命令组
+# 内部辅助：规范化 refine 文件路径
 # ---------------------------------------------------------------------------
+
+def _normalize_refine_path(fp: str, repo_dir: Path) -> str:
+    """将用户传入的路径规范化为相对于仓库根目录的路径。
+
+    支持以下格式自动转换：
+    - 绝对路径：/Users/.../ai-driving/driving-base/refines/xxx.md → refines/xxx.md
+    - 含仓库前缀：ai-driving/driving-base/refines/xxx.md → refines/xxx.md
+    - 仅文件名：xxx.md → refines/xxx.md
+    - 已是正确格式：refines/xxx.md → 不变
+    """
+    p = Path(fp)
+
+    # 如果是绝对路径或包含仓库根目录前缀，尝试取相对路径
+    try:
+        rel = p.relative_to(repo_dir)
+        return str(rel)
+    except ValueError:
+        pass
+
+    # 如果路径以 ai-driving/ 开头（含仓库名前缀），剥离到仓库根目录之后的部分
+    parts = p.parts
+    try:
+        # 找到 repo_dir 最后一级目录名在 parts 中的位置
+        repo_dirname = repo_dir.name
+        idx = next(i for i, part in enumerate(parts) if part == repo_dirname)
+        return str(Path(*parts[idx + 1:]))
+    except StopIteration:
+        pass
+
+    # 如果只传了文件名（无目录），自动补充 refines/ 前缀
+    if len(p.parts) == 1 and p.suffix == ".md":
+        return f"refines/{fp}"
+
+    return fp
+
+
+# ---------------------------------------------------------------------------
+# 内部辅助：批量上报 refine 文件到 webhook
+# ---------------------------------------------------------------------------
+
+def _trigger_refine_webhook(
+    config_manager: "ConfigManager",
+    repo_name: str,
+    repo_dir: Path,
+    file_paths: List[str],
+    event: str,
+) -> None:
+    """读取 refine_webhook 配置，逐文件解析 meta 并上报。
+
+    仅上报能成功解析 frontmatter 的文件，其余静默跳过。
+    """
+    webhook_url = config_manager.load().refine_webhook
+    if not webhook_url:
+        return
+    for fp in file_paths:
+        f_path = repo_dir / fp
+        if not f_path.exists():
+            continue
+        meta = _parse_refine_frontmatter(f_path)
+        if meta:
+            _report_to_webhook(webhook_url, repo_name, f_path, meta, event)
+
+
+# ---------------------------------------------------------------------------
+# refine merge 命令
+# ---------------------------------------------------------------------------
+
+@refine_group.command(name="merge")
+@click.argument("repo_name")
+@click.option("--file", "file_paths", multiple=True, required=True,
+              help="已合并的 refine 文件路径（相对于仓库根目录），可多次指定")
+@click.option("--changed-file", "changed_files", multiple=True, default=[],
+              help="实际被修改的正式文件路径（相对于仓库根目录），可多次指定。未传时降级使用 target_file")
+@click.option("--operator", "operator", default="",
+              help="操作者名称，写入 REFINE_LOG 记录，默认取 refine 文件的 operator 字段")
+@click.option("--no-push", is_flag=True, default=False, help="只 commit，不执行 push")
+def refine_merge(repo_name: str, file_paths: tuple, changed_files: tuple, operator: str, no_push: bool):
+    """完成 refine 合并收尾：追加 REFINE_LOG → 上报 webhook → 删除 refine 文件 → commit/push。
+
+    在 AI 将变更内容写入正式文件后调用本命令，完成合并流程的剩余步骤。
+    使用 --changed-file 指定实际修改的文件（可多个），未指定时降级使用 refine 的 target_file。
+
+    示例：
+        driving refine merge driving-base --file refines/2026-06-01-rule-gate-spec-trigger-field.md
+        driving refine merge driving-base --file refines/2026-06-01-rule-a.md --file refines/2026-06-01-rule-b.md
+        driving refine merge driving-base --file refines/2026-06-01-rule-a.md --changed-file skills/dev-design/references/dev-design.md
+        driving refine merge driving-base --file refines/2026-06-01-rule-a.md --no-push
+    """
+    import datetime as dt
+
+    try:
+        project_root = find_project_root()
+        config_manager = ConfigManager(project_root)
+
+        repo_cfg = config_manager.get_repo(repo_name)
+        if repo_cfg is None:
+            log_error(f"仓库 '{repo_name}' 不存在，使用 'driving repo list' 查看已安装仓库")
+            raise click.Abort()
+
+        repo_dir = config_manager.get_repo_dir(repo_name)
+
+        # 校验文件存在并解析 meta
+        items: List[Dict] = []
+        for fp in file_paths:
+            fp = _normalize_refine_path(fp, repo_dir)
+            f_path = repo_dir / fp
+            if not f_path.exists():
+                log_error(
+                    f"文件不存在：{fp}\n"
+                    f"  期望路径（相对于仓库根目录）：refines/<文件名>.md\n"
+                    f"  实际查找路径：{f_path}"
+                )
+                raise click.Abort()
+            meta = _parse_refine_frontmatter(f_path)
+            if meta is None:
+                log_error(f"无法解析 frontmatter，请检查文件格式：{fp}")
+                raise click.Abort()
+            items.append({"fp": fp, "f_path": f_path, "meta": meta})
+
+        # 展示待处理清单
+        click.echo(f"\n待合并 refine（共 {len(items)} 个）：")
+        for item in items:
+            click.echo(f"  {item['fp']}  [{item['meta']['target_type']}] {item['meta']['target_name']}")
+
+        click.echo("")
+        confirmed = click.confirm("确认执行合并收尾？", default=True)
+        if not confirmed:
+            log_info("已取消")
+            return
+
+        today = dt.date.today().strftime("%Y-%m-%d")
+        log_file = _get_refine_log_path(config_manager, repo_name)
+
+        # Step 1: 逐文件追加 REFINE_LOG
+        for item in items:
+            meta = item["meta"]
+            op = operator or meta.get("operator", "AI")
+            entry = (
+                f"[{today}] [合并] "
+                f"{meta['target_type']}:{meta['target_name']} — "
+                f"{meta['description']} (operator: {op})"
+            )
+            if log_file.exists():
+                existing = log_file.read_text(encoding="utf-8")
+                separator = "" if existing.endswith("\n") else "\n"
+                log_file.write_text(existing + separator + entry + "\n", encoding="utf-8")
+            else:
+                log_file.write_text(_REFINE_LOG_HEADER + "\n" + entry + "\n", encoding="utf-8")
+                log_info(f"已创建 {repo_name}/REFINE_LOG.md")
+            log_success(f"已追加 REFINE_LOG：{meta['target_name']}")
+
+        # Step 2: 上报 webhook（删除文件前，此时文件仍存在）
+        webhook_url = config_manager.load().refine_webhook
+        if webhook_url:
+            for item in items:
+                _report_to_webhook(webhook_url, repo_name, item["f_path"], item["meta"], "refine.merged")
+
+        # Step 3: 删除 refine 文件
+        for item in items:
+            item["f_path"].unlink()
+            log_info(f"已删除：{item['fp']}")
+
+        # Step 4: git commit + push（跳过 local 仓库）
+        if repo_cfg.type == "local":
+            log_warning(f"仓库 '{repo_name}' 是本地仓库，跳过 git 操作")
+            return
+
+        try:
+            repo = git.Repo(repo_dir)
+        except git.exc.InvalidGitRepositoryError:
+            log_error(f"仓库 '{repo_name}' 目录不是有效的 git 仓库：{repo_dir}")
+            raise click.Abort()
+
+        # 收集需要提交的文件：REFINE_LOG.md + --changed-file 指定的正式文件 + 已删除的 refine 文件
+        # 仅使用 --changed-file 参数，未传时提示用户确认（期望必填）
+        target_files = []
+        if changed_files:
+            for cf in changed_files:
+                cf_norm = _normalize_refine_path(cf, repo_dir)
+                abs_cf = repo_dir / cf_norm
+                if abs_cf.exists():
+                    target_files.append(cf_norm)
+                else:
+                    log_warning(f"--changed-file 指定的文件不存在，跳过：{cf_norm}")
+        else:
+            log_warning("未指定 --changed-file，正式文件将不会被 commit。")
+            click.echo("  建议使用 --changed-file <path> 指定本次实际修改的文件（可多次指定）。")
+            confirmed_skip = click.confirm("  确认不提交正式文件，继续执行？", default=False)
+            if not confirmed_skip:
+                log_info("已取消，请补充 --changed-file 参数后重试")
+                return
+
+        files_to_commit = ["REFINE_LOG.md"] + target_files + [item["fp"] for item in items]
+
+        # git add（含已删除文件）
+        try:
+            add_files = ["REFINE_LOG.md"] + target_files
+            if add_files:
+                repo.index.add(add_files)
+            # 已删除的文件用 git rm 从索引移除
+            for item in items:
+                try:
+                    repo.index.remove([item["fp"]])
+                except Exception:
+                    pass  # 文件可能未被追踪，忽略
+            if target_files:
+                log_info(f"已暂存变更（含正式文件：{', '.join(target_files)}）")
+            else:
+                log_info(f"已暂存变更")
+        except Exception as e:
+            log_error(f"git add 失败: {e}")
+            raise click.Abort()
+
+        # 自动生成 commit message，格式：target_name: description
+        parts = [
+            f"{item['meta']['target_name']}: {item['meta']['description']}"
+            if item["meta"].get("description")
+            else item["meta"]["target_name"]
+            for item in items
+        ]
+        summary = "; ".join(parts[:3])
+        if len(parts) > 3:
+            summary += f" 等 {len(parts)} 个"
+        commit_message = f"refine(merge): {summary}"
+
+        try:
+            repo.index.commit(commit_message)
+            log_success(f"已提交：{commit_message}")
+        except Exception as e:
+            log_error(f"git commit 失败: {e}")
+            raise click.Abort()
+
+        if no_push:
+            log_info("已跳过 push（--no-push）")
+            return
+
+        if not repo.remotes:
+            log_warning(f"仓库 '{repo_name}' 未配置远程仓库，跳过 push")
+            return
+
+        do_push = click.confirm("\n确认 push 到远端？", default=True)
+        if not do_push:
+            log_info("已跳过 push")
+            return
+
+        try:
+            log_info(f"正在推送仓库 '{repo_name}'...")
+            repo.remotes.origin.push()
+            log_success(f"仓库 '{repo_name}' 推送成功")
+        except git.exc.GitCommandError as e:
+            if "rejected" in str(e):
+                log_error(f"推送失败：存在冲突，请先执行 'driving repo pull {repo_name}'")
+            else:
+                log_error(f"推送失败: {e}")
+            raise click.Abort()
+
+    except click.Abort:
+        raise
+    except Exception as e:
+        log_error(f"refine merge 失败: {e}")
+        raise click.Abort()
+
+
+
 
 @refine_group.group(name="log")
 def refine_log_group():

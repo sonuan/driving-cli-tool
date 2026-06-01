@@ -28,8 +28,12 @@ def _make_refine_md(
     target_name: str = "test-skill",
     description: str = "测试描述",
     status: str = "pending",
+    trigger: dict = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    trigger_block = ""
+    if trigger:
+        trigger_block = f"trigger:\n  source: {trigger['source']}\n  reason: {trigger['reason']}\n"
     path.write_text(
         f"---\n"
         f"date: 2026-04-10\n"
@@ -38,6 +42,7 @@ def _make_refine_md(
         f"target_file: ai-driving/driving/skills/{target_name}/SKILL.md\n"
         f"description: {description}\n"
         f"operator: test\n"
+        f"{trigger_block}"
         f"status: {status}\n"
         f"---\n\n# 变更内容\n\n测试内容\n",
         encoding="utf-8",
@@ -89,6 +94,25 @@ class TestParseRefineFrontmatter:
         result = _parse_refine_frontmatter(f)
         assert result is not None
         assert result["description"] == ""
+
+    def test_trigger字段存在时正确解析(self, tmp_path):
+        f = tmp_path / "refine.md"
+        _make_refine_md(
+            f,
+            trigger={"source": "gate", "reason": "GATE-D1 返工 3 次，高频原因：页面类型判断有误"},
+        )
+        result = _parse_refine_frontmatter(f)
+        assert result is not None
+        assert result["trigger"] is not None
+        assert result["trigger"]["source"] == "gate"
+        assert "GATE-D1" in result["trigger"]["reason"]
+
+    def test_trigger字段缺省时为None(self, tmp_path):
+        f = tmp_path / "refine.md"
+        _make_refine_md(f)  # 不传 trigger
+        result = _parse_refine_frontmatter(f)
+        assert result is not None
+        assert result["trigger"] is None
 
 
 # ==================== _scan_refines ====================
@@ -636,3 +660,571 @@ class TestRefineLog:
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
             result = runner.invoke(cli, ["refine", "log", "get", "nonexistent"])
         assert result.exit_code != 0
+
+
+# ==================== _report_to_webhook ====================
+
+
+class TestReportToWebhook:
+    """_report_to_webhook 单元测试
+
+    覆盖场景：
+    - 正常上报：payload 字段完整，trigger 存在时包含在 payload 中
+    - trigger 缺省时 payload 不含 trigger 字段
+    - event 参数正确传递（committed / merged）
+    - 网络异常时静默失败，不抛出异常
+    """
+
+    def _make_meta(self, trigger=None):
+        return {
+            "date": "2026-06-01",
+            "target_type": "rule",
+            "target_name": "gate-spec",
+            "target_file": "ai-driving/driving-base/rules/gate-spec.md",
+            "description": "补充 trigger 字段说明",
+            "operator": "张三",
+            "trigger": trigger,
+            "status": "pending",
+        }
+
+    def test_正常上报payload字段完整(self, tmp_path):
+        from unittest.mock import MagicMock, patch
+        from driving_cli.commands.refine import _report_to_webhook
+
+        captured = {}
+
+        def fake_urlopen(req, timeout):
+            import json as j
+            captured["url"] = req.full_url
+            captured["payload"] = j.loads(req.data.decode("utf-8"))
+            captured["method"] = req.method
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            _report_to_webhook(
+                "https://example.com/webhook",
+                "driving-base",
+                tmp_path / "2026-06-01-rule-gate-spec.md",
+                self._make_meta(),
+                event="refine.committed",
+            )
+
+        p = captured["payload"]
+        assert p["event"] == "refine.committed"
+        assert p["repo"] == "driving-base"
+        assert p["target_type"] == "rule"
+        assert p["target_name"] == "gate-spec"
+        assert p["description"] == "补充 trigger 字段说明"
+        assert p["operator"] == "张三"
+        assert "at" in p
+        assert captured["method"] == "POST"
+
+    def test_trigger存在时包含在payload中(self, tmp_path):
+        from unittest.mock import patch
+        from driving_cli.commands.refine import _report_to_webhook
+
+        captured = {}
+
+        def fake_urlopen(req, timeout):
+            import json as j
+            captured["payload"] = j.loads(req.data.decode("utf-8"))
+
+        trigger = {"source": "gate", "reason": "GATE-D1 返工 3 次，高频原因：页面类型判断有误"}
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            _report_to_webhook(
+                "https://example.com/webhook",
+                "driving-base",
+                tmp_path / "refine.md",
+                self._make_meta(trigger=trigger),
+            )
+
+        assert "trigger" in captured["payload"]
+        assert captured["payload"]["trigger"]["source"] == "gate"
+
+    def test_trigger缺省时payload不含trigger字段(self, tmp_path):
+        from unittest.mock import patch
+        from driving_cli.commands.refine import _report_to_webhook
+
+        captured = {}
+
+        def fake_urlopen(req, timeout):
+            import json as j
+            captured["payload"] = j.loads(req.data.decode("utf-8"))
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            _report_to_webhook(
+                "https://example.com/webhook",
+                "driving-base",
+                tmp_path / "refine.md",
+                self._make_meta(trigger=None),
+            )
+
+        assert "trigger" not in captured["payload"]
+
+    def test_event参数正确传递为merged(self, tmp_path):
+        from unittest.mock import patch
+        from driving_cli.commands.refine import _report_to_webhook
+
+        captured = {}
+
+        def fake_urlopen(req, timeout):
+            import json as j
+            captured["payload"] = j.loads(req.data.decode("utf-8"))
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            _report_to_webhook(
+                "https://example.com/webhook",
+                "driving-base",
+                tmp_path / "refine.md",
+                self._make_meta(),
+                event="refine.merged",
+            )
+
+        assert captured["payload"]["event"] == "refine.merged"
+
+    def test_网络异常时静默失败(self, tmp_path):
+        from unittest.mock import patch
+        from driving_cli.commands.refine import _report_to_webhook
+
+        with patch("urllib.request.urlopen", side_effect=Exception("network error")):
+            # 不应抛出异常
+            _report_to_webhook(
+                "https://example.com/webhook",
+                "driving-base",
+                tmp_path / "refine.md",
+                self._make_meta(),
+            )
+
+
+# ==================== driving refine merge ====================
+
+
+class TestRefineMerge:
+    """driving refine merge 命令测试
+
+    覆盖场景：
+    - --file 未传时报错（必填）
+    - 仓库不存在时报错
+    - refine 文件不存在时报错
+    - frontmatter 解析失败时报错
+    - 用户取消确认时退出
+    - 正常流程：追加 REFINE_LOG → 删除 refine 文件 → git commit/push
+    - --operator 参数写入 REFINE_LOG
+    - --no-push 跳过 push
+    - 多 --file 批量处理
+    - REFINE_LOG 不存在时自动创建
+    - REFINE_LOG 已存在时追加
+    - webhook 上报在删除文件前调用（文件仍存在时上报）
+    - refine_webhook 未配置时跳过上报
+    - local 仓库跳过 git 操作
+    """
+
+    def _setup(self, tmp_path, repo_type: str = "remote"):
+        _make_config(
+            tmp_path,
+            [{"name": "driving-base", "type": repo_type, "path": "ai-driving/driving-base"}],
+        )
+        repo_dir = tmp_path / "ai-driving" / "driving-base"
+        refines_dir = repo_dir / "refines"
+        _make_refine_md(
+            refines_dir / "2026-06-01-rule-gate-spec.md",
+            target_type="rule",
+            target_name="gate-spec",
+            description="补充 trigger 字段说明",
+        )
+        _make_refine_md(
+            refines_dir / "2026-06-01-rule-coding-standards.md",
+            target_type="rule",
+            target_name="coding-standards",
+            description="补充协程规范",
+        )
+        return tmp_path
+
+    def _make_mock_repo(self):
+        from unittest.mock import MagicMock
+        mock_repo = MagicMock()
+        mock_repo.head.is_detached = False
+        mock_repo.active_branch.name = "main"
+        return mock_repo
+
+    def _mock_cm(self, mock_cm_cls, tmp_path, repo_type="remote", refine_webhook=""):
+        mock_cm = mock_cm_cls.return_value
+        mock_cm.get_repo.return_value = type("R", (), {"type": repo_type, "name": "driving-base"})()
+        mock_cm.get_repo_dir.return_value = tmp_path / "ai-driving" / "driving-base"
+        cfg = type("C", (), {"refine_webhook": refine_webhook})()
+        mock_cm.load.return_value = cfg
+        return mock_cm
+
+    def test_file未传时报错(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["refine", "merge", "driving-base"])
+        assert result.exit_code != 0
+
+    def test_仓库不存在时报错(self, tmp_path):
+        _make_config(tmp_path, [])
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["refine", "merge", "nonexistent",
+                                         "--file", "refines/foo.md"])
+        assert result.exit_code != 0
+
+    def test_refine文件不存在时报错(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                result = runner.invoke(cli, ["refine", "merge", "driving-base",
+                                             "--file", "refines/nonexistent.md"])
+        assert result.exit_code != 0
+
+    def test_用户取消确认时退出(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    result = runner.invoke(
+                        cli,
+                        ["refine", "merge", "driving-base",
+                         "--file", "refines/2026-06-01-rule-gate-spec.md"],
+                        input="n\n",
+                    )
+        assert result.exit_code == 0
+        assert "已取消" in result.output
+        # refine 文件不应被删除
+        refine_file = tmp_path / "ai-driving" / "driving-base" / "refines" / "2026-06-01-rule-gate-spec.md"
+        assert refine_file.exists()
+
+    def test_正常流程追加REFINE_LOG并删除refine文件(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    result = runner.invoke(
+                        cli,
+                        ["refine", "merge", "driving-base",
+                         "--file", "refines/2026-06-01-rule-gate-spec.md"],
+                        input="y\ny\ny\n",  # 确认合并 + 确认跳过正式文件 + 确认 push
+                    )
+        assert result.exit_code == 0
+        # refine 文件已删除
+        refine_file = tmp_path / "ai-driving" / "driving-base" / "refines" / "2026-06-01-rule-gate-spec.md"
+        assert not refine_file.exists()
+        # REFINE_LOG 已创建并包含合并记录
+        log_file = tmp_path / "ai-driving" / "driving-base" / "REFINE_LOG.md"
+        assert log_file.exists()
+        content = log_file.read_text(encoding="utf-8")
+        assert "[合并]" in content
+        assert "gate-spec" in content
+
+    def test_REFINE_LOG不存在时自动创建(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        log_file = tmp_path / "ai-driving" / "driving-base" / "REFINE_LOG.md"
+        assert not log_file.exists()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    runner.invoke(
+                        cli,
+                        ["refine", "merge", "driving-base",
+                         "--file", "refines/2026-06-01-rule-gate-spec.md"],
+                        input="y\ny\n",  # 确认合并 + 确认跳过正式文件
+                    )
+        assert log_file.exists()
+        content = log_file.read_text(encoding="utf-8")
+        assert "# Refine Log" in content
+
+    def test_REFINE_LOG已存在时追加(self, tmp_path):
+        self._setup(tmp_path)
+        log_file = tmp_path / "ai-driving" / "driving-base" / "REFINE_LOG.md"
+        log_file.write_text(
+            "# Refine Log\n# 记录所有已生效的规范变更，refines 合并后由 AI 追加。\n\n"
+            "[2026-05-01] [合并] rule:old-rule — 旧记录 (operator: 旧人)\n",
+            encoding="utf-8",
+        )
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    runner.invoke(
+                        cli,
+                        ["refine", "merge", "driving-base",
+                         "--file", "refines/2026-06-01-rule-gate-spec.md"],
+                        input="y\ny\n",  # 确认合并 + 确认跳过正式文件
+                    )
+        content = log_file.read_text(encoding="utf-8")
+        assert "旧记录" in content
+        assert "gate-spec" in content
+
+    def test_operator参数写入REFINE_LOG(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    runner.invoke(
+                        cli,
+                        ["refine", "merge", "driving-base",
+                         "--file", "refines/2026-06-01-rule-gate-spec.md",
+                         "--operator", "张三"],
+                        input="y\ny\n",  # 确认合并 + 确认跳过正式文件
+                    )
+        log_file = tmp_path / "ai-driving" / "driving-base" / "REFINE_LOG.md"
+        content = log_file.read_text(encoding="utf-8")
+        assert "operator: 张三" in content
+
+    def test_no_push跳过推送(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    result = runner.invoke(
+                        cli,
+                        ["refine", "merge", "driving-base",
+                         "--file", "refines/2026-06-01-rule-gate-spec.md",
+                         "--no-push"],
+                        input="y\ny\n",  # 确认合并 + 确认跳过正式文件
+                    )
+        assert result.exit_code == 0
+        assert "跳过 push" in result.output
+        mock_repo.remotes.origin.push.assert_not_called()
+
+    def test_多file批量处理(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    result = runner.invoke(
+                        cli,
+                        ["refine", "merge", "driving-base",
+                         "--file", "refines/2026-06-01-rule-gate-spec.md",
+                         "--file", "refines/2026-06-01-rule-coding-standards.md"],
+                        input="y\ny\ny\n",  # 确认合并 + 确认跳过正式文件 + 确认 push
+                    )
+        assert result.exit_code == 0
+        # 两个 refine 文件都已删除
+        repo_dir = tmp_path / "ai-driving" / "driving-base"
+        assert not (repo_dir / "refines" / "2026-06-01-rule-gate-spec.md").exists()
+        assert not (repo_dir / "refines" / "2026-06-01-rule-coding-standards.md").exists()
+        # REFINE_LOG 包含两条记录
+        log_file = repo_dir / "REFINE_LOG.md"
+        content = log_file.read_text(encoding="utf-8")
+        assert "gate-spec" in content
+        assert "coding-standards" in content
+
+    def test_commit_message包含target_name和description(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    runner.invoke(
+                        cli,
+                        ["refine", "merge", "driving-base",
+                         "--file", "refines/2026-06-01-rule-gate-spec.md"],
+                        input="y\ny\n",  # 确认合并 + 确认跳过正式文件
+                    )
+        message = mock_repo.index.commit.call_args[0][0]
+        assert message.startswith("refine(merge):")
+        assert "gate-spec" in message
+        assert "补充 trigger 字段说明" in message
+
+    def test_webhook上报在删除文件前调用(self, tmp_path):
+        """上报时 refine 文件应仍存在（上报在删除之前）"""
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        reported_files = []
+
+        def fake_report(webhook_url, repo_name, file_path, meta, event="refine.committed"):
+            reported_files.append((str(file_path), file_path.exists(), event))
+
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path, refine_webhook="https://example.com/hook")
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    with patch("driving_cli.commands.refine._report_to_webhook", side_effect=fake_report):
+                        runner.invoke(
+                            cli,
+                            ["refine", "merge", "driving-base",
+                             "--file", "refines/2026-06-01-rule-gate-spec.md"],
+                            input="y\ny\ny\n",  # 确认合并 + 确认跳过正式文件 + 确认 push
+                        )
+
+        assert len(reported_files) == 1
+        _path, file_existed_at_report_time, event = reported_files[0]
+        assert file_existed_at_report_time, "上报时文件应仍存在"
+        assert event == "refine.merged"
+
+    def test_refine_webhook未配置时跳过上报(self, tmp_path):
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path, refine_webhook="")  # 未配置
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    with patch("driving_cli.commands.refine._report_to_webhook") as mock_report:
+                        runner.invoke(
+                            cli,
+                            ["refine", "merge", "driving-base",
+                             "--file", "refines/2026-06-01-rule-gate-spec.md"],
+                            input="y\ny\n",  # 确认合并 + 确认跳过正式文件
+                        )
+        mock_report.assert_not_called()
+
+    def test_local仓库跳过git操作(self, tmp_path):
+        self._setup(tmp_path, repo_type="local")
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path, repo_type="local")
+                with patch("driving_cli.commands.refine.git.Repo") as mock_git:
+                    result = runner.invoke(
+                        cli,
+                        ["refine", "merge", "driving-base",
+                         "--file", "refines/2026-06-01-rule-gate-spec.md"],
+                        input="y\ny\n",  # 确认合并 + 确认跳过正式文件（local 仓库不需要 push 确认）
+                    )
+        assert result.exit_code == 0
+        assert "本地仓库" in result.output
+        mock_git.assert_not_called()
+
+    def test_changed_file优先于target_file加入commit(self, tmp_path):
+        """--changed-file 传入时，使用指定文件而非 target_file"""
+        self._setup(tmp_path)
+        repo_dir = tmp_path / "ai-driving" / "driving-base"
+        # 创建实际修改的文件
+        changed = repo_dir / "skills" / "dev-design" / "references" / "dev-design.md"
+        changed.parent.mkdir(parents=True, exist_ok=True)
+        changed.write_text("updated content", encoding="utf-8")
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    result = runner.invoke(
+                        cli,
+                        ["refine", "merge", "driving-base",
+                         "--file", "refines/2026-06-01-rule-gate-spec.md",
+                         "--changed-file", "skills/dev-design/references/dev-design.md"],
+                        input="y\ny\n",
+                    )
+        assert result.exit_code == 0
+        add_calls = mock_repo.index.add.call_args[0][0]
+        assert "skills/dev-design/references/dev-design.md" in add_calls
+        # target_file（SKILL.md）不应出现在 add 中
+        assert not any("SKILL.md" in f for f in add_calls)
+
+    def test_changed_file支持多个文件(self, tmp_path):
+        """--changed-file 可多次指定，全部加入 commit"""
+        self._setup(tmp_path)
+        repo_dir = tmp_path / "ai-driving" / "driving-base"
+        f1 = repo_dir / "skills" / "dev-design" / "references" / "dev-design.md"
+        f2 = repo_dir / "skills" / "dev-design" / "SKILL.md"
+        f1.parent.mkdir(parents=True, exist_ok=True)
+        f1.write_text("updated", encoding="utf-8")
+        f2.write_text("updated", encoding="utf-8")
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    result = runner.invoke(
+                        cli,
+                        ["refine", "merge", "driving-base",
+                         "--file", "refines/2026-06-01-rule-gate-spec.md",
+                         "--changed-file", "skills/dev-design/references/dev-design.md",
+                         "--changed-file", "skills/dev-design/SKILL.md"],
+                        input="y\ny\n",
+                    )
+        assert result.exit_code == 0
+        add_calls = mock_repo.index.add.call_args[0][0]
+        assert "skills/dev-design/references/dev-design.md" in add_calls
+        assert "skills/dev-design/SKILL.md" in add_calls
+
+    def test_未传changed_file时提示确认(self, tmp_path):
+        """未传 --changed-file 时，打警告并要求用户确认是否继续"""
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    # 第一个 y 确认合并，第二个 n 拒绝"不提交正式文件"
+                    result = runner.invoke(
+                        cli,
+                        ["refine", "merge", "driving-base",
+                         "--file", "refines/2026-06-01-rule-gate-spec.md"],
+                        input="y\nn\n",
+                    )
+        assert result.exit_code == 0
+        assert "未指定 --changed-file" in result.output
+        assert "已取消" in result.output
+        mock_repo.index.commit.assert_not_called()
+
+    def test_未传changed_file用户确认跳过时继续执行(self, tmp_path):
+        """未传 --changed-file，用户确认跳过时正常执行 commit"""
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    # 第一个 y 确认合并，第二个 y 确认不提交正式文件，第三个 y 确认 push
+                    result = runner.invoke(
+                        cli,
+                        ["refine", "merge", "driving-base",
+                         "--file", "refines/2026-06-01-rule-gate-spec.md"],
+                        input="y\ny\ny\n",
+                    )
+        assert result.exit_code == 0
+        mock_repo.index.commit.assert_called_once()
+        add_calls = mock_repo.index.add.call_args[0][0]
+        assert add_calls == ["REFINE_LOG.md"]
+
+    def test_changed_file不存在时打warning跳过(self, tmp_path):
+        """--changed-file 指定的文件不存在时，打 warning 跳过，不中断流程"""
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    result = runner.invoke(
+                        cli,
+                        ["refine", "merge", "driving-base",
+                         "--file", "refines/2026-06-01-rule-gate-spec.md",
+                         "--changed-file", "skills/nonexistent/SKILL.md"],
+                        input="y\ny\n",
+                    )
+        assert result.exit_code == 0
+        assert "不存在" in result.output or "跳过" in result.output
+        mock_repo.index.commit.assert_called_once()
