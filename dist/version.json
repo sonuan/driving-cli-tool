@@ -1,10 +1,12 @@
 {
-  "version": "1.2.0",
-  "build_date": "2026-05-28T14:27:03+08:00",
+  "version": "1.2.1",
+  "build_date": "2026-06-01T18:15:22+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
+      "v1.2.1",
+      "feat：新增提案合并命令行 driving refine merge，并上报webhook",
       "v1.2.0",
       "feat：agent export导出kiro时使用硬链接",
       "v1.1.9",
@@ -12,8 +14,6 @@
       "feat：优化--help不换行的问题",
       "v1.1.8",
       "feat：优化 driving gate request 输入信息的操作体验",
-      "feat：新增refine log命令行，管理REFINE_LOG.md",
-      "feat：refine commit 要包含修改文件",
-      "feat：refine commit 在push前先确认是否可pull"
+      "feat：新增refine log命令行，管理REFINE_LOG.md"
   ]
 }
