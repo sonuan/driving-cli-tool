@@ -1,0 +1,558 @@
+"""Power 模块测试
+
+覆盖：
+- PowerEntry / PowerConfig 数据模型
+- PowerManager：add_power_local、remove_power、load_merged_config
+- _merge_configs：repos 去重、单值字段冲突检测
+- ConfigManager.load() Power 模式分支
+- driving power 命令：add（本地）、remove、list
+"""
+
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+from click.testing import CliRunner
+
+from driving_cli.cli import cli
+from driving_cli.models.config import DrivingConfig, RepoConfig
+from driving_cli.models.power import PowerConfig, PowerEntry
+from driving_cli.utils.config_manager import (
+    CONFIG_FILE_NAME,
+    POWER_FILE_NAME,
+    ConfigManager,
+    PowerManager,
+    _merge_configs,
+)
+
+
+# ==================== 测试辅助工具 ====================
+
+def make_driving_config(
+    repos=None,
+    gate_webhook="",
+    agent_webhook="",
+    refine_webhook="",
+    update_version_url="",
+    default_commit_message="update by driving",
+    user_prompt="",
+    check_sample_rate=100,
+) -> DrivingConfig:
+    return DrivingConfig(
+        version="2",
+        repos=repos or [],
+        default_commit_message=default_commit_message,
+        update_version_url=update_version_url,
+        gate_webhook=gate_webhook,
+        agent_webhook=agent_webhook,
+        refine_webhook=refine_webhook,
+        user_prompt=user_prompt,
+        check_sample_rate=check_sample_rate,
+    )
+
+
+def make_repo(name: str, repo_type: str = "remote") -> RepoConfig:
+    return RepoConfig(
+        name=name,
+        type=repo_type,
+        url=f"https://github.com/example/{name}" if repo_type == "remote" else None,
+        path=f"ai-driving/{name}",
+    )
+
+
+def write_driving_config(directory: Path, config: DrivingConfig) -> None:
+    """将 DrivingConfig 写入指定目录的 driving.config.json"""
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / CONFIG_FILE_NAME).write_text(
+        json.dumps(config.to_dict(), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def write_power_config(project_root: Path, power_cfg: PowerConfig) -> None:
+    """将 PowerConfig 写入项目根目录的 driving.power.json"""
+    (project_root / POWER_FILE_NAME).write_text(
+        json.dumps(power_cfg.to_dict(), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+# ==================== PowerEntry 模型测试 ====================
+
+class TestPowerEntry:
+    def test_type_remote_when_url_set(self):
+        entry = PowerEntry(name="feat", path="ai-driving/feat", url="https://git.example.com/r.git")
+        assert entry.type == "remote"
+
+    def test_type_local_when_url_none(self):
+        entry = PowerEntry(name="local", path="ai-driving/local", url=None)
+        assert entry.type == "local"
+
+    def test_to_dict_includes_url(self):
+        entry = PowerEntry(name="feat", path="ai-driving/feat", url="https://git.example.com/r.git")
+        d = entry.to_dict()
+        assert d["url"] == "https://git.example.com/r.git"
+        assert d["name"] == "feat"
+        assert d["path"] == "ai-driving/feat"
+
+    def test_to_dict_omits_description_when_empty(self):
+        entry = PowerEntry(name="feat", path="ai-driving/feat")
+        d = entry.to_dict()
+        assert "description" not in d
+
+    def test_to_dict_includes_description_when_set(self):
+        entry = PowerEntry(name="feat", path="ai-driving/feat", description="my desc")
+        d = entry.to_dict()
+        assert d["description"] == "my desc"
+
+    def test_from_dict_success(self):
+        data = {"name": "feat", "path": "ai-driving/feat", "url": "https://git.example.com/r.git"}
+        entry = PowerEntry.from_dict(data)
+        assert entry.name == "feat"
+        assert entry.url == "https://git.example.com/r.git"
+
+    def test_from_dict_missing_name_raises(self):
+        with pytest.raises(KeyError, match="name"):
+            PowerEntry.from_dict({"path": "ai-driving/feat"})
+
+    def test_from_dict_missing_path_raises(self):
+        with pytest.raises(KeyError, match="path"):
+            PowerEntry.from_dict({"name": "feat"})
+
+    def test_from_dict_empty_url_becomes_none(self):
+        entry = PowerEntry.from_dict({"name": "feat", "path": "ai-driving/feat", "url": ""})
+        assert entry.url is None
+        assert entry.type == "local"
+
+
+# ==================== PowerConfig 模型测试 ====================
+
+class TestPowerConfig:
+    def test_from_dict_success(self):
+        data = {"powers": [{"name": "a", "path": "ai-driving/a"}]}
+        cfg = PowerConfig.from_dict(data)
+        assert len(cfg.powers) == 1
+        assert cfg.powers[0].name == "a"
+
+    def test_from_dict_missing_powers_raises(self):
+        with pytest.raises(KeyError, match="powers"):
+            PowerConfig.from_dict({})
+
+    def test_from_dict_powers_not_list_raises(self):
+        with pytest.raises(ValueError, match="列表"):
+            PowerConfig.from_dict({"powers": "not-a-list"})
+
+    def test_to_dict_roundtrip(self):
+        cfg = PowerConfig(powers=[
+            PowerEntry(name="a", path="ai-driving/a", url="https://git.example.com/a.git"),
+            PowerEntry(name="b", path="ai-driving/b"),
+        ])
+        restored = PowerConfig.from_dict(cfg.to_dict())
+        assert len(restored.powers) == 2
+        assert restored.powers[0].name == "a"
+        assert restored.powers[1].type == "local"
+
+
+# ==================== _merge_configs 测试 ====================
+
+class TestMergeConfigs:
+    def test_repos_dedup_first_wins(self):
+        """相同 name 的 repo，先出现的 power 优先"""
+        cfg1 = make_driving_config(repos=[make_repo("shared"), make_repo("only-in-1")])
+        cfg2 = make_driving_config(repos=[make_repo("shared"), make_repo("only-in-2")])
+        merged = _merge_configs([cfg1, cfg2], ["p1", "p2"])
+        names = [r.name for r in merged.repos]
+        assert names.count("shared") == 1
+        assert "only-in-1" in names
+        assert "only-in-2" in names
+
+    def test_repos_order_preserved(self):
+        """合并后 repos 顺序：p1 的先，p2 独有的追加在后"""
+        cfg1 = make_driving_config(repos=[make_repo("a"), make_repo("b")])
+        cfg2 = make_driving_config(repos=[make_repo("c")])
+        merged = _merge_configs([cfg1, cfg2], ["p1", "p2"])
+        assert [r.name for r in merged.repos] == ["a", "b", "c"]
+
+    def test_single_value_field_same_value_ok(self):
+        """单值字段相同时合并成功"""
+        cfg1 = make_driving_config(gate_webhook="https://hook.example.com/a")
+        cfg2 = make_driving_config(gate_webhook="https://hook.example.com/a")
+        merged = _merge_configs([cfg1, cfg2], ["p1", "p2"])
+        assert merged.gate_webhook == "https://hook.example.com/a"
+
+    def test_single_value_field_conflict_raises(self):
+        """单值字段不同时抛出 ValueError"""
+        cfg1 = make_driving_config(gate_webhook="https://hook.example.com/a")
+        cfg2 = make_driving_config(gate_webhook="https://hook.example.com/b")
+        with pytest.raises(ValueError, match="冲突"):
+            _merge_configs([cfg1, cfg2], ["p1", "p2"])
+
+    def test_empty_field_not_conflict(self):
+        """一方为空时不视为冲突，取非空值"""
+        cfg1 = make_driving_config(gate_webhook="https://hook.example.com/a")
+        cfg2 = make_driving_config(gate_webhook="")
+        merged = _merge_configs([cfg1, cfg2], ["p1", "p2"])
+        assert merged.gate_webhook == "https://hook.example.com/a"
+
+    def test_both_empty_field_stays_empty(self):
+        """两方都为空时结果也为空"""
+        cfg1 = make_driving_config(gate_webhook="")
+        cfg2 = make_driving_config(gate_webhook="")
+        merged = _merge_configs([cfg1, cfg2], ["p1", "p2"])
+        assert merged.gate_webhook == ""
+
+    def test_single_config_returns_as_is(self):
+        """只有一个 config 时直接返回其内容"""
+        cfg = make_driving_config(repos=[make_repo("a")], gate_webhook="https://hook.example.com/x")
+        merged = _merge_configs([cfg], ["p1"])
+        assert len(merged.repos) == 1
+        assert merged.gate_webhook == "https://hook.example.com/x"
+
+    def test_empty_configs_raises(self):
+        with pytest.raises(ValueError, match="没有可合并"):
+            _merge_configs([], [])
+
+
+# ==================== PowerManager 本地操作测试 ====================
+
+class TestPowerManagerLocal:
+    def test_exists_false_when_no_file(self, tmp_path):
+        pm = PowerManager(tmp_path)
+        assert pm.exists() is False
+
+    def test_exists_true_after_add(self, tmp_path):
+        pm = PowerManager(tmp_path)
+        power_dir = tmp_path / "ai-driving" / "p1"
+        write_driving_config(power_dir, make_driving_config())
+        pm.add_power_local(PowerEntry(name="p1", path="ai-driving/p1"))
+        assert pm.exists() is True
+
+    def test_add_power_local_success(self, tmp_path):
+        pm = PowerManager(tmp_path)
+        power_dir = tmp_path / "ai-driving" / "p1"
+        write_driving_config(power_dir, make_driving_config())
+        pm.add_power_local(PowerEntry(name="p1", path="ai-driving/p1"))
+        cfg = pm.load_power_config()
+        assert len(cfg.powers) == 1
+        assert cfg.powers[0].name == "p1"
+
+    def test_add_power_local_duplicate_raises(self, tmp_path):
+        pm = PowerManager(tmp_path)
+        power_dir = tmp_path / "ai-driving" / "p1"
+        write_driving_config(power_dir, make_driving_config())
+        pm.add_power_local(PowerEntry(name="p1", path="ai-driving/p1"))
+        with pytest.raises(ValueError, match="已存在"):
+            pm.add_power_local(PowerEntry(name="p1", path="ai-driving/p1"))
+
+    def test_add_power_local_no_config_raises(self, tmp_path):
+        """目录下没有 driving.config.json 时报错"""
+        pm = PowerManager(tmp_path)
+        (tmp_path / "ai-driving" / "p1").mkdir(parents=True)
+        with pytest.raises(ValueError, match="driving.config.json"):
+            pm.add_power_local(PowerEntry(name="p1", path="ai-driving/p1"))
+
+    def test_remove_power_success(self, tmp_path):
+        pm = PowerManager(tmp_path)
+        power_dir = tmp_path / "ai-driving" / "p1"
+        write_driving_config(power_dir, make_driving_config())
+        pm.add_power_local(PowerEntry(name="p1", path="ai-driving/p1"))
+        pm.remove_power("p1")
+        cfg = pm.load_power_config()
+        assert len(cfg.powers) == 0
+
+    def test_remove_nonexistent_raises(self, tmp_path):
+        pm = PowerManager(tmp_path)
+        write_power_config(tmp_path, PowerConfig(powers=[]))
+        with pytest.raises(ValueError, match="不存在"):
+            pm.remove_power("ghost")
+
+    def test_load_merged_config_single_power(self, tmp_path):
+        """单个 power 时合并结果等于该 power 的配置"""
+        power_dir = tmp_path / "ai-driving" / "p1"
+        cfg = make_driving_config(repos=[make_repo("repo-a")])
+        write_driving_config(power_dir, cfg)
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1"),
+        ]))
+        pm = PowerManager(tmp_path)
+        merged = pm.load_merged_config()
+        assert len(merged.repos) == 1
+        assert merged.repos[0].name == "repo-a"
+
+    def test_load_merged_config_two_powers_dedup(self, tmp_path):
+        """两个 power 有相同 repo name 时去重"""
+        for name, repos in [("p1", ["shared", "only-1"]), ("p2", ["shared", "only-2"])]:
+            write_driving_config(
+                tmp_path / "ai-driving" / name,
+                make_driving_config(repos=[make_repo(r) for r in repos]),
+            )
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1"),
+            PowerEntry(name="p2", path="ai-driving/p2"),
+        ]))
+        pm = PowerManager(tmp_path)
+        merged = pm.load_merged_config()
+        names = [r.name for r in merged.repos]
+        assert names.count("shared") == 1
+        assert "only-1" in names
+        assert "only-2" in names
+
+    def test_load_merged_config_missing_driving_config_returns_none(self, tmp_path):
+        """power 目录下没有 driving.config.json 时跳过该 power，全部缺失返回 None"""
+        (tmp_path / "ai-driving" / "p1").mkdir(parents=True)
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1"),
+        ]))
+        pm = PowerManager(tmp_path)
+        result = pm.load_merged_config()
+        assert result is None
+
+    def test_load_merged_config_partial_missing_skips_invalid(self, tmp_path):
+        """部分 power 缺失时跳过缺失的，只合并有效的"""
+        # p1 有配置，p2 没有
+        write_driving_config(
+            tmp_path / "ai-driving" / "p1",
+            make_driving_config(repos=[make_repo("repo-a")]),
+        )
+        (tmp_path / "ai-driving" / "p2").mkdir(parents=True)
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1"),
+            PowerEntry(name="p2", path="ai-driving/p2"),
+        ]))
+        pm = PowerManager(tmp_path)
+        merged = pm.load_merged_config()
+        assert merged is not None
+        assert len(merged.repos) == 1
+        assert merged.repos[0].name == "repo-a"
+
+    def test_load_merged_config_empty_powers_raises(self, tmp_path):
+        write_power_config(tmp_path, PowerConfig(powers=[]))
+        pm = PowerManager(tmp_path)
+        with pytest.raises(ValueError, match="没有配置任何 power"):
+            pm.load_merged_config()
+
+    def test_get_config_manager_for_success(self, tmp_path):
+        power_dir = tmp_path / "ai-driving" / "p1"
+        write_driving_config(power_dir, make_driving_config())
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1"),
+        ]))
+        pm = PowerManager(tmp_path)
+        cm = pm.get_config_manager_for("p1")
+        assert isinstance(cm, ConfigManager)
+
+    def test_get_config_manager_for_nonexistent_raises(self, tmp_path):
+        write_power_config(tmp_path, PowerConfig(powers=[]))
+        pm = PowerManager(tmp_path)
+        with pytest.raises(ValueError, match="不存在"):
+            pm.get_config_manager_for("ghost")
+
+    def test_get_default_config_manager_returns_first(self, tmp_path):
+        for name in ("p1", "p2"):
+            write_driving_config(tmp_path / "ai-driving" / name, make_driving_config())
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1"),
+            PowerEntry(name="p2", path="ai-driving/p2"),
+        ]))
+        pm = PowerManager(tmp_path)
+        cm = pm.get_default_config_manager()
+        # 默认返回第一个 power 的 ConfigManager，其 project_root 应指向 p1
+        assert cm._project_root == tmp_path / "ai-driving" / "p1"
+
+
+# ==================== ConfigManager Power 模式测试 ====================
+
+class TestConfigManagerPowerMode:
+    def test_load_uses_power_mode_when_power_file_exists(self, tmp_path):
+        """存在 driving.power.json 时 load() 走 Power 模式"""
+        power_dir = tmp_path / "ai-driving" / "p1"
+        write_driving_config(power_dir, make_driving_config(repos=[make_repo("repo-x")]))
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1"),
+        ]))
+        cm = ConfigManager(tmp_path)
+        config = cm.load()
+        assert any(r.name == "repo-x" for r in config.repos)
+
+    def test_load_uses_traditional_mode_when_no_power_file(self, tmp_path):
+        """不存在 driving.power.json 时 load() 走传统模式"""
+        write_driving_config(tmp_path, make_driving_config(repos=[make_repo("repo-y")]))
+        cm = ConfigManager(tmp_path)
+        config = cm.load()
+        assert any(r.name == "repo-y" for r in config.repos)
+
+    def test_power_mode_all_missing_falls_back_to_root_config(self, tmp_path):
+        """所有 power 均无有效配置时，降级读取根目录 driving.config.json"""
+        # power 目录存在但没有 driving.config.json
+        (tmp_path / "ai-driving" / "p1").mkdir(parents=True)
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1"),
+        ]))
+        # 根目录有 driving.config.json
+        write_driving_config(tmp_path, make_driving_config(repos=[make_repo("fallback-repo")]))
+        cm = ConfigManager(tmp_path)
+        config = cm.load()
+        assert any(r.name == "fallback-repo" for r in config.repos)
+
+    def test_power_mode_partial_missing_uses_valid_powers(self, tmp_path):
+        """部分 power 缺失时，只合并有效的 power"""
+        write_driving_config(
+            tmp_path / "ai-driving" / "p1",
+            make_driving_config(repos=[make_repo("repo-valid")]),
+        )
+        (tmp_path / "ai-driving" / "p2").mkdir(parents=True)  # 无 config
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1"),
+            PowerEntry(name="p2", path="ai-driving/p2"),
+        ]))
+        cm = ConfigManager(tmp_path)
+        config = cm.load()
+        assert any(r.name == "repo-valid" for r in config.repos)
+
+    def test_power_mode_conflict_raises(self, tmp_path):
+        """Power 模式下字段冲突时 load() 抛出 ValueError"""
+        for name, webhook in [("p1", "https://hook.example.com/a"), ("p2", "https://hook.example.com/b")]:
+            write_driving_config(
+                tmp_path / "ai-driving" / name,
+                make_driving_config(gate_webhook=webhook),
+            )
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1"),
+            PowerEntry(name="p2", path="ai-driving/p2"),
+        ]))
+        cm = ConfigManager(tmp_path)
+        with pytest.raises(ValueError, match="冲突"):
+            cm.load()
+
+
+# ==================== driving power 命令测试 ====================
+
+@pytest.fixture
+def runner():
+    return CliRunner()
+
+
+@pytest.fixture
+def project_with_power_dirs(tmp_path):
+    """创建包含两个本地 power 目录的项目"""
+    for name in ("p1", "p2"):
+        write_driving_config(
+            tmp_path / "ai-driving" / name,
+            make_driving_config(repos=[make_repo(f"repo-{name}")]),
+        )
+    return tmp_path
+
+
+class TestPowerAddCommand:
+    def test_add_local_power_success(self, runner, project_with_power_dirs):
+        tmp_path = project_with_power_dirs
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, [
+                "power", "add", "--name", "p1", "--path", "ai-driving/p1"
+            ])
+        assert result.exit_code == 0, result.output
+        assert "p1" in result.output
+
+        power_file = tmp_path / POWER_FILE_NAME
+        assert power_file.exists()
+        data = json.loads(power_file.read_text(encoding="utf-8"))
+        assert any(p["name"] == "p1" for p in data["powers"])
+
+    def test_add_local_power_no_config_fails(self, runner, tmp_path):
+        """目录下没有 driving.config.json 时命令失败"""
+        (tmp_path / "ai-driving" / "empty").mkdir(parents=True)
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, [
+                "power", "add", "--name", "empty", "--path", "ai-driving/empty"
+            ])
+        assert result.exit_code != 0 or "driving.config.json" in result.output
+
+    def test_add_without_url_or_path_fails(self, runner, tmp_path):
+        """既没有 --url 也没有 --path 时报错"""
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["power", "add", "--name", "p1"])
+        assert result.exit_code != 0 or "--url" in result.output or "--path" in result.output
+
+
+class TestPowerRemoveCommand:
+    def test_remove_existing_power(self, runner, project_with_power_dirs):
+        tmp_path = project_with_power_dirs
+        # 先添加
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            runner.invoke(cli, ["power", "add", "--name", "p1", "--path", "ai-driving/p1"])
+            result = runner.invoke(cli, ["power", "remove", "p1"])
+        assert result.exit_code == 0, result.output
+        data = json.loads((tmp_path / POWER_FILE_NAME).read_text(encoding="utf-8"))
+        assert not any(p["name"] == "p1" for p in data["powers"])
+
+    def test_remove_nonexistent_power_fails(self, runner, tmp_path):
+        write_power_config(tmp_path, PowerConfig(powers=[]))
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["power", "remove", "ghost"])
+        assert result.exit_code != 0 or "不存在" in result.output
+
+    def test_remove_without_power_file_fails(self, runner, tmp_path):
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["power", "remove", "p1"])
+        assert result.exit_code != 0 or "不存在" in result.output
+
+
+class TestPowerListCommand:
+    def test_list_no_power_file(self, runner, tmp_path):
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["power", "list"])
+        assert result.exit_code == 0
+        assert "传统模式" in result.output
+
+    def test_list_with_powers(self, runner, project_with_power_dirs):
+        tmp_path = project_with_power_dirs
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1"),
+            PowerEntry(name="p2", path="ai-driving/p2"),
+        ]))
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["power", "list"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        names = [p["name"] for p in data]
+        assert "p1" in names
+        assert "p2" in names
+
+    def test_list_shows_config_exists_flag(self, runner, project_with_power_dirs):
+        """list 输出中 config_exists 字段应正确反映文件是否存在"""
+        tmp_path = project_with_power_dirs
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1"),       # 有 config
+            PowerEntry(name="ghost", path="ai-driving/ghost"),  # 无 config
+        ]))
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["power", "list"])
+        data = json.loads(result.output)
+        by_name = {p["name"]: p for p in data}
+        assert by_name["p1"]["config_exists"] is True
+        assert by_name["ghost"]["config_exists"] is False
+
+
+class TestPowerPullCommand:
+    def test_pull_local_power_skipped(self, runner, project_with_power_dirs):
+        """本地 power 执行 pull 时跳过"""
+        tmp_path = project_with_power_dirs
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1", url=None),
+        ]))
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["power", "pull", "p1"])
+        assert result.exit_code == 0
+        assert "跳过" in result.output
+
+    def test_pull_nonexistent_power_fails(self, runner, tmp_path):
+        write_power_config(tmp_path, PowerConfig(powers=[]))
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["power", "pull", "ghost"])
+        assert result.exit_code != 0 or "不存在" in result.output
+
+    def test_pull_without_power_file_fails(self, runner, tmp_path):
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["power", "pull"])
+        assert result.exit_code != 0 or "不存在" in result.output

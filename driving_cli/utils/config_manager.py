@@ -1,6 +1,13 @@
 """配置管理器
 
-负责读写 driving.config.json，提供仓库配置的增删查改及路径辅助方法。
+负责读写 driving.config.json / driving.power.json，提供仓库配置的增删查改及路径辅助方法。
+
+模式说明：
+- 传统模式：项目根目录存在 driving.config.json，直接读写该文件（原有行为不变）。
+- Power 模式：项目根目录存在 driving.power.json，从各 power 目录下的 driving.config.json
+  合并出一份只读的 DrivingConfig 供读取；写入时需指定 power name，写入对应 power 的文件。
+  降级规则：某个 power 的 driving.config.json 不存在时跳过该 power；
+  若所有 power 均无有效配置，自动降级读取项目根目录的 driving.config.json。
 """
 
 import json
@@ -8,9 +15,13 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from driving_cli.models.config import DrivingConfig, RepoConfig
+from driving_cli.models.power import PowerConfig, PowerEntry
 
 # 配置文件名称
 CONFIG_FILE_NAME = "driving.config.json"
+
+# power 配置文件名称
+POWER_FILE_NAME = "driving.power.json"
 
 # ai-driving 根目录名称
 AI_DRIVING_DIR_NAME = "ai-driving"
@@ -21,10 +32,79 @@ DEFAULT_COMMIT_MESSAGE = "update by driving"
 DEFAULT_UPDATE_VERSION_URL = ""
 
 
+# ==================== 单值字段合并策略 ====================
+
+# 这些字段在多个 power 中必须完全相同，否则报错
+_CONFLICT_CHECK_FIELDS = (
+    "default_commit_message",
+    "update_version_url",
+    "gate_webhook",
+    "agent_webhook",
+    "refine_webhook",
+    "user_prompt",
+    "check_sample_rate",
+)
+
+
+def _merge_configs(configs: List[DrivingConfig], power_names: List[str]) -> DrivingConfig:
+    """将多个 DrivingConfig 合并为一个。
+
+    合并规则：
+    - repos：按 name 去重，先出现的 power 优先（保留第一个）
+    - 单值字段（webhook、url 等）：所有 power 中非空值必须相同，否则抛出 ValueError
+    - version：取第一个 power 的值
+    """
+    if not configs:
+        raise ValueError("没有可合并的配置")
+
+    # --- repos 合并（按 name 去重，先出现优先）---
+    merged_repos: List[RepoConfig] = []
+    seen_names: set = set()
+    for cfg in configs:
+        for repo in cfg.repos:
+            if repo.name not in seen_names:
+                merged_repos.append(repo)
+                seen_names.add(repo.name)
+
+    # --- 单值字段冲突检测 ---
+    def _get_field(cfg: DrivingConfig, field: str):
+        return getattr(cfg, field)
+
+    result_fields = {}
+    for field in _CONFLICT_CHECK_FIELDS:
+        values = [(_get_field(cfg, field), name) for cfg, name in zip(configs, power_names)]
+        # 过滤空值（空字符串 / 默认值不参与冲突检测）
+        non_default = [(v, n) for v, n in values if v not in ("", 0, 100)]
+        if not non_default:
+            # 全部为空/默认，取第一个 config 的值
+            result_fields[field] = _get_field(configs[0], field)
+            continue
+        unique_vals = {v for v, _ in non_default}
+        if len(unique_vals) > 1:
+            conflict_detail = ", ".join(f"{n}={repr(v)}" for v, n in non_default)
+            raise ValueError(
+                f"Power 配置冲突：字段 '{field}' 在多个 power 中值不同 ({conflict_detail})，"
+                f"请统一后重试"
+            )
+        result_fields[field] = non_default[0][0]
+
+    return DrivingConfig(
+        version=configs[0].version,
+        repos=merged_repos,
+        default_commit_message=result_fields["default_commit_message"] or DEFAULT_COMMIT_MESSAGE,
+        update_version_url=result_fields["update_version_url"] or DEFAULT_UPDATE_VERSION_URL,
+        user_prompt=result_fields["user_prompt"] or "",
+        check_sample_rate=result_fields["check_sample_rate"] if result_fields["check_sample_rate"] != 0 else 100,
+        gate_webhook=result_fields["gate_webhook"] or "",
+        agent_webhook=result_fields["agent_webhook"] or "",
+        refine_webhook=result_fields["refine_webhook"] or "",
+    )
+
+
 def find_project_root() -> Path:
     """向上查找项目根目录
 
-    从当前目录向上遍历，直到找到包含 driving.config.json 或 ai-driving/ 的目录。
+    从当前目录向上遍历，直到找到包含 driving.config.json、driving.power.json 或 ai-driving/ 的目录。
     如果都找不到，返回当前工作目录。
 
     Returns:
@@ -34,16 +114,368 @@ def find_project_root() -> Path:
 
     # 向上查找，直到文件系统根目录
     while current != current.parent:
-        if (current / CONFIG_FILE_NAME).exists() or (current / AI_DRIVING_DIR_NAME).exists():
+        if (
+            (current / CONFIG_FILE_NAME).exists()
+            or (current / POWER_FILE_NAME).exists()
+            or (current / AI_DRIVING_DIR_NAME).exists()
+        ):
             return current
         current = current.parent
 
     # 检查根目录本身
-    if (current / CONFIG_FILE_NAME).exists() or (current / AI_DRIVING_DIR_NAME).exists():
+    if (
+        (current / CONFIG_FILE_NAME).exists()
+        or (current / POWER_FILE_NAME).exists()
+        or (current / AI_DRIVING_DIR_NAME).exists()
+    ):
         return current
 
     # 都找不到，返回当前工作目录
     return Path.cwd()
+
+
+class PowerManager:
+    """Power 配置管理器
+
+    负责读写 driving.power.json，以及加载各 power 目录下的 driving.config.json。
+    """
+
+    def __init__(self, project_root: Path):
+        self._project_root = project_root
+        self._power_file = project_root / POWER_FILE_NAME
+
+    def exists(self) -> bool:
+        """driving.power.json 是否存在"""
+        return self._power_file.exists()
+
+    def load_power_config(self) -> PowerConfig:
+        """加载 driving.power.json"""
+        try:
+            raw = self._power_file.read_text(encoding="utf-8")
+        except OSError as e:
+            raise ValueError(f"driving.power.json 读取失败：{e}") from e
+
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"driving.power.json 格式错误：{e}") from e
+
+        try:
+            return PowerConfig.from_dict(data)
+        except (KeyError, ValueError) as e:
+            raise ValueError(f"driving.power.json 格式错误：{e}") from e
+
+    def save_power_config(self, power_cfg: PowerConfig) -> None:
+        """保存 driving.power.json"""
+        self._power_file.parent.mkdir(parents=True, exist_ok=True)
+        self._power_file.write_text(
+            json.dumps(power_cfg.to_dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def load_driving_config_for(self, entry: PowerEntry) -> DrivingConfig:
+        """加载指定 power 目录下的 driving.config.json"""
+        config_path = self._project_root / entry.path / CONFIG_FILE_NAME
+        if not config_path.exists():
+            raise ValueError(
+                f"Power '{entry.name}' 的配置文件不存在：{config_path}，"
+                f"该目录下必须包含 driving.config.json 才能作为 power"
+            )
+        try:
+            raw = config_path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            return DrivingConfig.from_dict(data)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Power '{entry.name}' 的配置文件格式错误：{e}") from e
+        except (KeyError, ValueError) as e:
+            raise ValueError(f"Power '{entry.name}' 的配置文件格式错误：{e}") from e
+
+    def load_merged_config(self) -> Optional[DrivingConfig]:
+        """加载并合并所有 power 的配置。
+
+        合并规则：
+        - driving.config.json 不存在的 power 跳过（不报错）
+        - 有效 power > 0：合并后返回 DrivingConfig
+        - 有效 power = 0（全部缺失）：返回 None，由调用方降级处理
+
+        Returns:
+            DrivingConfig：合并结果；None 表示所有 power 均无有效配置，需降级
+        """
+        power_cfg = self.load_power_config()
+        if not power_cfg.powers:
+            raise ValueError("driving.power.json 中没有配置任何 power")
+
+        configs = []
+        names = []
+        for entry in power_cfg.powers:
+            config_path = self._project_root / entry.path / CONFIG_FILE_NAME
+            if not config_path.exists():
+                # 跳过缺失的 power，不报错
+                continue
+            try:
+                raw = config_path.read_text(encoding="utf-8")
+                data = json.loads(raw)
+                cfg = DrivingConfig.from_dict(data)
+                configs.append(cfg)
+                names.append(entry.name)
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                raise ValueError(f"Power '{entry.name}' 的配置文件格式错误：{e}") from e
+
+        if not configs:
+            # 所有 power 均无有效配置，返回 None 触发降级
+            return None
+
+        return _merge_configs(configs, names)
+
+    def get_config_manager_for(self, power_name: str) -> "ConfigManager":
+        """返回指定 power 的 ConfigManager（用于写入操作）"""
+        power_cfg = self.load_power_config()
+        for entry in power_cfg.powers:
+            if entry.name == power_name:
+                power_root = self._project_root / entry.path
+                return ConfigManager(power_root)
+        raise ValueError(
+            f"Power '{power_name}' 不存在，使用 'driving power list' 查看已配置的 power"
+        )
+
+    def get_default_config_manager(self) -> "ConfigManager":
+        """返回第一个 power 的 ConfigManager（--power 未指定时的默认写入目标）"""
+        power_cfg = self.load_power_config()
+        if not power_cfg.powers:
+            raise ValueError("driving.power.json 中没有配置任何 power")
+        first = power_cfg.powers[0]
+        return ConfigManager(self._project_root / first.path)
+
+    def add_power_local(self, entry: PowerEntry) -> None:
+        """添加一个本地 power 条目（目录已存在，直接注册）"""
+        if self.exists():
+            power_cfg = self.load_power_config()
+        else:
+            power_cfg = PowerConfig(powers=[])
+
+        if any(p.name == entry.name for p in power_cfg.powers):
+            raise ValueError(f"Power '{entry.name}' 已存在")
+
+        # 校验目标目录下有 driving.config.json
+        config_path = self._project_root / entry.path / CONFIG_FILE_NAME
+        if not config_path.exists():
+            raise ValueError(
+                f"路径 '{entry.path}' 下不存在 driving.config.json，无法作为 power"
+            )
+
+        power_cfg.powers.append(entry)
+        self.save_power_config(power_cfg)
+
+    def add_power_remote(self, entry: PowerEntry, git_root: Path) -> None:
+        """添加一个远程 power（git submodule clone），然后注册到 driving.power.json
+
+        Args:
+            entry: PowerEntry，url 必须有值
+            git_root: 主项目 git 根目录（用于执行 submodule add）
+
+        Raises:
+            ValueError: URL 无效、目录已存在、driving.config.json 不存在等
+        """
+        import subprocess as _sp
+
+        if not entry.url:
+            raise ValueError("远程 power 必须提供 url")
+
+        if self.exists():
+            power_cfg = self.load_power_config()
+        else:
+            power_cfg = PowerConfig(powers=[])
+
+        if any(p.name == entry.name for p in power_cfg.powers):
+            raise ValueError(f"Power '{entry.name}' 已存在")
+
+        # 计算相对于 git 根目录的 submodule 路径
+        abs_path = self._project_root / entry.path
+        try:
+            submodule_path = str(abs_path.relative_to(git_root))
+        except ValueError:
+            submodule_path = entry.path
+
+        # 清理残留工作目录
+        if abs_path.exists() and not abs_path.is_symlink():
+            import shutil
+            shutil.rmtree(abs_path)
+
+        # 清理残留 .git/modules 数据
+        self._cleanup_stale_git_modules(git_root, submodule_path)
+
+        # git submodule add
+        try:
+            _sp.check_call(
+                ["git", "submodule", "add", "--force", entry.url, submodule_path],
+                cwd=str(git_root),
+                stderr=_sp.DEVNULL,
+            )
+        except _sp.CalledProcessError as e:
+            # 主仓库尚无 commit 时 checkout 会失败，但 clone 已完成
+            gitmodules = git_root / ".gitmodules"
+            if gitmodules.exists() and submodule_path in gitmodules.read_text(encoding="utf-8"):
+                pass  # clone 成功，继续
+            else:
+                raise ValueError(f"git submodule add 失败：{e}") from e
+
+        # 设置 ignore = all，避免主项目 git status 显示 power 内部变更
+        self._set_submodule_ignore(git_root, submodule_path)
+
+        # 校验 driving.config.json 存在
+        config_path = abs_path / CONFIG_FILE_NAME
+        if not config_path.exists():
+            raise ValueError(
+                f"Power 仓库 '{entry.name}' 中不存在 driving.config.json，无法作为 power"
+            )
+
+        power_cfg.powers.append(entry)
+        self.save_power_config(power_cfg)
+
+    def pull_power(self, name: str) -> bool:
+        """拉取指定远程 power 的最新内容
+
+        Returns:
+            True 表示成功，False 表示跳过（本地 power 或目录不存在）
+
+        Raises:
+            ValueError: power 不存在
+        """
+        import subprocess as _sp
+
+        power_cfg = self.load_power_config()
+        entry = next((p for p in power_cfg.powers if p.name == name), None)
+        if entry is None:
+            raise ValueError(f"Power '{name}' 不存在")
+
+        if entry.type == "local":
+            return False  # 本地 power 不需要 pull
+
+        repo_dir = self._project_root / entry.path
+        if not repo_dir.exists():
+            return False
+
+        try:
+            _sp.check_call(
+                ["git", "pull", "--quiet"],
+                cwd=str(repo_dir),
+                stdout=_sp.DEVNULL,
+                stderr=_sp.DEVNULL,
+                timeout=30,
+            )
+            return True
+        except Exception:
+            return False
+
+    def check_power_updates(self) -> list:
+        """检查所有远程 power 是否有更新（纯本地对比，不 fetch）
+
+        Returns:
+            有更新的 PowerEntry 列表
+        """
+        import subprocess as _sp
+
+        if not self.exists():
+            return []
+
+        try:
+            power_cfg = self.load_power_config()
+        except ValueError:
+            return []
+
+        updatable = []
+        for entry in power_cfg.powers:
+            if entry.type != "remote":
+                continue
+            repo_dir = self._project_root / entry.path
+            if not (repo_dir / ".git").exists():
+                continue
+            # fetch 远端
+            try:
+                _sp.run(
+                    ["git", "fetch", "--quiet"],
+                    cwd=str(repo_dir),
+                    stdout=_sp.DEVNULL,
+                    stderr=_sp.DEVNULL,
+                    timeout=10,
+                )
+            except Exception:
+                continue
+            # 对比 behind
+            for ref in ("@{u}", "origin/HEAD", "origin/main", "origin/master"):
+                try:
+                    out = _sp.check_output(
+                        ["git", "rev-list", "--left-right", "--count", f"HEAD...{ref}"],
+                        cwd=str(repo_dir),
+                        stderr=_sp.DEVNULL,
+                        text=True,
+                    ).strip()
+                    _ahead, behind = map(int, out.split())
+                    if behind > 0:
+                        updatable.append(entry)
+                    break
+                except Exception:
+                    continue
+
+        return updatable
+
+    def remove_power(self, name: str) -> None:
+        """移除一个 power 条目（仅修改 driving.power.json，不删除目录）"""
+        power_cfg = self.load_power_config()
+        original = len(power_cfg.powers)
+        power_cfg.powers = [p for p in power_cfg.powers if p.name != name]
+        if len(power_cfg.powers) == original:
+            raise ValueError(f"Power '{name}' 不存在")
+        self.save_power_config(power_cfg)
+
+    @staticmethod
+    def _cleanup_stale_git_modules(git_root: Path, submodule_path: str) -> None:
+        """清理残留的 .git/modules 数据"""
+        import shutil
+        modules_dir = git_root / ".git" / "modules"
+        parts = Path(submodule_path).parts
+        for depth in range(len(parts), 0, -1):
+            partial = Path(*parts[:depth])
+            modules_path = modules_dir / partial
+            work_path = git_root / partial
+            work_empty = not work_path.exists() or (
+                work_path.is_dir() and not any(work_path.iterdir())
+            )
+            if modules_path.exists() and work_empty:
+                shutil.rmtree(modules_path)
+                break
+
+    @staticmethod
+    def _set_submodule_ignore(git_root: Path, submodule_path: str) -> None:
+        """在 .gitmodules 中为 submodule 设置 ignore = all"""
+        gitmodules = git_root / ".gitmodules"
+        if not gitmodules.exists():
+            return
+        lines = gitmodules.read_text(encoding="utf-8").splitlines(keepends=True)
+        section_header = None
+        for i, line in enumerate(lines):
+            if line.strip().startswith("[submodule") and submodule_path in line:
+                section_header = i
+                break
+        if section_header is None:
+            return
+        i = section_header + 1
+        insert_pos = len(lines)
+        while i < len(lines):
+            stripped = lines[i].strip()
+            if stripped.startswith("["):
+                insert_pos = i
+                break
+            if stripped == "ignore" or stripped.startswith("ignore=") or stripped.startswith("ignore ="):
+                return  # 已存在
+            i += 1
+        indent = "\t"
+        for j in range(section_header + 1, insert_pos):
+            if lines[j].strip() and not lines[j].startswith("["):
+                indent = lines[j][: len(lines[j]) - len(lines[j].lstrip())]
+                break
+        lines.insert(insert_pos, f"{indent}ignore = all\n")
+        gitmodules.write_text("".join(lines), encoding="utf-8")
 
 
 class ConfigManager:
@@ -51,6 +483,9 @@ class ConfigManager:
 
     负责读写 driving.config.json，提供仓库配置的增删查改及路径辅助方法。
     配置文件路径为 {project_root}/driving.config.json。
+
+    当项目根目录存在 driving.power.json 时，load() 自动切换为 Power 模式：
+    合并所有 power 的配置后返回，写入操作仍需通过 PowerManager 路由到具体 power。
     """
 
     def __init__(self, project_root: Path):
@@ -64,20 +499,37 @@ class ConfigManager:
         # 内存中缓存的配置对象，None 表示尚未加载
         self._config: Optional[DrivingConfig] = None
 
+    def _is_power_mode(self) -> bool:
+        """判断当前是否为 Power 模式（项目根目录存在 driving.power.json）"""
+        return (self._project_root / POWER_FILE_NAME).exists()
+
     # ==================== 核心读写方法 ====================
 
     def load(self) -> DrivingConfig:
         """加载配置文件
 
-        若配置文件不存在，自动创建并返回默认配置。
-        若配置文件格式非法，抛出 ValueError 并附带描述性错误信息。
+        - 传统模式：直接读取 driving.config.json，不存在则自动创建默认配置。
+        - Power 模式：合并所有有效 power 的 driving.config.json 后返回。
+          若所有 power 均无有效配置（driving.config.json 全部缺失），
+          自动降级读取项目根目录的 driving.config.json。
 
         Returns:
             DrivingConfig: 配置对象
 
         Raises:
-            ValueError: 配置文件格式非法时抛出
+            ValueError: 配置文件格式非法或 power 冲突时抛出
         """
+        # Power 模式：合并所有 power 配置
+        if self._is_power_mode():
+            pm = PowerManager(self._project_root)
+            merged = pm.load_merged_config()
+            if merged is not None:
+                self._config = merged
+                return merged
+            # 所有 power 均无有效配置，降级读取根目录 driving.config.json
+            # （fall through 到传统模式逻辑）
+
+        # 传统模式
         if not self._config_file.exists():
             # 配置文件不存在，创建默认配置
             default_config = DrivingConfig(
@@ -115,7 +567,9 @@ class ConfigManager:
         return config
 
     def save(self, config: DrivingConfig) -> None:
-        """将配置保存为格式化 JSON
+        """将配置保存为格式化 JSON（仅传统模式可用）
+
+        Power 模式下请通过 PowerManager.get_config_manager_for(name).save() 写入。
 
         Args:
             config: 要保存的配置对象

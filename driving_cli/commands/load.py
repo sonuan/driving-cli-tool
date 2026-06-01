@@ -115,6 +115,32 @@ def _collect_repo_system_prompts() -> str:
         return ""
 
 
+def _check_and_pull_powers() -> None:
+    """检查所有远程 power 是否有更新，有则自动拉取（静默执行）"""
+    _dbg("检查 power 更新 ...")
+    t = time.perf_counter()
+    try:
+        from driving_cli.utils.config_manager import PowerManager
+        project_root = find_project_root()
+        pm = PowerManager(project_root)
+        if not pm.exists():
+            _dbg("未启用 Power 模式，跳过 power 更新检查")
+            return
+
+        updatable = pm.check_power_updates()
+        _dbg(f"power 更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，有更新的 power 数={len(updatable)}")
+
+        for entry in updatable:
+            _dbg(f"自动拉取 power '{entry.name}' ...")
+            try:
+                ok = pm.pull_power(entry.name)
+                _dbg(f"power '{entry.name}' 拉取{'成功' if ok else '跳过'}")
+            except Exception as e:
+                _dbg(f"power '{entry.name}' 拉取失败：{e}")
+    except Exception as e:
+        _dbg(f"power 更新检查异常，耗时 {(time.perf_counter()-t)*1000:.1f}ms：{e}")
+
+
 def _check_and_pull_repos() -> str:
     """检查仓库更新，自动拉取 check_sample_rate=-1 的仓库，返回需通知的提示文本"""
     _dbg("检查仓库更新 ...")
@@ -228,10 +254,15 @@ def load(keywords: tuple, debug: bool, with_modules: str):
         # 解析 --with 模块列表
         modules = {m.strip().lower() for m in with_modules.split(",") if m.strip()}
 
-        # 带关键词时不检查仓库更新；不带关键词时提前检查并 auto_pull，
-        # 确保后续 collect 读到的是最新内容
+        # 带关键词时不检查仓库更新；不带关键词时：
+        # 1. 先检查并自动拉取 power 更新（确保合并的 config 是最新的）
+        # 2. 再检查各 config.json 里的 repos 是否有更新
         repo_update_msg = ""
         if not keywords:
+            t = time.perf_counter()
+            _check_and_pull_powers()
+            _dbg(f"power 更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
+
             t = time.perf_counter()
             repo_update_msg = _check_and_pull_repos()
             _dbg(f"仓库更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")

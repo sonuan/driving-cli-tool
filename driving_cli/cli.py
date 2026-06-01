@@ -3,7 +3,7 @@
 import click
 
 from driving_cli import __version__
-from driving_cli.commands import agent, check, feature, framework, gate, ide, load, refine, repo, rule, skill, update
+from driving_cli.commands import agent, check, feature, framework, gate, ide, load, power, refine, repo, rule, skill, update
 from driving_cli.utils.help_formatter import patch_click_help
 
 
@@ -25,6 +25,9 @@ cli.add_command(agent.agent_group)
 
 # 注册 repo 子命令组（多仓库管理）
 cli.add_command(repo.repo_group)
+
+# 注册 power 子命令组（power 配置管理）
+cli.add_command(power.power_group)
 
 # 注册 framework 子命令组（多仓库框架管理）
 cli.add_command(framework.framework_group)

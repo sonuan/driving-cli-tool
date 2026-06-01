@@ -1,0 +1,249 @@
+"""Power 子命令组 - 管理 driving.power.json
+
+提供 driving power <subcommand> 系列命令，用于添加、移除、列出、更新 power 条目。
+Power 模式允许将多个目录下的 driving.config.json 合并使用，解决多分支配置冲突问题。
+"""
+
+import json as _json
+from typing import Optional
+
+import click
+
+from driving_cli.models.power import PowerEntry
+from driving_cli.utils.config_manager import PowerManager, find_project_root
+from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
+from driving_cli.utils.validators import infer_repo_name_from_url, validate_git_url, validate_repo_name
+
+
+@click.group(name="power")
+def power_group():
+    """Power 配置管理（合并多个 driving.config.json）
+
+    Power 模式：在项目根目录创建 driving.power.json，列出多个包含
+    driving.config.json 的目录，driving-cli 运行时自动合并所有配置。
+
+    适用场景：项目有多个分支，各分支有独立的 driving.config.json，
+    通过 power 合并后无需跨分支合并配置文件。
+
+    示例：
+        driving power add --url https://git.xxx.com/config.git
+        driving power add --url https://git.xxx.com/config.git --name feature
+        driving power add --name main --path ai-driving/my-local
+        driving power pull
+        driving power list
+        driving power remove feature
+    """
+    pass
+
+
+# ==================== power add ====================
+
+@power_group.command(name="add")
+@click.option("--url", default=None, help="远程 Git 仓库地址（作为 submodule 安装）")
+@click.option("--name", "power_name", default=None, help="Power 名称（唯一标识，不指定则从 URL 推断）")
+@click.option("--path", "power_path", default=None, help="本地目录路径（--url 时可选，默认 ai-driving/<name>；本地模式时必填）")
+@click.option("--description", default=None, help="Power 描述")
+def power_add(url: Optional[str], power_name: Optional[str], power_path: Optional[str], description: Optional[str]):
+    """添加一个 power 条目
+
+    远程模式（--url）：将远程仓库作为 git submodule 安装，仓库根目录须包含 driving.config.json。\n
+    本地模式（--path）：注册已存在的本地目录，目录下须包含 driving.config.json。\n
+
+    示例：
+        driving power add --url https://git.xxx.com/config.git
+        driving power add --url https://git.xxx.com/config.git --name feature
+        driving power add --name main --path ai-driving/my-local
+    """
+    project_root = find_project_root()
+    pm = PowerManager(project_root)
+
+    if url is not None:
+        # ---- 远程模式 ----
+        if not validate_git_url(url):
+            log_error(f"Git URL 格式不合法：{url}")
+            raise click.Abort()
+
+        # 推断 name
+        if power_name is None:
+            power_name = infer_repo_name_from_url(url)
+            log_info(f"自动推断 power 名称：{power_name}")
+        elif not validate_repo_name(power_name):
+            log_error("Power 名称只允许字母、数字、连字符和下划线，且必须以字母或数字开头")
+            raise click.Abort()
+
+        # 推断安装路径
+        install_path = power_path if power_path else f"ai-driving/{power_name}"
+
+        # 查找 git 根目录
+        try:
+            import git
+            from driving_cli.utils.git_helper import find_git_root
+            git_root = find_git_root(project_root)
+        except Exception:
+            log_error("当前目录不在 Git 仓库中，请先执行 git init")
+            raise click.Abort()
+
+        entry = PowerEntry(name=power_name, path=install_path, url=url, description=description)
+
+        log_info(f"正在添加远程 power '{power_name}'...")
+        log_info(f"仓库地址：{url}")
+        log_info("正在 clone 远程仓库，请稍候...")
+
+        try:
+            pm.add_power_remote(entry, git_root)
+        except ValueError as e:
+            log_error(str(e))
+            raise click.Abort()
+
+        log_success(f"远程 power '{power_name}' 安装成功！")
+        log_info(f"安装路径：{install_path}")
+        log_info("下一步：")
+        try:
+            from driving_cli.utils.git_helper import find_git_root as _fgr
+            _git_root = _fgr(project_root)
+            abs_path = project_root / install_path
+            submodule_path = str(abs_path.relative_to(_git_root))
+        except Exception:
+            submodule_path = install_path
+        log_info(f"  git add .gitmodules {submodule_path}")
+        log_info(f"  git commit -m 'Add power {power_name}'")
+
+    elif power_path is not None:
+        # ---- 本地模式 ----
+        if power_name is None:
+            log_error("本地模式下请通过 --name 指定 power 名称")
+            raise click.Abort()
+        if not validate_repo_name(power_name):
+            log_error("Power 名称只允许字母、数字、连字符和下划线，且必须以字母或数字开头")
+            raise click.Abort()
+
+        entry = PowerEntry(name=power_name, path=power_path, url=None, description=description)
+
+        try:
+            pm.add_power_local(entry)
+        except ValueError as e:
+            log_error(str(e))
+            raise click.Abort()
+
+        log_success(f"本地 power '{power_name}' 已添加（路径：{power_path}）")
+
+    else:
+        log_error("请提供 --url（远程仓库）或 --path（本地目录）")
+        raise click.Abort()
+
+
+# ==================== power pull ====================
+
+@power_group.command(name="pull")
+@click.argument("power_name", required=False, default=None)
+def power_pull(power_name: Optional[str]):
+    """拉取远程 power 的最新内容
+
+    不指定名称则更新所有远程 power。
+    本地 power 会跳过并给出提示。
+
+    示例：
+        driving power pull
+        driving power pull feature
+    """
+    project_root = find_project_root()
+    pm = PowerManager(project_root)
+
+    if not pm.exists():
+        log_error("driving.power.json 不存在，当前未启用 Power 模式")
+        raise click.Abort()
+
+    try:
+        power_cfg = pm.load_power_config()
+    except ValueError as e:
+        log_error(str(e))
+        raise click.Abort()
+
+    targets = power_cfg.powers
+    if power_name is not None:
+        targets = [p for p in targets if p.name == power_name]
+        if not targets:
+            log_error(f"Power '{power_name}' 不存在，使用 'driving power list' 查看已配置的 power")
+            raise click.Abort()
+
+    for entry in targets:
+        if entry.type == "local":
+            log_warning(f"Power '{entry.name}' 是本地 power，跳过 pull 操作")
+            continue
+        log_info(f"正在拉取 power '{entry.name}'...")
+        try:
+            ok = pm.pull_power(entry.name)
+            if ok:
+                log_success(f"Power '{entry.name}' 拉取成功")
+            else:
+                log_warning(f"Power '{entry.name}' 目录不存在，跳过")
+        except ValueError as e:
+            log_error(str(e))
+
+
+# ==================== power remove ====================
+
+@power_group.command(name="remove")
+@click.argument("power_name")
+def power_remove(power_name: str):
+    """移除一个 power 条目（仅修改 driving.power.json，不删除目录或 submodule）
+
+    示例：
+        driving power remove feature
+    """
+    project_root = find_project_root()
+    pm = PowerManager(project_root)
+
+    if not pm.exists():
+        log_error("driving.power.json 不存在，当前未启用 Power 模式")
+        raise click.Abort()
+
+    try:
+        pm.remove_power(power_name)
+    except ValueError as e:
+        log_error(str(e))
+        raise click.Abort()
+
+    log_success(f"Power '{power_name}' 已移除")
+    log_info("注意：submodule 目录和 .gitmodules 条目未删除，如需完全移除请手动执行 git submodule deinit")
+
+
+# ==================== power list ====================
+
+@power_group.command(name="list")
+def power_list():
+    """列出所有已配置的 power 条目
+
+    示例：
+        driving power list
+    """
+    project_root = find_project_root()
+    pm = PowerManager(project_root)
+
+    if not pm.exists():
+        log_info("driving.power.json 不存在，当前使用传统模式（直接读取 driving.config.json）")
+        return
+
+    try:
+        power_cfg = pm.load_power_config()
+    except ValueError as e:
+        log_error(str(e))
+        raise click.Abort()
+
+    if not power_cfg.powers:
+        log_info("driving.power.json 中没有配置任何 power")
+        return
+
+    result = []
+    for entry in power_cfg.powers:
+        config_path = project_root / entry.path / "driving.config.json"
+        result.append({
+            "name": entry.name,
+            "type": entry.type,
+            "url": entry.url or "",
+            "path": entry.path,
+            "description": entry.description or "",
+            "config_exists": config_path.exists(),
+        })
+
+    print(_json.dumps(result, ensure_ascii=False, indent=2))

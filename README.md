@@ -35,16 +35,83 @@ driving load --debug                 # 同上，同时输出调试日志
 ## repo — 规范仓库管理
 
 ```bash
-driving repo install --url <url>     # 安装远程仓库（Git submodule）
-driving repo install --local <path>  # 安装本地仓库（软链接）
-driving repo uninstall <name>        # 卸载仓库
-driving repo list                    # 查看已安装仓库列表
-driving repo load [name...]          # 输出仓库列表（JSON，支持关键词过滤）
-driving repo pull <name>             # 从远程拉取更新
-driving repo commit <name> <message> # 提交修改
-driving repo push <name>             # 推送到远程
-driving repo checkout <name> <branch>  # 切换仓库分支
+driving repo install --url <url>              # 安装远程仓库（Git submodule）
+driving repo install --local <path>           # 安装本地仓库（软链接）
+driving repo install --url <url> --power <power-name>  # Power 模式下指定写入哪个 power 的配置
+driving repo uninstall <name>                 # 卸载仓库
+driving repo list                             # 查看已安装仓库列表
+driving repo load [name...]                   # 输出仓库列表（JSON，支持关键词过滤）
+driving repo pull <name>                      # 从远程拉取更新
+driving repo commit <name> <message>          # 提交修改
+driving repo push <name>                      # 推送到远程
+driving repo checkout <name> <branch>         # 切换仓库分支
 ```
+
+## power — Power 配置管理
+
+Power 模式允许将多个目录下的 `driving.config.json` 合并使用，解决多分支场景下配置文件需要跨分支合并的问题。
+
+**工作原理：** 在项目根目录创建 `driving.power.json`，列出多个包含 `driving.config.json` 的目录（本地或远程 git 仓库），driving-cli 运行时自动合并所有配置。不创建该文件则完全走传统模式，零感知。
+
+```bash
+# 远程模式：将远程仓库作为 git submodule 安装并注册为 power
+driving power add --url https://git.xxx.com/config.git
+driving power add --url https://git.xxx.com/config.git --name feature
+
+# 本地模式：注册已存在的本地目录（须包含 driving.config.json）
+driving power add --name main --path ai-driving/my-local
+
+# 拉取远程 power 更新
+driving power pull              # 更新所有远程 power
+driving power pull feature      # 更新指定 power
+
+# 管理
+driving power list              # 列出所有已配置的 power
+driving power remove feature    # 移除一个 power 条目
+```
+
+**合并规则：**
+- `repos`：按 `name` 去重，先出现的 power 优先
+- 单值字段（`gate_webhook`、`update_version_url` 等）：多个 power 中非空值必须相同，否则报错
+- 某个 power 的 `driving.config.json` 不存在时自动跳过该 power
+- 所有 power 均无有效配置时，降级读取项目根目录的 `driving.config.json`
+
+**`driving load` 自动更新：** 每次执行 `driving load` 时，会先检查所有远程 power 是否有更新并自动拉取，再检查各 `driving.config.json` 里的 repos 更新。
+
+**典型用法：**
+```bash
+# 1. 从远程安装 power（作为 submodule，跟随主项目 git）
+driving power add --url https://git.xxx.com/branch-config.git --name feature
+
+# 2. 安装新仓库时指定写入哪个 power 的配置
+driving repo install --url https://... --power feature
+```
+
+### driving.power.json 结构
+
+```json
+{
+  "powers": [
+    {
+      "name": "main",
+      "type": "local",
+      "path": "ai-driving/main-config",
+      "url": null,
+      "description": ""
+    },
+    {
+      "name": "feature",
+      "type": "remote",
+      "path": "ai-driving/feature-config",
+      "url": "https://git.xxx.com/feature-config.git",
+      "description": "feature 分支配置"
+    }
+  ]
+}
+```
+
+- `url` 有值 → remote 类型（git submodule，支持 `power pull` 更新）
+- `url` 无值 → local 类型（本地目录）
 
 ## framework — 框架文档管理
 

@@ -46,15 +46,37 @@ def repo_group():
 @click.option("--name", "repo_name", default=None, help="自定义仓库名称")
 @click.option("--description", "description", default=None, help="仓库描述，用于 AI 关键词匹配")
 @click.option("--force", is_flag=True, default=False, help="强制覆盖已存在的同名仓库")
-def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[str], description: Optional[str], force: bool):
+@click.option("--power", "power_name", default=None, help="Power 模式下指定写入哪个 power 的 driving.config.json")
+def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[str], description: Optional[str], force: bool, power_name: Optional[str]):
     """安装仓库
 
     无参数：读取配置初始化所有未初始化的远程仓库。\n
     --url：将远程 Git 仓库作为 submodule 安装。\n
     --local [path]：注册本地仓库（有路径则创建软链接，无路径则创建普通目录）。\n
+    --power <name>：Power 模式下指定写入哪个 power 的配置文件（不指定则写入第一个 power）。\n
     """
+    from driving_cli.utils.config_manager import PowerManager
     project_root = find_project_root()
-    config_mgr = ConfigManager(project_root)
+
+    # 解析写入目标 ConfigManager
+    pm = PowerManager(project_root)
+    if pm.exists():
+        # Power 模式：路由到指定 power 或默认 power
+        try:
+            if power_name:
+                config_mgr = pm.get_config_manager_for(power_name)
+            else:
+                config_mgr = pm.get_default_config_manager()
+                default_entry = pm.load_power_config().powers[0]
+                log_info(f"Power 模式：写入 power '{default_entry.name}'（{default_entry.path}/driving.config.json）")
+                log_info("如需写入其他 power，请使用 --power <name> 指定")
+        except ValueError as e:
+            from driving_cli.utils.logger import log_error
+            log_error(str(e))
+            raise click.Abort()
+    else:
+        # 传统模式
+        config_mgr = ConfigManager(project_root)
 
     # 无参数模式：初始化所有未初始化的远程仓库
     if url is None and local_path is None:

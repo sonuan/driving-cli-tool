@@ -1,0 +1,11 @@
+{
+  "powers": [
+    {
+      "name": "my-local",
+      "type": "local",
+      "url": "",
+      "path": "ai-driving/my-local",
+      "description": "本地测试power仓库"
+    }
+  ]
+}
