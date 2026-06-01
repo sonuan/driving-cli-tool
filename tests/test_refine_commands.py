@@ -669,9 +669,11 @@ class TestReportToWebhook:
     """_report_to_webhook 单元测试
 
     覆盖场景：
-    - 正常上报：payload 字段完整，含 trigger_source / trigger_reason 顶层字段
+    - 正常上报：payload 字段完整，at 为北京时间格式，含 actor / trigger_source / trigger_reason
     - trigger 存在时 trigger_source / trigger_reason 正确展开到顶层
     - trigger 缺省时 trigger_source / trigger_reason 为空字符串
+    - trigger 部分字段缺失时缺省为空字符串
+    - actor 取自 git user.name，无法获取时为空字符串
     - event 参数正确传递（committed / merged）
     - 网络异常时静默失败，不抛出异常
     """
@@ -689,25 +691,25 @@ class TestReportToWebhook:
         }
 
     def test_正常上报payload字段完整(self, tmp_path):
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
         from driving_cli.commands.refine import _report_to_webhook
 
         captured = {}
 
-        def fake_urlopen(req, timeout):
-            import json as j
-            captured["url"] = req.full_url
-            captured["payload"] = j.loads(req.data.decode("utf-8"))
-            captured["method"] = req.method
+        def fake_do_post(webhook_url, payload):
+            captured["url"] = webhook_url
+            captured["payload"] = payload
 
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            _report_to_webhook(
-                "https://example.com/webhook",
-                "driving-base",
-                tmp_path / "2026-06-01-rule-gate-spec.md",
-                self._make_meta(),
-                event="refine.committed",
-            )
+        with patch("driving_cli.commands.refine.do_post", side_effect=fake_do_post):
+            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "李四", "email": "lisi@example.com"}):
+                with patch("driving_cli.commands.refine.now_timestamp", return_value="2026/06/01 10:00"):
+                    _report_to_webhook(
+                        "https://example.com/webhook",
+                        "driving-base",
+                        tmp_path / "2026-06-01-rule-gate-spec.md",
+                        self._make_meta(),
+                        event="refine.committed",
+                    )
 
         p = captured["payload"]
         assert p["event"] == "refine.committed"
@@ -716,11 +718,14 @@ class TestReportToWebhook:
         assert p["target_name"] == "gate-spec"
         assert p["description"] == "补充 trigger 字段说明"
         assert p["operator"] == "张三"
-        assert "at" in p
-        assert captured["method"] == "POST"
+        # at 为北京时间格式
+        assert p["at"] == "2026/06/01 10:00"
+        # actor 取自 git user.name
+        assert p["actor"] == "李四"
         # trigger 展开为顶层字段
         assert "trigger_source" in p
         assert "trigger_reason" in p
+        assert captured["url"] == "https://example.com/webhook"
 
     def test_trigger存在时source和reason展开到顶层(self, tmp_path):
         from unittest.mock import patch
@@ -728,18 +733,18 @@ class TestReportToWebhook:
 
         captured = {}
 
-        def fake_urlopen(req, timeout):
-            import json as j
-            captured["payload"] = j.loads(req.data.decode("utf-8"))
+        def fake_do_post(webhook_url, payload):
+            captured["payload"] = payload
 
         trigger = {"source": "gate", "reason": "GATE-D1 返工 3 次，高频原因：页面类型判断有误"}
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            _report_to_webhook(
-                "https://example.com/webhook",
-                "driving-base",
-                tmp_path / "refine.md",
-                self._make_meta(trigger=trigger),
-            )
+        with patch("driving_cli.commands.refine.do_post", side_effect=fake_do_post):
+            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "", "email": ""}):
+                _report_to_webhook(
+                    "https://example.com/webhook",
+                    "driving-base",
+                    tmp_path / "refine.md",
+                    self._make_meta(trigger=trigger),
+                )
 
         p = captured["payload"]
         assert p["trigger_source"] == "gate"
@@ -753,17 +758,17 @@ class TestReportToWebhook:
 
         captured = {}
 
-        def fake_urlopen(req, timeout):
-            import json as j
-            captured["payload"] = j.loads(req.data.decode("utf-8"))
+        def fake_do_post(webhook_url, payload):
+            captured["payload"] = payload
 
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            _report_to_webhook(
-                "https://example.com/webhook",
-                "driving-base",
-                tmp_path / "refine.md",
-                self._make_meta(trigger=None),
-            )
+        with patch("driving_cli.commands.refine.do_post", side_effect=fake_do_post):
+            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "", "email": ""}):
+                _report_to_webhook(
+                    "https://example.com/webhook",
+                    "driving-base",
+                    tmp_path / "refine.md",
+                    self._make_meta(trigger=None),
+                )
 
         p = captured["payload"]
         assert p["trigger_source"] == ""
@@ -776,23 +781,63 @@ class TestReportToWebhook:
 
         captured = {}
 
-        def fake_urlopen(req, timeout):
-            import json as j
-            captured["payload"] = j.loads(req.data.decode("utf-8"))
+        def fake_do_post(webhook_url, payload):
+            captured["payload"] = payload
 
         # 只有 source，没有 reason
         trigger = {"source": "self-discover"}
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            _report_to_webhook(
-                "https://example.com/webhook",
-                "driving-base",
-                tmp_path / "refine.md",
-                self._make_meta(trigger=trigger),
-            )
+        with patch("driving_cli.commands.refine.do_post", side_effect=fake_do_post):
+            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "", "email": ""}):
+                _report_to_webhook(
+                    "https://example.com/webhook",
+                    "driving-base",
+                    tmp_path / "refine.md",
+                    self._make_meta(trigger=trigger),
+                )
 
         p = captured["payload"]
         assert p["trigger_source"] == "self-discover"
         assert p["trigger_reason"] == ""
+
+    def test_actor取自git_user_name(self, tmp_path):
+        from unittest.mock import patch
+        from driving_cli.commands.refine import _report_to_webhook
+
+        captured = {}
+
+        def fake_do_post(webhook_url, payload):
+            captured["payload"] = payload
+
+        with patch("driving_cli.commands.refine.do_post", side_effect=fake_do_post):
+            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "王五", "email": "wangwu@example.com"}):
+                _report_to_webhook(
+                    "https://example.com/webhook",
+                    "driving-base",
+                    tmp_path / "refine.md",
+                    self._make_meta(),
+                )
+
+        assert captured["payload"]["actor"] == "王五"
+
+    def test_actor无法获取时为空字符串(self, tmp_path):
+        from unittest.mock import patch
+        from driving_cli.commands.refine import _report_to_webhook
+
+        captured = {}
+
+        def fake_do_post(webhook_url, payload):
+            captured["payload"] = payload
+
+        with patch("driving_cli.commands.refine.do_post", side_effect=fake_do_post):
+            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "", "email": ""}):
+                _report_to_webhook(
+                    "https://example.com/webhook",
+                    "driving-base",
+                    tmp_path / "refine.md",
+                    self._make_meta(),
+                )
+
+        assert captured["payload"]["actor"] == ""
 
     def test_event参数正确传递为merged(self, tmp_path):
         from unittest.mock import patch
@@ -800,18 +845,18 @@ class TestReportToWebhook:
 
         captured = {}
 
-        def fake_urlopen(req, timeout):
-            import json as j
-            captured["payload"] = j.loads(req.data.decode("utf-8"))
+        def fake_do_post(webhook_url, payload):
+            captured["payload"] = payload
 
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            _report_to_webhook(
-                "https://example.com/webhook",
-                "driving-base",
-                tmp_path / "refine.md",
-                self._make_meta(),
-                event="refine.merged",
-            )
+        with patch("driving_cli.commands.refine.do_post", side_effect=fake_do_post):
+            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "", "email": ""}):
+                _report_to_webhook(
+                    "https://example.com/webhook",
+                    "driving-base",
+                    tmp_path / "refine.md",
+                    self._make_meta(),
+                    event="refine.merged",
+                )
 
         assert captured["payload"]["event"] == "refine.merged"
 
@@ -819,14 +864,15 @@ class TestReportToWebhook:
         from unittest.mock import patch
         from driving_cli.commands.refine import _report_to_webhook
 
-        with patch("urllib.request.urlopen", side_effect=Exception("network error")):
-            # 不应抛出异常
-            _report_to_webhook(
-                "https://example.com/webhook",
-                "driving-base",
-                tmp_path / "refine.md",
-                self._make_meta(),
-            )
+        with patch("driving_cli.commands.refine.do_post", side_effect=Exception("network error")):
+            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "", "email": ""}):
+                # 不应抛出异常
+                _report_to_webhook(
+                    "https://example.com/webhook",
+                    "driving-base",
+                    tmp_path / "refine.md",
+                    self._make_meta(),
+                )
 
 
 # ==================== driving refine merge ====================

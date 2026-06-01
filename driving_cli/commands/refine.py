@@ -13,8 +13,9 @@ import click
 import git
 
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
-from driving_cli.utils.git_helper import push_with_upstream
+from driving_cli.utils.git_helper import get_git_user, push_with_upstream
 from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
+from driving_cli.utils.reporter_utils import do_post, now_timestamp
 
 VALID_TYPES = ("skill", "rule", "agent", "framework")
 
@@ -147,15 +148,13 @@ def _report_to_webhook(
         meta: 由 _parse_refine_frontmatter 返回的 frontmatter 字典
         event: 事件类型，refine.committed（提交）或 refine.merged（合并）
     """
-    import urllib.error
-    import urllib.request
-    from datetime import datetime, timezone
-
     trigger = meta.get("trigger") or {}
+
+    git_user = get_git_user()
 
     payload: Dict = {
         "event": event,
-        "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "at": now_timestamp(),
         "repo": repo_name,
         "file": file_path.name,
         "date": meta.get("date", ""),
@@ -164,20 +163,14 @@ def _report_to_webhook(
         "target_file": meta.get("target_file", ""),
         "description": meta.get("description", ""),
         "operator": meta.get("operator", ""),
+        "actor": git_user["name"],
         "status": meta.get("status", "pending"),
         "trigger_source": trigger.get("source", ""),
         "trigger_reason": trigger.get("reason", ""),
     }
 
     try:
-        data = json_module.dumps(payload, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(
-            webhook_url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        urllib.request.urlopen(req, timeout=5)
+        do_post(webhook_url, payload)
     except Exception:
         pass  # 静默失败，不影响主流程
 
