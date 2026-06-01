@@ -43,7 +43,8 @@ def power_group():
 @click.option("--name", "power_name", default=None, help="Power 名称（唯一标识，不指定则从 URL 推断）")
 @click.option("--path", "power_path", default=None, help="本地目录路径（--url 时可选，默认 ai-driving/<name>；本地模式时必填）")
 @click.option("--description", default=None, help="Power 描述")
-def power_add(url: Optional[str], power_name: Optional[str], power_path: Optional[str], description: Optional[str]):
+@click.option("--force", is_flag=True, default=False, help="强制覆盖已存在的同名 power")
+def power_add(url: Optional[str], power_name: Optional[str], power_path: Optional[str], description: Optional[str], force: bool):
     """添加一个 power 条目
 
     远程模式（--url）：将远程仓库作为 git submodule 安装，仓库根目录须包含 driving.config.json。\n
@@ -52,6 +53,7 @@ def power_add(url: Optional[str], power_name: Optional[str], power_path: Optiona
     示例：
         driving power add --url https://git.xxx.com/config.git
         driving power add --url https://git.xxx.com/config.git --name feature
+        driving power add --url https://git.xxx.com/config.git --force
         driving power add --name main --path ai-driving/my-local
     """
     project_root = find_project_root()
@@ -73,10 +75,34 @@ def power_add(url: Optional[str], power_name: Optional[str], power_path: Optiona
 
         # 推断安装路径
         install_path = power_path if power_path else f"ai-driving/{power_name}"
+        abs_install_path = project_root / install_path
+        config_json_path = abs_install_path / "driving.config.json"
 
-        # 查找 git 根目录
+        # 判断当前状态，决定执行路径
+        dir_exists = abs_install_path.exists() and abs_install_path.is_dir() and any(abs_install_path.iterdir())
+        already_registered = False
+        if pm.exists():
+            try:
+                existing_cfg = pm.load_power_config()
+                already_registered = any(p.name == power_name for p in existing_cfg.powers)
+            except ValueError:
+                pass
+
+        # 情况 4：目录存在 + 已注册 + 有 driving.config.json → 已完整安装
+        if dir_exists and already_registered and config_json_path.exists():
+            if not force:
+                log_info(f"Power '{power_name}' 已完整安装（路径：{install_path}）")
+                log_info("如需重新安装，请使用 --force")
+                return
+            # --force：移除注册记录，重新走安装流程
+            log_warning(f"--force：重新安装 power '{power_name}'")
+            try:
+                pm.remove_power(power_name)
+            except ValueError:
+                pass
+
+        # 查找 git 根目录（clone 和注册都需要）
         try:
-            import git
             from driving_cli.utils.git_helper import find_git_root
             git_root = find_git_root(project_root)
         except Exception:
@@ -85,28 +111,56 @@ def power_add(url: Optional[str], power_name: Optional[str], power_path: Optiona
 
         entry = PowerEntry(name=power_name, path=install_path, url=url, description=description)
 
-        log_info(f"正在添加远程 power '{power_name}'...")
-        log_info(f"仓库地址：{url}")
-        log_info("正在 clone 远程仓库，请稍候...")
+        # 情况 1：目录不存在 → clone
+        if not dir_exists:
+            log_info(f"正在添加远程 power '{power_name}'...")
+            log_info(f"仓库地址：{url}")
+            log_info("正在 clone 远程仓库，请稍候...")
+            try:
+                pm.add_power_remote(entry, git_root)
+            except ValueError as e:
+                log_error(str(e))
+                raise click.Abort()
+            log_success(f"远程 power '{power_name}' clone 成功！")
+            log_info(f"安装路径：{install_path}")
+            try:
+                submodule_path = str(abs_install_path.relative_to(git_root))
+            except ValueError:
+                submodule_path = install_path
+            log_info("下一步提交 submodule：")
+            log_info(f"  git add .gitmodules {submodule_path}")
+            log_info(f"  git commit -m 'Add power {power_name}'")
+            # clone 完成后检查 driving.config.json
+            if config_json_path.exists():
+                log_success("driving.config.json 已就绪，power 配置完整 ✓")
+                return
+            # 没有 driving.config.json，fall through 到情况 3 提示
 
-        try:
-            pm.add_power_remote(entry, git_root)
-        except ValueError as e:
-            log_error(str(e))
-            raise click.Abort()
+        # 情况 2：目录存在但未注册 → 注册到 driving.power.json
+        elif not already_registered:
+            log_info(f"检测到本地目录 '{install_path}'，注册为 power '{power_name}'...")
+            try:
+                # 直接写入 driving.power.json，不校验 driving.config.json（后续情况3会提示）
+                if pm.exists():
+                    power_cfg = pm.load_power_config()
+                else:
+                    from driving_cli.models.power import PowerConfig
+                    power_cfg = PowerConfig(powers=[])
+                power_cfg.powers.append(entry)
+                pm.save_power_config(power_cfg)
+            except ValueError as e:
+                log_error(str(e))
+                raise click.Abort()
+            log_success(f"Power '{power_name}' 已注册到 driving.power.json")
+            if config_json_path.exists():
+                log_success("driving.config.json 已就绪，power 配置完整 ✓")
+                return
+            # 没有 driving.config.json，fall through 到情况 3 提示
 
-        log_success(f"远程 power '{power_name}' 安装成功！")
-        log_info(f"安装路径：{install_path}")
-        log_info("下一步：")
-        try:
-            from driving_cli.utils.git_helper import find_git_root as _fgr
-            _git_root = _fgr(project_root)
-            abs_path = project_root / install_path
-            submodule_path = str(abs_path.relative_to(_git_root))
-        except Exception:
-            submodule_path = install_path
-        log_info(f"  git add .gitmodules {submodule_path}")
-        log_info(f"  git commit -m 'Add power {power_name}'")
+        # 情况 3：已注册但无 driving.config.json → 提示用户运行 repo install
+        log_warning(f"Power '{power_name}' 已注册，但 '{install_path}/driving.config.json' 不存在")
+        log_info("请运行以下命令安装仓库并生成配置文件：")
+        log_info(f"  driving repo install --power {power_name}")
 
     elif power_path is not None:
         # ---- 本地模式 ----

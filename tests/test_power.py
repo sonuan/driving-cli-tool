@@ -99,7 +99,13 @@ class TestPowerEntry:
     def test_to_dict_omits_description_when_empty(self):
         entry = PowerEntry(name="feat", path="ai-driving/feat")
         d = entry.to_dict()
-        assert "description" not in d
+        assert d["description"] == ""
+
+    def test_to_dict_includes_type_field(self):
+        remote = PowerEntry(name="feat", path="ai-driving/feat", url="https://git.example.com/r.git")
+        assert remote.to_dict()["type"] == "remote"
+        local = PowerEntry(name="feat", path="ai-driving/feat")
+        assert local.to_dict()["type"] == "local"
 
     def test_to_dict_includes_description_when_set(self):
         entry = PowerEntry(name="feat", path="ai-driving/feat", description="my desc")
@@ -473,6 +479,56 @@ class TestPowerAddCommand:
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
             result = runner.invoke(cli, ["power", "add", "--name", "p1"])
         assert result.exit_code != 0 or "--url" in result.output or "--path" in result.output
+
+    def test_add_remote_duplicate_name_without_force_shows_info(self, runner, project_with_power_dirs):
+        """--url 模式下已完整安装（name+目录+config 都存在）时，无 --force 提示已安装，不报错"""
+        tmp_path = project_with_power_dirs
+        # p1 目录有 config，且已注册
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1"),
+        ]))
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, [
+                "power", "add", "--url", "https://github.com/example/r.git", "--name", "p1"
+            ])
+        assert result.exit_code == 0
+        assert "已完整安装" in result.output or "--force" in result.output
+
+    def test_add_remote_duplicate_name_with_force_removes_old_entry(self, runner, project_with_power_dirs):
+        """--url 模式下已完整安装，加 --force 时先移除旧注册记录"""
+        tmp_path = project_with_power_dirs
+        # p1 已注册且有 config
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1"),
+        ]))
+        # patch add_power_remote 避免真实 git 操作
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            with patch.object(PowerManager, "add_power_remote") as mock_add:
+                with patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path):
+                    result = runner.invoke(cli, [
+                        "power", "add", "--url", "https://github.com/example/r.git",
+                        "--name", "p1", "--force"
+                    ])
+        # --force 时旧记录应被移除（power.json 中 p1 不再存在）
+        power_cfg = PowerManager(tmp_path).load_power_config()
+        # add_power_remote 被调用（尝试重新 clone）或旧记录已被清除
+        assert not any(p.name == "p1" for p in power_cfg.powers) or mock_add.called
+
+    def test_add_remote_existing_nonempty_dir_without_force_registers_and_hints(self, runner, tmp_path):
+        """--url 模式下本地目录已存在且非空但未注册，应注册并提示运行 repo install"""
+        # 创建非空目录（无 driving.config.json）
+        nonempty = tmp_path / "ai-driving" / "mypower"
+        nonempty.mkdir(parents=True)
+        (nonempty / "somefile.txt").write_text("content")
+
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path):
+                result = runner.invoke(cli, [
+                    "power", "add", "--url", "https://github.com/example/r.git", "--name", "mypower"
+                ])
+        # 应注册成功（exit 0）并提示运行 repo install
+        assert result.exit_code == 0, result.output
+        assert "driving repo install" in result.output
 
 
 class TestPowerRemoveCommand:

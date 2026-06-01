@@ -269,12 +269,14 @@ class PowerManager:
     def add_power_remote(self, entry: PowerEntry, git_root: Path) -> None:
         """添加一个远程 power（git submodule clone），然后注册到 driving.power.json
 
+        调用前应已在命令层完成 name 重复检查和目录存在检查（--force 处理）。
+
         Args:
             entry: PowerEntry，url 必须有值
             git_root: 主项目 git 根目录（用于执行 submodule add）
 
         Raises:
-            ValueError: URL 无效、目录已存在、driving.config.json 不存在等
+            ValueError: URL 无效、driving.config.json 不存在等
         """
         import subprocess as _sp
 
@@ -287,7 +289,7 @@ class PowerManager:
             power_cfg = PowerConfig(powers=[])
 
         if any(p.name == entry.name for p in power_cfg.powers):
-            raise ValueError(f"Power '{entry.name}' 已存在")
+            raise ValueError(f"Power '{entry.name}' 已存在，使用 --force 覆盖")
 
         # 计算相对于 git 根目录的 submodule 路径
         abs_path = self._project_root / entry.path
@@ -296,7 +298,7 @@ class PowerManager:
         except ValueError:
             submodule_path = entry.path
 
-        # 清理残留工作目录
+        # 清理残留工作目录（--force 场景下目录可能非空）
         if abs_path.exists() and not abs_path.is_symlink():
             import shutil
             shutil.rmtree(abs_path)
@@ -321,13 +323,6 @@ class PowerManager:
 
         # 设置 ignore = all，避免主项目 git status 显示 power 内部变更
         self._set_submodule_ignore(git_root, submodule_path)
-
-        # 校验 driving.config.json 存在
-        config_path = abs_path / CONFIG_FILE_NAME
-        if not config_path.exists():
-            raise ValueError(
-                f"Power 仓库 '{entry.name}' 中不存在 driving.config.json，无法作为 power"
-            )
 
         power_cfg.powers.append(entry)
         self.save_power_config(power_cfg)

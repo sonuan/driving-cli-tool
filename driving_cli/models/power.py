@@ -27,14 +27,13 @@ class PowerEntry:
         return "remote" if self.url else "local"
 
     def to_dict(self) -> dict:
-        d = {
+        return {
             "name": self.name,
+            "type": self.type,
             "path": self.path,
             "url": self.url,
+            "description": self.description or "",
         }
-        if self.description:
-            d["description"] = self.description
-        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "PowerEntry":
@@ -46,6 +45,7 @@ class PowerEntry:
             path=str(data["path"]),
             url=data.get("url") or None,
             description=data.get("description") or None,
+            # type 字段由 url 推断，从文件读取时忽略（向后兼容）
         )
 
 

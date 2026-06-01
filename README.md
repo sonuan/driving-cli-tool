@@ -55,8 +55,10 @@ Power 模式允许将多个目录下的 `driving.config.json` 合并使用，解
 
 ```bash
 # 远程模式：将远程仓库作为 git submodule 安装并注册为 power
+# 幂等安装：根据本地状态自动判断执行路径
 driving power add --url https://git.xxx.com/config.git
 driving power add --url https://git.xxx.com/config.git --name feature
+driving power add --url https://git.xxx.com/config.git --force  # 强制重新安装
 
 # 本地模式：注册已存在的本地目录（须包含 driving.config.json）
 driving power add --name main --path ai-driving/my-local
@@ -76,9 +78,15 @@ driving power remove feature    # 移除一个 power 条目
 - 某个 power 的 `driving.config.json` 不存在时自动跳过该 power
 - 所有 power 均无有效配置时，降级读取项目根目录的 `driving.config.json`
 
+**`driving power add --url` 安装逻辑（幂等）：**
+1. 本地目录不存在 → clone + 注册
+2. 本地目录存在但未注册 → 直接注册到 `driving.power.json`
+3. 已注册但无 `driving.config.json` → 提示运行 `driving repo install --power <name>` 生成配置
+4. 已完整安装 → 提示已存在，加 `--force` 可重新安装
+
 **`driving load` 自动更新：** 每次执行 `driving load` 时，会先检查所有远程 power 是否有更新并自动拉取，再检查各 `driving.config.json` 里的 repos 更新。
 
-**典型用法：**
+
 ```bash
 # 1. 从远程安装 power（作为 submodule，跟随主项目 git）
 driving power add --url https://git.xxx.com/branch-config.git --name feature
