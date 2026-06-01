@@ -669,8 +669,9 @@ class TestReportToWebhook:
     """_report_to_webhook 单元测试
 
     覆盖场景：
-    - 正常上报：payload 字段完整，trigger 存在时包含在 payload 中
-    - trigger 缺省时 payload 不含 trigger 字段
+    - 正常上报：payload 字段完整，含 trigger_source / trigger_reason 顶层字段
+    - trigger 存在时 trigger_source / trigger_reason 正确展开到顶层
+    - trigger 缺省时 trigger_source / trigger_reason 为空字符串
     - event 参数正确传递（committed / merged）
     - 网络异常时静默失败，不抛出异常
     """
@@ -717,8 +718,11 @@ class TestReportToWebhook:
         assert p["operator"] == "张三"
         assert "at" in p
         assert captured["method"] == "POST"
+        # trigger 展开为顶层字段
+        assert "trigger_source" in p
+        assert "trigger_reason" in p
 
-    def test_trigger存在时包含在payload中(self, tmp_path):
+    def test_trigger存在时source和reason展开到顶层(self, tmp_path):
         from unittest.mock import patch
         from driving_cli.commands.refine import _report_to_webhook
 
@@ -737,10 +741,13 @@ class TestReportToWebhook:
                 self._make_meta(trigger=trigger),
             )
 
-        assert "trigger" in captured["payload"]
-        assert captured["payload"]["trigger"]["source"] == "gate"
+        p = captured["payload"]
+        assert p["trigger_source"] == "gate"
+        assert p["trigger_reason"] == "GATE-D1 返工 3 次，高频原因：页面类型判断有误"
+        # 不再有嵌套的 trigger 对象
+        assert "trigger" not in p
 
-    def test_trigger缺省时payload不含trigger字段(self, tmp_path):
+    def test_trigger缺省时source和reason为空字符串(self, tmp_path):
         from unittest.mock import patch
         from driving_cli.commands.refine import _report_to_webhook
 
@@ -758,7 +765,34 @@ class TestReportToWebhook:
                 self._make_meta(trigger=None),
             )
 
-        assert "trigger" not in captured["payload"]
+        p = captured["payload"]
+        assert p["trigger_source"] == ""
+        assert p["trigger_reason"] == ""
+        assert "trigger" not in p
+
+    def test_trigger部分字段缺失时缺省为空字符串(self, tmp_path):
+        from unittest.mock import patch
+        from driving_cli.commands.refine import _report_to_webhook
+
+        captured = {}
+
+        def fake_urlopen(req, timeout):
+            import json as j
+            captured["payload"] = j.loads(req.data.decode("utf-8"))
+
+        # 只有 source，没有 reason
+        trigger = {"source": "self-discover"}
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            _report_to_webhook(
+                "https://example.com/webhook",
+                "driving-base",
+                tmp_path / "refine.md",
+                self._make_meta(trigger=trigger),
+            )
+
+        p = captured["payload"]
+        assert p["trigger_source"] == "self-discover"
+        assert p["trigger_reason"] == ""
 
     def test_event参数正确传递为merged(self, tmp_path):
         from unittest.mock import patch
@@ -1094,6 +1128,63 @@ class TestRefineMerge:
                             input="y\ny\n",  # 确认合并 + 确认跳过正式文件
                         )
         mock_report.assert_not_called()
+
+    def test_trigger_source和reason传入时覆盖meta中的trigger(self, tmp_path):
+        """--trigger-source / --trigger-reason 传入时，webhook 上报使用合并操作的触发信息"""
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        reported_metas = []
+
+        def fake_report(webhook_url, repo_name, file_path, meta, event="refine.committed"):
+            reported_metas.append(dict(meta))
+
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path, refine_webhook="https://example.com/hook")
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    with patch("driving_cli.commands.refine._report_to_webhook", side_effect=fake_report):
+                        result = runner.invoke(
+                            cli,
+                            ["refine", "merge", "driving-base",
+                             "--file", "refines/2026-06-01-rule-gate-spec.md",
+                             "--trigger-source", "manual",
+                             "--trigger-reason", "用户主动合并"],
+                            input="y\ny\ny\n",
+                        )
+
+        assert result.exit_code == 0
+        assert len(reported_metas) == 1
+        trigger = reported_metas[0]["trigger"]
+        assert trigger["source"] == "manual"
+        assert trigger["reason"] == "用户主动合并"
+
+    def test_trigger_source和reason未传时沿用meta中的trigger(self, tmp_path):
+        """未传 --trigger-source / --trigger-reason 时，webhook 上报沿用 refine 文件的 trigger"""
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        reported_metas = []
+
+        def fake_report(webhook_url, repo_name, file_path, meta, event="refine.committed"):
+            reported_metas.append(dict(meta))
+
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path, refine_webhook="https://example.com/hook")
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    with patch("driving_cli.commands.refine._report_to_webhook", side_effect=fake_report):
+                        result = runner.invoke(
+                            cli,
+                            ["refine", "merge", "driving-base",
+                             "--file", "refines/2026-06-01-rule-gate-spec.md"],
+                            input="y\ny\ny\n",
+                        )
+
+        assert result.exit_code == 0
+        assert len(reported_metas) == 1
+        # 未传参数时 trigger 沿用 meta 原始值（测试 fixture 中 trigger 为 None）
+        assert reported_metas[0].get("trigger") is None
 
     def test_local仓库跳过git操作(self, tmp_path):
         self._setup(tmp_path, repo_type="local")

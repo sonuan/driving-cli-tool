@@ -151,6 +151,8 @@ def _report_to_webhook(
     import urllib.request
     from datetime import datetime, timezone
 
+    trigger = meta.get("trigger") or {}
+
     payload: Dict = {
         "event": event,
         "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -163,10 +165,9 @@ def _report_to_webhook(
         "description": meta.get("description", ""),
         "operator": meta.get("operator", ""),
         "status": meta.get("status", "pending"),
+        "trigger_source": trigger.get("source", ""),
+        "trigger_reason": trigger.get("reason", ""),
     }
-    # trigger 字段缺省时省略，不写入 payload
-    if meta.get("trigger"):
-        payload["trigger"] = meta["trigger"]
 
     try:
         data = json_module.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -538,17 +539,24 @@ def _trigger_refine_webhook(
               help="实际被修改的正式文件路径（相对于仓库根目录），可多次指定。未传时降级使用 target_file")
 @click.option("--operator", "operator", default="",
               help="操作者名称，写入 REFINE_LOG 记录，默认取 refine 文件的 operator 字段")
+@click.option("--trigger-source", "trigger_source", default="",
+              help="本次合并操作的触发来源（gate / self / manual），上报 webhook 时使用")
+@click.option("--trigger-reason", "trigger_reason", default="",
+              help="本次合并操作的触发原因，上报 webhook 时使用")
 @click.option("--no-push", is_flag=True, default=False, help="只 commit，不执行 push")
-def refine_merge(repo_name: str, file_paths: tuple, changed_files: tuple, operator: str, no_push: bool):
+def refine_merge(repo_name: str, file_paths: tuple, changed_files: tuple, operator: str,
+                 trigger_source: str, trigger_reason: str, no_push: bool):
     """完成 refine 合并收尾：追加 REFINE_LOG → 上报 webhook → 删除 refine 文件 → commit/push。
 
     在 AI 将变更内容写入正式文件后调用本命令，完成合并流程的剩余步骤。
     使用 --changed-file 指定实际修改的文件（可多个），未指定时降级使用 refine 的 target_file。
+    使用 --trigger-source / --trigger-reason 指定本次合并操作的触发来源和原因，上报 webhook 时使用。
 
     示例：
         driving refine merge driving-base --file refines/2026-06-01-rule-gate-spec-trigger-field.md
         driving refine merge driving-base --file refines/2026-06-01-rule-a.md --file refines/2026-06-01-rule-b.md
         driving refine merge driving-base --file refines/2026-06-01-rule-a.md --changed-file skills/dev-design/references/dev-design.md
+        driving refine merge driving-base --file refines/2026-06-01-rule-a.md --trigger-source manual --trigger-reason "用户主动合并"
         driving refine merge driving-base --file refines/2026-06-01-rule-a.md --no-push
     """
     import datetime as dt
@@ -618,7 +626,14 @@ def refine_merge(repo_name: str, file_paths: tuple, changed_files: tuple, operat
         webhook_url = config_manager.load().refine_webhook
         if webhook_url:
             for item in items:
-                _report_to_webhook(webhook_url, repo_name, item["f_path"], item["meta"], "refine.merged")
+                # 用本次合并操作的触发信息覆盖提案生成时的 trigger
+                merge_meta = dict(item["meta"])
+                if trigger_source or trigger_reason:
+                    merge_meta["trigger"] = {
+                        "source": trigger_source,
+                        "reason": trigger_reason,
+                    }
+                _report_to_webhook(webhook_url, repo_name, item["f_path"], merge_meta, "refine.merged")
 
         # Step 3: 删除 refine 文件
         for item in items:

@@ -274,6 +274,13 @@ driving refine commit <repo>                 # 提交 pending refine 到 git（a
 driving refine commit <repo> --no-push       # 只 commit，不 push（离线场景）
 driving refine commit <repo> --file <path>   # 提交指定文件（相对于仓库根目录的路径，必填，可多次指定）
 
+# 合并收尾：追加 REFINE_LOG → 上报 webhook → 删除 refine 文件 → commit/push
+driving refine merge <repo> --file <path>                          # 完成 refine 合并收尾（--file 必填，可多次指定）
+driving refine merge <repo> --file <path> --changed-file <path>    # 指定实际修改的正式文件（可多次指定）
+driving refine merge <repo> --file <path> --trigger-source manual  # 指定本次合并操作的触发来源（gate/self/manual），用于 webhook 上报
+driving refine merge <repo> --file <path> --trigger-reason "..."   # 指定本次合并操作的触发原因，用于 webhook 上报
+driving refine merge <repo> --file <path> --no-push                # 只 commit，不 push
+
 # REFINE_LOG.md 变更记录管理
 driving refine log append <repo> "<entry>"   # 追加一条已生效的变更记录（文件不存在时自动创建）
 driving refine log get <repo>                # 读取当前变更记录内容
