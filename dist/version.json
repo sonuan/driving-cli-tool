@@ -1,10 +1,12 @@
 {
-  "version": "1.2.2",
-  "build_date": "2026-06-01T19:27:18+08:00",
+  "version": "1.2.3",
+  "build_date": "2026-06-01T20:04:58+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
+      "v1.2.3",
+      "feat: 优化 driving power add 的逻辑判断，增强体验",
       "v1.2.2",
       "feat: 新增driving power命令组，为了方便管理多分支上的配置，可以通过git下发driving.config.json，达到不需要合并代码的效果",
       "v1.2.1",
@@ -12,8 +14,6 @@
       "v1.2.0",
       "feat：agent export导出kiro时使用硬链接",
       "v1.1.9",
-      "feat：新增agent触发上报，用于统计agent的启动率",
-      "feat：优化--help不换行的问题",
-      "v1.1.8"
+      "feat：新增agent触发上报，用于统计agent的启动率"
   ]
 }
