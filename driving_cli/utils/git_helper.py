@@ -1,7 +1,7 @@
 """Git 辅助模块 - 使用 GitPython 封装 Git 操作"""
 
 from pathlib import Path
-from typing import Union
+from typing import Optional, Tuple, Union
 
 import git
 
@@ -114,3 +114,59 @@ def is_local_framework(framework: dict) -> bool:
         and framework.get("url") == "__local__"
         and framework.get("branch") == "__local__"
     )
+
+
+def push_with_upstream(repo: git.Repo) -> Tuple[bool, str]:
+    """执行 git push，自动处理无 upstream 分支的情况。
+
+    当当前分支在远端不存在（no upstream branch）时，自动加 --set-upstream
+    推送并建立追踪关系，等价于 `git push -u origin <branch>`。
+
+    Args:
+        repo: GitPython Repo 对象，必须已配置 origin remote
+
+    Returns:
+        Tuple[bool, str]: (是否成功, 错误信息或空字符串)
+    """
+    if repo.head.is_detached:
+        return False, "当前处于 detached HEAD 状态，无法推送"
+
+    branch = repo.active_branch.name
+
+    # 检查当前分支是否已有 upstream tracking
+    has_upstream = False
+    try:
+        tracking = repo.active_branch.tracking_branch()
+        has_upstream = tracking is not None
+    except Exception:
+        has_upstream = False
+
+    try:
+        if has_upstream:
+            # 已有 upstream，直接 push
+            push_infos = repo.remotes.origin.push()
+        else:
+            # 无 upstream，推送并建立追踪关系（git push -u origin <branch>）
+            push_infos = repo.remotes.origin.push(
+                refspec=f"{branch}:{branch}",
+                set_upstream=True,
+            )
+
+        # GitPython 在某些错误下不抛异常，需检查 flags
+        errors = []
+        for info in push_infos:
+            if info.flags & info.ERROR:
+                errors.append(info.summary.strip())
+        if errors:
+            return False, "; ".join(errors)
+
+        return True, ""
+
+    except git.exc.GitCommandError as e:
+        err = str(e)
+        if "rejected" in err:
+            return False, "存在冲突，请先执行 pull"
+        if "no upstream" in err or "has no upstream" in err:
+            # 理论上已被上面的 set_upstream 处理，保底兜底
+            return False, f"分支 '{branch}' 无远端追踪分支，且自动设置 upstream 失败: {e}"
+        return False, str(e)

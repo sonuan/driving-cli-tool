@@ -781,3 +781,77 @@ class TestRepoLoad:
             result = runner.invoke(repo_group, ["load"])
         assert result.exit_code == 0
         assert json.loads(result.output) == []
+
+
+# ==================== _git_push（使用 push_with_upstream）测试 ====================
+
+from driving_cli.commands.repo import _git_push
+
+
+class TestGitPush:
+    """_git_push 函数测试
+
+    覆盖场景：
+    - 仓库目录不存在时报错
+    - 未配置远程仓库时报错
+    - push_with_upstream 成功时输出成功
+    - push_with_upstream 失败时输出错误
+    """
+
+    def _make_repo_cfg(self, name="main", path="ai-driving/main"):
+        return RepoConfig(name=name, type="remote",
+                          url="https://github.com/org/repo.git", path=path)
+
+    def test_repo_dir_not_exist(self, tmp_project, capsys):
+        """仓库目录不存在时报错"""
+        cfg = self._make_repo_cfg(path="ai-driving/nonexistent")
+        _git_push(cfg, tmp_project)
+        captured = capsys.readouterr()
+        assert "不存在" in captured.out or "不存在" in captured.err
+
+    def test_no_remotes(self, tmp_project, capsys):
+        """未配置远程仓库时报错"""
+        repo_dir = tmp_project / "ai-driving" / "main"
+        repo_dir.mkdir(parents=True)
+        cfg = self._make_repo_cfg()
+
+        mock_repo = MagicMock()
+        mock_repo.remotes = []
+
+        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo):
+            _git_push(cfg, tmp_project)
+
+        captured = capsys.readouterr()
+        assert "未配置远程仓库" in captured.out or "未配置远程仓库" in captured.err
+
+    def test_push_success(self, tmp_project, capsys):
+        """push_with_upstream 成功时输出成功提示"""
+        repo_dir = tmp_project / "ai-driving" / "main"
+        repo_dir.mkdir(parents=True)
+        cfg = self._make_repo_cfg()
+
+        mock_repo = MagicMock()
+
+        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo), \
+             patch("driving_cli.commands.repo.push_with_upstream", return_value=(True, "")):
+            _git_push(cfg, tmp_project)
+
+        captured = capsys.readouterr()
+        assert "推送成功" in captured.out or "推送成功" in captured.err
+
+    def test_push_failure(self, tmp_project, capsys):
+        """push_with_upstream 失败时输出错误提示"""
+        repo_dir = tmp_project / "ai-driving" / "main"
+        repo_dir.mkdir(parents=True)
+        cfg = self._make_repo_cfg()
+
+        mock_repo = MagicMock()
+
+        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo), \
+             patch("driving_cli.commands.repo.push_with_upstream",
+                   return_value=(False, "存在冲突，请先执行 pull")):
+            _git_push(cfg, tmp_project)
+
+        captured = capsys.readouterr()
+        assert "推送失败" in captured.out or "推送失败" in captured.err
+        assert "冲突" in captured.out or "冲突" in captured.err

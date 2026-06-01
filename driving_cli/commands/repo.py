@@ -12,7 +12,7 @@ import git
 
 from driving_cli.models.config import RepoConfig
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
-from driving_cli.utils.git_helper import find_git_root
+from driving_cli.utils.git_helper import find_git_root, push_with_upstream
 from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
 from driving_cli.utils.validators import (
     infer_repo_name_from_url,
@@ -799,7 +799,7 @@ def push(repo_name: Optional[str]):
 
 
 def _git_push(repo_cfg: RepoConfig, project_root: Path):
-    """对指定远程仓库执行 git push"""
+    """对指定远程仓库执行 git push，自动处理无 upstream 分支的情况"""
     repo_dir = project_root / repo_cfg.path
     if not repo_dir.exists():
         log_error(f"仓库 '{repo_cfg.name}' 目录不存在：{repo_cfg.path}")
@@ -811,13 +811,11 @@ def _git_push(repo_cfg: RepoConfig, project_root: Path):
         if not repo.remotes:
             log_error(f"仓库 '{repo_cfg.name}' 未配置远程仓库")
             return
-        repo.remotes.origin.push()
-        log_success(f"仓库 '{repo_cfg.name}' 推送成功")
-    except git.exc.GitCommandError as e:
-        if "rejected" in str(e):
-            log_error(f"仓库 '{repo_cfg.name}' 推送失败：存在冲突，请先执行 pull")
+        ok, err = push_with_upstream(repo)
+        if ok:
+            log_success(f"仓库 '{repo_cfg.name}' 推送成功")
         else:
-            log_error(f"仓库 '{repo_cfg.name}' 推送失败: {e}")
+            log_error(f"仓库 '{repo_cfg.name}' 推送失败：{err}")
     except Exception as e:
         log_error(f"仓库 '{repo_cfg.name}' 推送失败: {e}")
 

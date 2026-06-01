@@ -13,6 +13,7 @@ import click
 import git
 
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
+from driving_cli.utils.git_helper import push_with_upstream
 from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
 
 VALID_TYPES = ("skill", "rule", "agent", "framework")
@@ -440,15 +441,16 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
 
         try:
             log_info(f"正在推送仓库 '{repo_name}'...")
-            repo.remotes.origin.push()
-            log_success(f"仓库 '{repo_name}' 推送成功")
-            # push 成功后上报 webhook
-            _trigger_refine_webhook(config_manager, repo_name, repo_dir, valid_files, "refine.committed")
-        except git.exc.GitCommandError as e:
-            if "rejected" in str(e):
-                log_error(f"推送失败：存在冲突，请先执行 'driving repo pull {repo_name}'")
+            ok, err = push_with_upstream(repo)
+            if ok:
+                log_success(f"仓库 '{repo_name}' 推送成功")
+                # push 成功后上报 webhook
+                _trigger_refine_webhook(config_manager, repo_name, repo_dir, valid_files, "refine.committed")
             else:
-                log_error(f"推送失败: {e}")
+                log_error(f"推送失败：{err}")
+                raise click.Abort()
+        except git.exc.GitCommandError as e:
+            log_error(f"推送失败: {e}")
             raise click.Abort()
 
     except click.Abort:
@@ -708,13 +710,14 @@ def refine_merge(repo_name: str, file_paths: tuple, changed_files: tuple, operat
 
         try:
             log_info(f"正在推送仓库 '{repo_name}'...")
-            repo.remotes.origin.push()
-            log_success(f"仓库 '{repo_name}' 推送成功")
-        except git.exc.GitCommandError as e:
-            if "rejected" in str(e):
-                log_error(f"推送失败：存在冲突，请先执行 'driving repo pull {repo_name}'")
+            ok, err = push_with_upstream(repo)
+            if ok:
+                log_success(f"仓库 '{repo_name}' 推送成功")
             else:
-                log_error(f"推送失败: {e}")
+                log_error(f"推送失败：{err}")
+                raise click.Abort()
+        except git.exc.GitCommandError as e:
+            log_error(f"推送失败: {e}")
             raise click.Abort()
 
     except click.Abort:
