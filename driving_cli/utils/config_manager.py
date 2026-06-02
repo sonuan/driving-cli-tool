@@ -74,9 +74,9 @@ def _merge_configs(configs: List[DrivingConfig], power_names: List[str]) -> Driv
     for field in _CONFLICT_CHECK_FIELDS:
         values = [(_get_field(cfg, field), name) for cfg, name in zip(configs, power_names)]
         # 过滤空值（空字符串 / 默认值不参与冲突检测）
-        non_default = [(v, n) for v, n in values if v not in ("", 0, 100)]
+        non_default = [(v, n) for v, n in values if v not in ("", None)]
         if not non_default:
-            # 全部为空/默认，取第一个 config 的值
+            # 全部为空/None，取第一个 config 的值
             result_fields[field] = _get_field(configs[0], field)
             continue
         unique_vals = {v for v, _ in non_default}
@@ -94,7 +94,7 @@ def _merge_configs(configs: List[DrivingConfig], power_names: List[str]) -> Driv
         default_commit_message=result_fields["default_commit_message"] or DEFAULT_COMMIT_MESSAGE,
         update_version_url=result_fields["update_version_url"] or DEFAULT_UPDATE_VERSION_URL,
         user_prompt=result_fields["user_prompt"] or "",
-        check_sample_rate=result_fields["check_sample_rate"] if result_fields["check_sample_rate"] != 0 else 100,
+        check_sample_rate=result_fields["check_sample_rate"],
         gate_webhook=result_fields["gate_webhook"] or "",
         agent_webhook=result_fields["agent_webhook"] or "",
         refine_webhook=result_fields["refine_webhook"] or "",

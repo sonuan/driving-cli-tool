@@ -152,6 +152,68 @@ class TestCollectUpdatable:
         assert len(warnings) == 1
 
 
+# ==================== 采样率兜底逻辑测试 ====================
+
+class TestCollectUpdatableSampleRate:
+    """采样率相关测试（本次 bugfix 覆盖）"""
+
+    def _make_config_with_rate(self, tmp_path: Path, global_rate=None, repo_rate=None):
+        config = {
+            "version": "2",
+            "repos": [
+                {"name": "driving", "type": "remote", "url": "https://github.com/org/driving",
+                 "path": "ai-driving/driving"},
+            ],
+            "default_commit_message": "update",
+            "update_version_url": "",
+        }
+        if global_rate is not None:
+            config["check_sample_rate"] = global_rate
+        if repo_rate is not None:
+            config["repos"][0]["check_sample_rate"] = repo_rate
+        (tmp_path / "driving.config.json").write_text(
+            json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        # 初始化仓库目录
+        repo_dir = tmp_path / "ai-driving" / "driving"
+        repo_dir.mkdir(parents=True)
+        (repo_dir / ".git").mkdir()
+
+    def test_全局rate为None时兜底为100(self, tmp_path):
+        """全局 check_sample_rate 未配置（None）时应兜底为 100，仓库参与检测"""
+        self._make_config_with_rate(tmp_path, global_rate=None)
+        with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.check._compare_local_remote", return_value=False):
+            _, updatable, warnings, auto_pull, sample_log = _collect_updatable(fetch=False)
+        # 采样率兜底为100，仓库应被命中（rate=100 始终 hit）
+        assert len(sample_log) == 1
+        name, rate, hit, _ = sample_log[0]
+        assert rate == 100
+        assert hit is True
+
+    def test_全局rate为0时仓库被跳过(self, tmp_path):
+        """全局 check_sample_rate=0 时仓库应被跳过"""
+        self._make_config_with_rate(tmp_path, global_rate=0)
+        with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path):
+            _, updatable, warnings, auto_pull, sample_log = _collect_updatable(fetch=False)
+        assert len(sample_log) == 1
+        name, rate, hit, _ = sample_log[0]
+        assert rate == 0
+        assert hit is False
+        assert updatable == []
+
+    def test_仓库级rate为0覆盖全局rate(self, tmp_path):
+        """仓库级 check_sample_rate=0 应覆盖全局 rate=100"""
+        self._make_config_with_rate(tmp_path, global_rate=100, repo_rate=0)
+        with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path):
+            _, updatable, warnings, auto_pull, sample_log = _collect_updatable(fetch=False)
+        assert len(sample_log) == 1
+        name, rate, hit, _ = sample_log[0]
+        assert rate == 0
+        assert hit is False
+        assert updatable == []
+
+
 # ==================== check --json 命令 ====================
 
 class TestCheckJsonCommand:

@@ -460,3 +460,49 @@ class TestConfigManagerPaths:
         assert len(dirs) == 2
         names = {d[0] for d in dirs}
         assert names == {"repo1", "repo2"}
+
+
+# ==================== _merge_configs check_sample_rate 测试 ====================
+
+from driving_cli.utils.config_manager import _merge_configs
+
+
+class TestMergeConfigsCheckSampleRate:
+    """_merge_configs 对 check_sample_rate 的合并行为测试（本次 bugfix 覆盖）"""
+
+    def _cfg(self, rate):
+        """创建只设置 check_sample_rate 的 DrivingConfig"""
+        return DrivingConfig(
+            version="2", repos=[], default_commit_message="msg",
+            update_version_url="", check_sample_rate=rate,
+        )
+
+    def test_zero在合并时不被过滤(self):
+        """check_sample_rate=0 不应被当作默认值过滤，应保留"""
+        merged = _merge_configs([self._cfg(0), self._cfg(None)], ["a", "b"])
+        assert merged.check_sample_rate == 0
+
+    def test_100在合并时不被替换(self):
+        """check_sample_rate=100 不应被替换，应保留"""
+        merged = _merge_configs([self._cfg(100), self._cfg(None)], ["a", "b"])
+        assert merged.check_sample_rate == 100
+
+    def test_两个none合并后结果为none(self):
+        """两个 None 合并后结果应为 None"""
+        merged = _merge_configs([self._cfg(None), self._cfg(None)], ["a", "b"])
+        assert merged.check_sample_rate is None
+
+    def test_minus1在合并时正确保留(self):
+        """check_sample_rate=-1（auto_pull）合并后应保留"""
+        merged = _merge_configs([self._cfg(-1), self._cfg(None)], ["a", "b"])
+        assert merged.check_sample_rate == -1
+
+    def test_相同非None值不报冲突(self):
+        """两个 power 均设置相同的 check_sample_rate 应不报冲突"""
+        merged = _merge_configs([self._cfg(50), self._cfg(50)], ["a", "b"])
+        assert merged.check_sample_rate == 50
+
+    def test_不同非None值报冲突(self):
+        """两个 power 设置不同的 check_sample_rate 应抛出 ValueError"""
+        with pytest.raises(ValueError, match="配置冲突"):
+            _merge_configs([self._cfg(0), self._cfg(50)], ["a", "b"])

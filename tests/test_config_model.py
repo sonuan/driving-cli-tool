@@ -283,6 +283,70 @@ def driving_config_st(draw) -> DrivingConfig:
     )
 
 
+class TestDrivingConfigCheckSampleRate:
+    """DrivingConfig.check_sample_rate 字段行为测试（本次 bugfix 覆盖）"""
+
+    def test_check_sample_rate_zero_roundtrip(self):
+        """check_sample_rate=0（永不检测）序列化往返后应保持为 0"""
+        cfg = DrivingConfig(
+            version="2", repos=[], default_commit_message="msg",
+            update_version_url="", check_sample_rate=0,
+        )
+        restored = DrivingConfig.from_dict(cfg.to_dict())
+        assert restored.check_sample_rate == 0
+
+    def test_check_sample_rate_100_roundtrip(self):
+        """check_sample_rate=100（全量检测）序列化往返后应保持为 100"""
+        cfg = DrivingConfig(
+            version="2", repos=[], default_commit_message="msg",
+            update_version_url="", check_sample_rate=100,
+        )
+        restored = DrivingConfig.from_dict(cfg.to_dict())
+        assert restored.check_sample_rate == 100
+
+    def test_check_sample_rate_none_when_not_in_json(self):
+        """JSON 中未包含 check_sample_rate 时，应反序列化为 None"""
+        cfg = DrivingConfig.from_dict({
+            "version": "2", "repos": [],
+            "default_commit_message": "msg", "update_version_url": "",
+        })
+        assert cfg.check_sample_rate is None
+
+    def test_check_sample_rate_zero_not_in_to_dict_for_default_none(self):
+        """check_sample_rate=None 时，to_dict() 不应包含该字段"""
+        cfg = DrivingConfig(
+            version="2", repos=[], default_commit_message="msg",
+            update_version_url="", check_sample_rate=None,
+        )
+        assert "check_sample_rate" not in cfg.to_dict()
+
+    def test_check_sample_rate_zero_in_to_dict(self):
+        """check_sample_rate=0 时，to_dict() 应包含该字段"""
+        cfg = DrivingConfig(
+            version="2", repos=[], default_commit_message="msg",
+            update_version_url="", check_sample_rate=0,
+        )
+        assert cfg.to_dict()["check_sample_rate"] == 0
+
+    def test_check_sample_rate_50_roundtrip(self):
+        """check_sample_rate=50 序列化往返后应保持为 50"""
+        cfg = DrivingConfig(
+            version="2", repos=[], default_commit_message="msg",
+            update_version_url="", check_sample_rate=50,
+        )
+        restored = DrivingConfig.from_dict(cfg.to_dict())
+        assert restored.check_sample_rate == 50
+
+    def test_check_sample_rate_minus1_roundtrip(self):
+        """check_sample_rate=-1（auto_pull）序列化往返后应保持为 -1"""
+        cfg = DrivingConfig(
+            version="2", repos=[], default_commit_message="msg",
+            update_version_url="", check_sample_rate=-1,
+        )
+        restored = DrivingConfig.from_dict(cfg.to_dict())
+        assert restored.check_sample_rate == -1
+
+
 class TestPropertySerializationRoundtrip:
     """Property 1：配置序列化往返一致性属性测试"""
 

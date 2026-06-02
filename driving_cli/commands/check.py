@@ -98,7 +98,7 @@ def _collect_updatable(fetch: bool = True):
     if not fetch:
         sampled = []
         for repo in remote_repos:
-            rate = repo.check_sample_rate if repo.check_sample_rate is not None else config.check_sample_rate
+            rate = repo.check_sample_rate if repo.check_sample_rate is not None else (config.check_sample_rate if config.check_sample_rate is not None else 100)
             if rate == 0:
                 sample_log.append((repo.name, 0, False, None))
                 continue  # 永不检测
