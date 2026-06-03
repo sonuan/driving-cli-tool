@@ -1,19 +1,19 @@
 {
-  "version": "1.2.5",
-  "build_date": "2026-06-01T21:18:12+08:00",
+  "version": "1.2.6",
+  "build_date": "2026-06-03T15:08:28+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
+      "v1.2.6",
+      "feat：gate 门禁自动化检测支持 length() 函数",
+      "feat：feature modules命令，调整无论 tags 是否包含 features，都把所有仓库的 features 目录追加进去（不再区分，但有 modules 的仍展开 modules）",
+      "feat：新增feature modules命令，用于罗列所有feature业务模块路径；repo install 新增--tag、--desc、--module等参数；feature list 修改为遍历所有modules",
+      "feat：优化check_sample_rate 采样率合并出现为0的问题，导致不会自动更新问题",
       "v1.2.5",
       "feat：优化refine webhook的at和actor字段",
       "feat：refine merge 支持触发来源和原因的传入，不是通过提案文件的tigger",
       "v1.2.4",
-      "feat：优化当前分支没有track时，无法push问题",
-      "v1.2.3",
-      "feat: 优化 driving power add 的逻辑判断，增强体验",
-      "v1.2.2",
-      "feat: 新增driving power命令组，为了方便管理多分支上的配置，可以通过git下发driving.config.json，达到不需要合并代码的效果",
-      "v1.2.1"
+      "feat：优化当前分支没有track时，无法push问题"
   ]
 }
