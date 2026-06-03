@@ -36,7 +36,11 @@ driving load --debug                 # 同上，同时输出调试日志
 
 ```bash
 driving repo install --url <url>              # 安装远程仓库（Git submodule）
+driving repo install --url <url> --tag base --tag features  # 安装时指定标签（可多次指定）
+driving repo install --url <url> --desc "描述"              # 安装时指定描述（--description 的简写）
+driving repo install --url <url> --module "order:订单模块" --module "pay:支付模块"  # 安装时指定业务模块
 driving repo install --local <path>           # 安装本地仓库（软链接）
+driving repo install --local --name <name> --tag features --module "chat:聊天"  # 本地仓库 + 标签 + 模块
 driving repo install --url <url> --power <power-name>  # Power 模式下指定写入哪个 power 的配置
 driving repo uninstall <name>                 # 卸载仓库
 driving repo list                             # 查看已安装仓库列表
@@ -46,6 +50,11 @@ driving repo commit <name> <message>          # 提交修改
 driving repo push <name>                      # 推送到远程
 driving repo checkout <name> <branch>         # 切换仓库分支
 ```
+
+`repo install` 新增参数说明：
+- `--tag <tag>`：新增仓库标签，可多次指定，如 `--tag base --tag features`
+- `--desc <desc>`：仓库描述，`--description` 的简写
+- `--module <name:description>`：新增业务模块（格式 `name:description`），可多次指定
 
 ## power — Power 配置管理
 
@@ -221,11 +230,19 @@ driving gate pass <gate-id> --path <dir> --note "说明"  # 带说明手动通�
 ## feature — 需求功能管理
 
 ```bash
-driving feature list                          # 列出所有 features
+driving feature modules                       # 列出所有 features 仓库的业务模块（JSON）
+driving feature list                          # 列出所有 features（从 modules 聚合路径遍历）
 driving feature list --repo <name>            # 只扫描指定仓库
 driving feature list --keywords game,list     # 关键词过滤（OR 关系）
 driving feature list --detail                 # 输出完整字段
 ```
+
+`feature modules` 输出规则：
+- 遍历所有 `tags` 包含 `"features"` 的仓库
+- 仓库 `modules` 非空：每个 module 输出 `name`、`description`、`path`（`{repo.path}/{module.name}`）
+- 仓库 `modules` 为空：回退输出仓库自身，`path` 为 `{repo.path}/features`
+
+`feature list` 从 `feature modules` 聚合的路径遍历，扫描各模块目录下的 feature 子目录。
 
 ## agent — Agent 管理
 
@@ -374,7 +391,11 @@ trigger: manual                 # Windsurf 所需
       "name": "f-message",
       "type": "local",
       "path": "ai-driving/f-message",
-      "tags": []
+      "tags": ["features"],
+      "modules": [
+        {"name": "chat", "description": "聊天模块"},
+        {"name": "live", "description": "直播模块"}
+      ]
     }
   ],
   "default_commit_message": "update by driving",
@@ -392,6 +413,8 @@ trigger: manual                 # Windsurf 所需
   - `-1`：始终检测，检测到更新时自动执行 `repo pull`（静默，不打扰用户）
   
 - `tags` 含 `"base"` 的仓库在无关键词时默认加载；传入关键词时忽略 tags，repo.name 精确匹配（不区分大小写）或 name/description 模糊匹配（子串包含即命中）。
+
+- `modules`：业务模块列表，每项包含 `name` 和 `description`。`tags` 含 `"features"` 的仓库设置 modules 后，`driving feature modules` 会展开每个 module，`driving feature list` 从各 module 目录扫描需求。
 
 - `skills` / `rules` / `agents` 均支持白名单（`enabled` 非空）和黑名单（`disabled` 非空）两种模式。
 

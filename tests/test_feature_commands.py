@@ -475,6 +475,7 @@ class TestFeatureListCommand:
         result = runner.invoke(cli, ["feature", "--help"])
         assert result.exit_code == 0
         assert "list" in result.output
+        assert "modules" in result.output
 
     def test_list_多关键词OR关系(self, runner, project_with_features):
         with patch("driving_cli.commands.feature.find_project_root", return_value=project_with_features):
@@ -482,6 +483,163 @@ class TestFeatureListCommand:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert len(data) == 2
+
+
+# ==================== driving feature modules 集成测试 ====================
+
+
+def _make_config_with_tags(tmp_path: Path, repos: list) -> None:
+    config = {
+        "version": "2",
+        "repos": repos,
+        "default_commit_message": "update",
+        "update_version_url": "",
+    }
+    (tmp_path / "driving.config.json").write_text(
+        json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+class TestFeatureModulesCommand:
+    def test_modules_empty_when_no_features_repos(self, runner, tmp_path):
+        """没有 tags=features 的仓库时，输出空数组"""
+        _make_config_with_tags(tmp_path, [
+            {"name": "base-repo", "type": "local", "path": "ai-driving/base-repo",
+             "local_path": None, "tags": ["base"], "modules": []},
+        ])
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["feature", "modules"])
+        assert result.exit_code == 0
+        assert json.loads(result.output) == []
+
+    def test_modules_returns_repo_modules_when_set(self, runner, tmp_path):
+        """仓库有 modules 时，返回每个 module 的 name/description/path"""
+        _make_config_with_tags(tmp_path, [
+            {
+                "name": "feature-repo", "type": "local", "path": "ai-driving/feature-repo",
+                "local_path": None, "tags": ["features"],
+                "modules": [
+                    {"name": "order", "description": "订单模块"},
+                    {"name": "pay", "description": "支付模块"},
+                ],
+            },
+        ])
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["feature", "modules"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 2
+        names = {item["name"] for item in data}
+        assert names == {"order", "pay"}
+        paths = {item["path"] for item in data}
+        assert "ai-driving/feature-repo/order" in paths
+        assert "ai-driving/feature-repo/pay" in paths
+
+    def test_modules_path_format_is_repo_path_slash_module_name(self, runner, tmp_path):
+        """modules 的 path 格式为 {repo.path}/{module.name}"""
+        _make_config_with_tags(tmp_path, [
+            {
+                "name": "my-repo", "type": "local", "path": "ai-driving/my-repo",
+                "local_path": None, "tags": ["features"],
+                "modules": [{"name": "chat", "description": "聊天"}],
+            },
+        ])
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["feature", "modules"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data[0]["path"] == "ai-driving/my-repo/chat"
+
+    def test_modules_fallback_to_features_dir_when_no_modules(self, runner, tmp_path):
+        """仓库 modules 为空时，回退返回 {repo.path}/features 路径"""
+        _make_config_with_tags(tmp_path, [
+            {
+                "name": "no-modules-repo", "type": "local", "path": "ai-driving/no-modules-repo",
+                "local_path": None, "tags": ["features"],
+                "modules": [],
+            },
+        ])
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["feature", "modules"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["name"] == "no-modules-repo"
+        assert data[0]["path"] == "ai-driving/no-modules-repo/features"
+
+    def test_modules_merges_multiple_repos(self, runner, tmp_path):
+        """多个 features 仓库的 modules 合并输出"""
+        _make_config_with_tags(tmp_path, [
+            {
+                "name": "repo-a", "type": "local", "path": "ai-driving/repo-a",
+                "local_path": None, "tags": ["features"],
+                "modules": [{"name": "mod1", "description": "模块1"}],
+            },
+            {
+                "name": "repo-b", "type": "local", "path": "ai-driving/repo-b",
+                "local_path": None, "tags": ["features"],
+                "modules": [{"name": "mod2", "description": "模块2"}],
+            },
+            {
+                "name": "base-repo", "type": "local", "path": "ai-driving/base-repo",
+                "local_path": None, "tags": ["base"],
+                "modules": [{"name": "should-not-appear", "description": "不应出现"}],
+            },
+        ])
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["feature", "modules"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        # 只有 features 仓库的 modules 出现
+        names = {item["name"] for item in data}
+        assert names == {"mod1", "mod2"}
+        assert "should-not-appear" not in names
+
+    def test_modules_output_contains_required_fields(self, runner, tmp_path):
+        """modules 输出每条记录都包含 name、description、path 字段"""
+        _make_config_with_tags(tmp_path, [
+            {
+                "name": "feature-repo", "type": "local", "path": "ai-driving/feature-repo",
+                "local_path": None, "tags": ["features"],
+                "modules": [{"name": "live", "description": "直播"}],
+            },
+        ])
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["feature", "modules"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        for item in data:
+            assert "name" in item
+            assert "description" in item
+            assert "path" in item
+
+    def test_feature_list_traverses_modules_paths(self, runner, tmp_path):
+        """feature list 从 modules 聚合的路径遍历，扫描各模块目录下的 features"""
+        # 创建仓库配置：包含 features tag 和两个 modules
+        _make_config_with_tags(tmp_path, [
+            {
+                "name": "app-repo", "type": "local", "path": "ai-driving/app-repo",
+                "local_path": None, "tags": ["features"],
+                "modules": [
+                    {"name": "order", "description": "订单"},
+                    {"name": "pay", "description": "支付"},
+                ],
+            },
+        ])
+        # 在 order module 路径下创建 feature
+        order_features = tmp_path / "ai-driving" / "app-repo" / "order"
+        _make_feature_md(order_features, "order-list", "order-list", title="订单列表")
+        # 在 pay module 路径下创建 feature
+        pay_features = tmp_path / "ai-driving" / "app-repo" / "pay"
+        _make_feature_md(pay_features, "pay-confirm", "pay-confirm", title="支付确认")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["feature", "list"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        names = {item["name"] for item in data}
+        assert "order-list" in names
+        assert "pay-confirm" in names
 
 
 # ==================== 属性测试 ====================

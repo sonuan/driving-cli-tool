@@ -189,6 +189,64 @@ def feature_group():
     pass
 
 
+def _collect_feature_modules(config_manager: ConfigManager, project_root: Path) -> List[Dict]:
+    """聚合所有 tags 包含 'features' 的仓库的 modules 列表。
+
+    - 若仓库的 modules 非空，则展开每个 module，path = {repo.path}/{module.name}
+    - 若仓库的 modules 为空，则返回仓库自身，path = {repo.path}/features
+
+    Returns:
+        List[Dict]: 每条包含 name、description、path
+    """
+    from driving_cli.models.config import RepoConfig
+
+    try:
+        repos = config_manager.get_all_repos()
+    except ValueError:
+        return []
+
+    result = []
+    for repo in repos:
+        tags = repo.tags or []
+        if "features" not in tags:
+            continue
+
+        if repo.modules:
+            for mod in repo.modules:
+                result.append({
+                    "name": mod.name,
+                    "description": mod.description,
+                    "path": f"{repo.path}/{mod.name}",
+                })
+        else:
+            # modules 为空，回退到 repo 本身，path 指向 features 目录
+            result.append({
+                "name": repo.name,
+                "description": repo.description or "",
+                "path": f"{repo.path}/features",
+            })
+
+    return result
+
+
+@feature_group.command(name="modules")
+def feature_modules():
+    """列出所有 features 仓库的业务模块，以 JSON 数组格式输出
+
+    聚合所有 tags 包含 'features' 的仓库的 modules 字段。
+    若 modules 为空，则以仓库的 features 目录作为回退路径。
+
+    输出字段：name、description、path
+    """
+    import json as _json
+
+    project_root = find_project_root()
+    config_manager = ConfigManager(project_root)
+
+    result = _collect_feature_modules(config_manager, project_root)
+    click.echo(_json.dumps(result, ensure_ascii=False, indent=2))
+
+
 @feature_group.command(name="list")
 @click.option("--repo", "repo_name", default=None, help="只扫描指定仓库的 features")
 @click.option("--keywords", "keywords", multiple=True, help="关键词过滤，OR 关系（可多次指定，或用逗号分割：--keywords kw1,kw2）")
@@ -196,8 +254,9 @@ def feature_group():
 def feature_list(repo_name: Optional[str], keywords: Tuple[str, ...], detail: bool):
     """列出所有 features，支持关键词搜索，以 JSON 数组格式输出
 
-    扫描所有已安装仓库（或指定仓库）的 features/ 目录，
-    解析每个 FEATURE.md 的 YAML frontmatter，支持关键词全字段模糊搜索。
+    从 `driving feature modules` 聚合的 modules 列表中遍历，
+    扫描每个 module path 下的所有 feature 子目录，
+    解析 FEATURE.md 的 YAML frontmatter，支持关键词全字段模糊搜索。
 
     \b
     示例：
@@ -211,28 +270,38 @@ def feature_list(repo_name: Optional[str], keywords: Tuple[str, ...], detail: bo
         project_root = find_project_root()
         config_manager = ConfigManager(project_root)
 
-        # 确定要扫描的仓库范围
         if repo_name:
+            # 单仓库模式：直接扫描该仓库的 features 目录
             repo_cfg = config_manager.get_repo(repo_name)
             if repo_cfg is None:
                 log_error(f"仓库 '{repo_name}' 不存在")
                 raise click.Abort()
-            features_dirs: List[Tuple[str, Path]] = []
             features_dir = config_manager.get_repo_dir(repo_name) / "features"
-            if features_dir.exists():
-                features_dirs = [(repo_name, features_dir)]
+            if not features_dir.exists():
+                click.echo("[]")
+                return
+            all_features = scan_features_from_dir(repo_name, features_dir, quiet=True)
         else:
-            features_dirs = config_manager.get_all_features_dirs()
+            # 从 modules 聚合结果遍历
+            modules_list = _collect_feature_modules(config_manager, project_root)
 
-        if not features_dirs:
-            click.echo("[]")
-            return
-
-        # 扫描所有 features
-        all_features: List[Dict] = []
-        for rname, fdir in features_dirs:
-            repo_features = scan_features_from_dir(rname, fdir, quiet=True)
-            all_features.extend(repo_features)
+            if not modules_list:
+                # 回退：扫描所有仓库的 features 目录（兼容旧逻辑）
+                features_dirs = config_manager.get_all_features_dirs()
+                all_features = []
+                for rname, fdir in features_dirs:
+                    all_features.extend(scan_features_from_dir(rname, fdir, quiet=True))
+            else:
+                all_features = []
+                for mod_entry in modules_list:
+                    mod_path = project_root / mod_entry["path"]
+                    if not mod_path.exists():
+                        continue
+                    # mod_path 本身就是 features 根目录，扫描其子目录
+                    mod_features = scan_features_from_dir(
+                        mod_entry["name"], mod_path, quiet=True
+                    )
+                    all_features.extend(mod_features)
 
         # 关键词过滤（支持逗号分割，如 --keywords kw1,kw2,kw3）
         if keywords:

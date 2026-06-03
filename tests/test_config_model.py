@@ -5,7 +5,7 @@
 
 import pytest
 
-from driving_cli.models.config import DrivingConfig, RepoConfig
+from driving_cli.models.config import DrivingConfig, ModuleConfig, RepoConfig
 
 
 class TestRepoConfig:
@@ -123,6 +123,77 @@ class TestRepoConfig:
         repo = RepoConfig(name="r", type="local", path="ai-driving/r", rules=None)
         restored = RepoConfig.from_dict(repo.to_dict())
         assert restored.rules is None
+
+    # ---------- modules 字段测试 ----------
+
+    def test_modules_none_serializes_to_empty_list(self):
+        """modules=None 时，to_dict() 应输出空数组（字段始终存在）"""
+        repo = RepoConfig(name="r", type="local", path="ai-driving/r")
+        d = repo.to_dict()
+        assert "modules" in d
+        assert d["modules"] == []
+
+    def test_modules_with_items_serializes_correctly(self):
+        """modules 有值时，to_dict() 应输出对应数组"""
+        repo = RepoConfig(
+            name="r", type="local", path="ai-driving/r",
+            modules=[
+                ModuleConfig(name="order", description="订单模块"),
+                ModuleConfig(name="pay", description="支付模块"),
+            ]
+        )
+        d = repo.to_dict()
+        assert len(d["modules"]) == 2
+        assert d["modules"][0] == {"name": "order", "description": "订单模块"}
+        assert d["modules"][1] == {"name": "pay", "description": "支付模块"}
+
+    def test_modules_roundtrip(self):
+        """modules 字段通过 to_dict() / from_dict() 往返后应保持一致"""
+        repo = RepoConfig(
+            name="r", type="local", path="ai-driving/r",
+            modules=[ModuleConfig(name="im", description="即时通讯")]
+        )
+        restored = RepoConfig.from_dict(repo.to_dict())
+        assert restored.modules is not None
+        assert len(restored.modules) == 1
+        assert restored.modules[0].name == "im"
+        assert restored.modules[0].description == "即时通讯"
+
+    def test_modules_empty_list_roundtrip(self):
+        """modules=[] 序列化后反序列化应得到 None（因为空列表被归一化）"""
+        data = {"name": "r", "type": "local", "path": "ai-driving/r", "modules": []}
+        restored = RepoConfig.from_dict(data)
+        # 空数组反序列化后 modules 字段为 None（无有效 module）
+        assert not restored.modules
+
+    def test_modules_from_dict_ignores_invalid_items(self):
+        """from_dict 忽略 modules 中非字典类型的元素"""
+        data = {
+            "name": "r", "type": "local", "path": "ai-driving/r",
+            "modules": [{"name": "valid", "description": "ok"}, "not-a-dict", 42]
+        }
+        restored = RepoConfig.from_dict(data)
+        assert restored.modules is not None
+        assert len(restored.modules) == 1
+        assert restored.modules[0].name == "valid"
+
+    def test_module_config_to_dict(self):
+        """ModuleConfig.to_dict() 输出正确格式"""
+        mod = ModuleConfig(name="chat", description="聊天模块")
+        d = mod.to_dict()
+        assert d == {"name": "chat", "description": "聊天模块"}
+
+    def test_module_config_from_dict(self):
+        """ModuleConfig.from_dict() 反序列化正确"""
+        mod = ModuleConfig.from_dict({"name": "live", "description": "直播模块"})
+        assert mod.name == "live"
+        assert mod.description == "直播模块"
+
+    def test_module_config_from_dict_missing_description(self):
+        """ModuleConfig.from_dict() 缺少 description 时默认为空字符串"""
+        mod = ModuleConfig.from_dict({"name": "payment"})
+        assert mod.name == "payment"
+        assert mod.description == ""
 
 
 class TestDrivingConfig:

@@ -8,6 +8,24 @@ from typing import List, Optional
 
 
 @dataclass
+class ModuleConfig:
+    """仓库内业务模块配置"""
+
+    name: str  # 业务模块名称
+    description: str = ""  # 业务模块描述
+
+    def to_dict(self) -> dict:
+        return {"name": self.name, "description": self.description}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ModuleConfig":
+        return cls(
+            name=str(data.get("name", "")),
+            description=str(data.get("description", "")),
+        )
+
+
+@dataclass
 class RepoConfig:
     """单个仓库的配置信息"""
 
@@ -18,6 +36,7 @@ class RepoConfig:
     local_path: Optional[str] = None  # 本地原始路径（local 类型可选，有值时创建软链接）
     description: Optional[str] = None  # 仓库描述，用于 AI 关键词匹配
     tags: Optional[List[str]] = None  # 仓库标签，含 "base" 时默认加载，否则需关键词匹配
+    modules: Optional[List[ModuleConfig]] = None  # 业务模块列表，用于 driving feature modules
     version: Optional[str] = None  # 最后一次 pull 后的 commit hash
     skills: Optional[dict] = None  # 技能过滤配置，格式：{"enabled": [...], "disabled": [...]}
     rules: Optional[dict] = None  # 规则过滤配置，格式：{"enabled": [...], "disabled": [...]}
@@ -37,6 +56,8 @@ class RepoConfig:
             d["description"] = self.description
         if self.tags is not None:
             d["tags"] = self.tags
+        # modules 始终写入（默认空数组），保持字段一致性
+        d["modules"] = [m.to_dict() for m in self.modules] if self.modules else []
         if self.version is not None:
             d["version"] = self.version
         # 只在有值时写入，保持 config.json 简洁
@@ -57,6 +78,10 @@ class RepoConfig:
             if required_field not in data:
                 raise KeyError(f"缺少必填字段：{required_field}")
 
+        # 解析 modules 列表
+        raw_modules = data.get("modules") or []
+        modules = [ModuleConfig.from_dict(m) for m in raw_modules if isinstance(m, dict)]
+
         return cls(
             name=data["name"],
             type=data["type"],
@@ -65,6 +90,7 @@ class RepoConfig:
             local_path=data.get("local_path"),
             description=data.get("description"),
             tags=data.get("tags"),
+            modules=modules if modules else None,
             version=data.get("version"),
             skills=data.get("skills"),
             rules=data.get("rules"),

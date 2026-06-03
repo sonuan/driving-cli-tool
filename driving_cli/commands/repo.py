@@ -45,18 +45,40 @@ def repo_group():
 @click.option("--local", "local_path", default=None, is_flag=False, flag_value="", help="注册本地仓库（可选路径）")
 @click.option("--name", "repo_name", default=None, help="自定义仓库名称")
 @click.option("--description", "description", default=None, help="仓库描述，用于 AI 关键词匹配")
+@click.option("--desc", "desc", default=None, help="仓库描述（--description 的简写）")
+@click.option("--tag", "tags", multiple=True, help="新增仓库标签（可多次指定，如 --tag base --tag features）")
+@click.option("--module", "modules", multiple=True, metavar="NAME:DESCRIPTION", help="新增业务模块（格式：name:description，可多次指定）")
 @click.option("--force", is_flag=True, default=False, help="强制覆盖已存在的同名仓库")
 @click.option("--power", "power_name", default=None, help="Power 模式下指定写入哪个 power 的 driving.config.json")
-def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[str], description: Optional[str], force: bool, power_name: Optional[str]):
+def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[str], description: Optional[str], desc: Optional[str], tags: tuple, modules: tuple, force: bool, power_name: Optional[str]):
     """安装仓库
 
     无参数：读取配置初始化所有未初始化的远程仓库。\n
     --url：将远程 Git 仓库作为 submodule 安装。\n
     --local [path]：注册本地仓库（有路径则创建软链接，无路径则创建普通目录）。\n
+    --tag <tag>：新增仓库标签（可多次指定）。\n
+    --desc <desc>：仓库描述（--description 的简写）。\n
+    --module <name:description>：新增业务模块（可多次指定）。\n
     --power <name>：Power 模式下指定写入哪个 power 的配置文件（不指定则写入第一个 power）。\n
     """
     from driving_cli.utils.config_manager import PowerManager
     project_root = find_project_root()
+
+    # --desc 是 --description 的简写，优先使用 --description
+    effective_description = description if description is not None else desc
+
+    # 解析 --module name:description 参数
+    from driving_cli.models.config import ModuleConfig
+    parsed_modules = []
+    for mod_str in modules:
+        if ":" in mod_str:
+            mod_name, mod_desc = mod_str.split(":", 1)
+        else:
+            mod_name, mod_desc = mod_str, ""
+        mod_name = mod_name.strip()
+        mod_desc = mod_desc.strip()
+        if mod_name:
+            parsed_modules.append(ModuleConfig(name=mod_name, description=mod_desc))
 
     # 解析写入目标 ConfigManager
     pm = PowerManager(project_root)
@@ -85,11 +107,13 @@ def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[s
 
     # 安装远程仓库
     if url is not None:
-        _install_remote(config_mgr, project_root, url, repo_name, force, description)
+        _install_remote(config_mgr, project_root, url, repo_name, force, effective_description,
+                        list(tags) or None, parsed_modules or None)
         return
 
     # 注册本地仓库（local_path 为 "" 表示 --local 无值，为具体路径表示有值）
-    _install_local(config_mgr, project_root, local_path, repo_name, force, description)
+    _install_local(config_mgr, project_root, local_path, repo_name, force, effective_description,
+                   list(tags) or None, parsed_modules or None)
 
 
 def _set_submodule_config(git_root: Path, submodule_path: str, key: str, value: str):
@@ -337,7 +361,7 @@ def _migrate_local_to_remote(config_mgr: ConfigManager, project_root: Path, repo
     log_info(f"已清理本地目录：{repo_cfg.path}")
 
 
-def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, repo_name: Optional[str], force: bool, description: Optional[str] = None):
+def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, repo_name: Optional[str], force: bool, description: Optional[str] = None, tags: Optional[list] = None, modules: Optional[list] = None):
     """安装远程 Git 仓库（submodule）"""
     # 校验 Git URL 格式
     if not validate_git_url(url):
@@ -433,7 +457,8 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
         path=install_path,
         local_path=None,
         description=description,
-        tags=[],
+        tags=tags if tags is not None else [],
+        modules=modules,
     )
     try:
         config_mgr.add_repo(repo_cfg)
@@ -448,7 +473,7 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
     log_info(f"  git commit -m 'Add repo {repo_name}'")
 
 
-def _install_local(config_mgr: ConfigManager, project_root: Path, local_path: str, repo_name: Optional[str], force: bool, description: Optional[str] = None):
+def _install_local(config_mgr: ConfigManager, project_root: Path, local_path: str, repo_name: Optional[str], force: bool, description: Optional[str] = None, tags: Optional[list] = None, modules: Optional[list] = None):
     """注册本地仓库（软链接或普通目录）"""
     # 确定仓库名称
     if repo_name is None:
@@ -518,7 +543,8 @@ def _install_local(config_mgr: ConfigManager, project_root: Path, local_path: st
         path=install_path,
         local_path=stored_local_path,
         description=description,
-        tags=[],
+        tags=tags if tags is not None else [],
+        modules=modules,
     )
     try:
         config_mgr.add_repo(repo_cfg)

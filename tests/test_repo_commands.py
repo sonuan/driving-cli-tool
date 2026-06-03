@@ -167,6 +167,69 @@ class TestRepoInstall:
         assert repo_cfg.type == "local"
         assert repo_cfg.local_path is None
 
+    def test_install_local_with_tag_and_desc(self, runner, tmp_project):
+        """--tag 和 --desc 参数写入配置"""
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = runner.invoke(repo_group, [
+                "install", "--local", "--name", "tagged-repo",
+                "--tag", "base", "--tag", "features",
+                "--desc", "测试仓库描述",
+            ])
+        assert result.exit_code == 0
+        mgr = ConfigManager(tmp_project)
+        repo_cfg = mgr.get_repo("tagged-repo")
+        assert repo_cfg is not None
+        assert "base" in (repo_cfg.tags or [])
+        assert "features" in (repo_cfg.tags or [])
+        assert repo_cfg.description == "测试仓库描述"
+
+    def test_install_local_desc_alias_for_description(self, runner, tmp_project):
+        """--desc 是 --description 的简写，两者效果相同"""
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = runner.invoke(repo_group, [
+                "install", "--local", "--name", "desc-repo",
+                "--desc", "简写描述",
+            ])
+        assert result.exit_code == 0
+        mgr = ConfigManager(tmp_project)
+        repo_cfg = mgr.get_repo("desc-repo")
+        assert repo_cfg.description == "简写描述"
+
+    def test_install_local_with_module(self, runner, tmp_project):
+        """--module name:description 写入 modules 配置"""
+        from driving_cli.models.config import ModuleConfig
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = runner.invoke(repo_group, [
+                "install", "--local", "--name", "module-repo",
+                "--module", "order:订单模块",
+                "--module", "pay:支付模块",
+            ])
+        assert result.exit_code == 0
+        mgr = ConfigManager(tmp_project)
+        repo_cfg = mgr.get_repo("module-repo")
+        assert repo_cfg is not None
+        assert repo_cfg.modules is not None
+        assert len(repo_cfg.modules) == 2
+        mod_names = {m.name for m in repo_cfg.modules}
+        assert mod_names == {"order", "pay"}
+        mod_map = {m.name: m.description for m in repo_cfg.modules}
+        assert mod_map["order"] == "订单模块"
+        assert mod_map["pay"] == "支付模块"
+
+    def test_install_local_module_without_description(self, runner, tmp_project):
+        """--module name 不带冒号时描述默认为空字符串"""
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = runner.invoke(repo_group, [
+                "install", "--local", "--name", "no-desc-module-repo",
+                "--module", "chat",
+            ])
+        assert result.exit_code == 0
+        mgr = ConfigManager(tmp_project)
+        repo_cfg = mgr.get_repo("no-desc-module-repo")
+        assert repo_cfg.modules is not None
+        assert repo_cfg.modules[0].name == "chat"
+        assert repo_cfg.modules[0].description == ""
+
     def test_install_local_with_path_creates_symlink(self, runner, tmp_project, tmp_path):
         """--local <path> 时创建软链接并写入配置"""
         # 创建一个真实的本地目录
