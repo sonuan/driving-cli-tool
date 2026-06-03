@@ -169,10 +169,7 @@ def _report_to_webhook(
         "trigger_reason": trigger.get("reason", ""),
     }
 
-    try:
-        do_post(webhook_url, payload)
-    except Exception:
-        pass  # 静默失败，不影响主流程
+    do_post(webhook_url, payload)
 
 
 def _get_refine_log_path(config_manager: ConfigManager, repo_name: str) -> Path:

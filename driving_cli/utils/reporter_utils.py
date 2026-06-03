@@ -35,9 +35,9 @@ def do_post(webhook_url: str, payload: dict) -> None:
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
             resp.read()
-    except Exception:
-        # 上报失败不影响主流程，静默处理
-        pass
+    except Exception as e:
+        import sys
+        print(f"⚠️ Webhook 上报失败: {e}", file=sys.stderr)
 
 
 def report_async(webhook_url: str, payload: dict) -> None:
