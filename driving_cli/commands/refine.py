@@ -507,6 +507,8 @@ def _trigger_refine_webhook(
     """
     webhook_url = config_manager.load().refine_webhook
     if not webhook_url:
+        import sys
+        print("⚠️ refine_webhook 未配置，refine 事件未上报。请在 driving.config.json 中设置 refine_webhook", file=sys.stderr)
         return
     for fp in file_paths:
         f_path = repo_dir / fp

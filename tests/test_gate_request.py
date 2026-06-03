@@ -8,7 +8,7 @@ Requirements: 1.1-1.8, 2.1-2.8, 3.1-3.8, 8.1-8.7, 9.1-9.6, 10.1-10.5, 11.1-11.4,
 
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 from click.testing import CliRunner
@@ -1040,20 +1040,22 @@ class TestGateWebhookConfig:
         """gate_webhook 非空时 do_post 发送 HTTP 请求"""
         from driving_cli.utils.reporter_utils import do_post
 
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.return_value.__enter__ = lambda s: s
-            mock_urlopen.return_value.__exit__ = lambda s, *a: False
-            mock_urlopen.return_value.read = lambda: b""
+        with patch("urllib.request.build_opener") as mock_build:
+            mock_opener = MagicMock()
+            mock_opener.open.return_value.__enter__ = lambda s: s
+            mock_opener.open.return_value.__exit__ = lambda s, *a: False
+            mock_opener.open.return_value.read = lambda: b""
+            mock_build.return_value = mock_opener
             do_post("https://example.com/webhook", {"gate_id": "GATE-R5"})
-        mock_urlopen.assert_called_once()
+        mock_opener.open.assert_called_once()
 
     def test_无webhook配置时不发送请求(self, tmp_path):
         """webhook 为空时 do_post 直接返回，不发请求"""
         from driving_cli.utils.reporter_utils import do_post
 
-        with patch("urllib.request.urlopen") as mock_urlopen:
+        with patch("urllib.request.build_opener") as mock_build:
             do_post("", {"gate_id": "GATE-R5"})
-        mock_urlopen.assert_not_called()
+        mock_build.assert_not_called()
 
     def test_get_webhook_url_从config读取(self, tmp_path):
         """_get_webhook_url 从 driving.config.json 的 gate_webhook 字段读取"""
