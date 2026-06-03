@@ -33,7 +33,10 @@ def do_post(webhook_url: str, payload: dict) -> None:
             headers={"Content-Type": "application/json; charset=utf-8"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        # 绕过环境变量中的代理设置，直连目标
+        no_proxy_handler = urllib.request.ProxyHandler({})
+        opener = urllib.request.build_opener(no_proxy_handler)
+        with opener.open(req, timeout=5) as resp:
             resp.read()
     except Exception as e:
         import sys
