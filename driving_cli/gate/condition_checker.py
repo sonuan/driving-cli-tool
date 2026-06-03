@@ -272,10 +272,17 @@ class ConditionChecker:
 
     @staticmethod
     def _extract_field(data: Any, field: str) -> Any:
-        """按 dot notation 从 dict 中提取字段值"""
+        """按 dot notation 从 dict 中提取字段值
+
+        支持函数调用语法（末尾带括号的 key）：
+          - length()：对 list 或 str 取长度，返回 int
+        示例：blocking_issues.length() → len(blocking_issues)
+        """
         keys = field.split(".")
         current = data
         for key in keys:
+            if key == "length()" and isinstance(current, (list, str)):
+                return len(current)
             if isinstance(current, dict) and key in current:
                 current = current[key]
             else:

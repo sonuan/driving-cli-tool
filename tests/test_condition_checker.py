@@ -433,6 +433,87 @@ class TestJsonField:
         )
         assert result.passed is True
 
+    def test_length伪属性_空数组等于0(self, checker, tmp_path):
+        """blocking_issues.length() eq 0 应在空数组时通过"""
+        target = tmp_path / "review.json"
+        target.write_text(json.dumps({"blocking_issues": []}))
+        result = checker.check(
+            {
+                "type": "json_field",
+                "label": "无阻塞问题",
+                "file": str(target),
+                "field": "blocking_issues.length()",
+                "op": "eq",
+                "value": 0,
+            }
+        )
+        assert result.passed is True
+
+    def test_length伪属性_非空数组不等于0(self, checker, tmp_path):
+        """blocking_issues.length() eq 0 应在有元素时失败"""
+        target = tmp_path / "review.json"
+        target.write_text(json.dumps({"blocking_issues": ["issue1"]}))
+        result = checker.check(
+            {
+                "type": "json_field",
+                "label": "无阻塞问题",
+                "file": str(target),
+                "field": "blocking_issues.length()",
+                "op": "eq",
+                "value": 0,
+            }
+        )
+        assert result.passed is False
+
+    def test_length伪属性_嵌套字段(self, checker, tmp_path):
+        """嵌套路径 dimensions.implementation_review.blocking_issues.length() eq 0"""
+        target = tmp_path / "review.json"
+        data = {"dimensions": {"implementation_review": {"blocking_issues": []}}}
+        target.write_text(json.dumps(data))
+        result = checker.check(
+            {
+                "type": "json_field",
+                "label": "编码实现无阻塞问题",
+                "file": str(target),
+                "field": "dimensions.implementation_review.blocking_issues.length()",
+                "op": "eq",
+                "value": 0,
+            }
+        )
+        assert result.passed is True
+
+    def test_length伪属性_gt操作符(self, checker, tmp_path):
+        """blocking_issues.length() gt 0 应在有元素时通过"""
+        target = tmp_path / "review.json"
+        target.write_text(json.dumps({"blocking_issues": ["a", "b"]}))
+        result = checker.check(
+            {
+                "type": "json_field",
+                "label": "有阻塞问题",
+                "file": str(target),
+                "field": "blocking_issues.length()",
+                "op": "gt",
+                "value": 0,
+            }
+        )
+        assert result.passed is True
+
+    def test_length普通字段不受影响(self, checker, tmp_path):
+        """JSON 里真实存在 length 字段时，应正常读取字段值而非触发函数语义"""
+        target = tmp_path / "data.json"
+        target.write_text(json.dumps({"payload": {"length": 42}}))
+        result = checker.check(
+            {
+                "type": "json_field",
+                "label": "length 字段检查",
+                "file": str(target),
+                "field": "payload.length",
+                "op": "eq",
+                "value": 42,
+            }
+        )
+        assert result.passed is True
+
 
 # ============================================================
 # 测试 all_tasks_done - Requirements 4.8
