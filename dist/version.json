@@ -1,19 +1,19 @@
 {
-  "version": "1.2.7",
-  "build_date": "2026-06-03T17:10:06+08:00",
+  "version": "1.2.8",
+  "build_date": "2026-06-03T17:40:38+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
+      "v1.2.8",
+      "feat：网络请求不走代理",
+      "feat：webhook出现错误时给出error信息",
       "v1.2.7",
       "feat：解决 gate request 无法在AI CLI内交互的问题，导致报错和无法触发门禁的问题；新增gate respond 执行操作的命令",
       "v1.2.6",
       "feat：gate 门禁自动化检测支持 length() 函数",
       "feat：feature modules命令，调整无论 tags 是否包含 features，都把所有仓库的 features 目录追加进去（不再区分，但有 modules 的仍展开 modules）",
       "feat：新增feature modules命令，用于罗列所有feature业务模块路径；repo install 新增--tag、--desc、--module等参数；feature list 修改为遍历所有modules",
-      "feat：优化check_sample_rate 采样率合并出现为0的问题，导致不会自动更新问题",
-      "v1.2.5",
-      "feat：优化refine webhook的at和actor字段",
-      "feat：refine merge 支持触发来源和原因的传入，不是通过提案文件的tigger"
+      "feat：优化check_sample_rate 采样率合并出现为0的问题，导致不会自动更新问题"
   ]
 }
