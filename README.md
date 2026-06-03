@@ -29,8 +29,12 @@ driving load <name>,<name>           # 逗号分隔写法
 driving load --with framework        # 附带框架文档（关键词同样生效）
 driving load --with agent            # 附带 agent 列表（关键词同样生效）
 driving load --with framework,agent  # 同时附带框架和 agent
+driving load --platform <platform>   # 指定开发平台（android/iOS/harmony/kuikly），返回值中包含 platform 字段
 driving load --debug                 # 同上，同时输出调试日志
 ```
+
+`--platform` 可用值：`android`、`iOS`、`harmony`、`kuikly`
+
 
 ## repo — 规范仓库管理
 

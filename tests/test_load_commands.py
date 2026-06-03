@@ -438,3 +438,69 @@ class TestCollectRepoSystemPrompts:
         # notifications 包含 CLI 更新提示，system_prompt 包含业务规则，两者独立
         assert "99.0.0" in notifications
         assert "business rules" in system_prompt
+
+
+# ==================== --platform 参数测试 ====================
+
+class TestLoadPlatformOption:
+    """driving load --platform 测试"""
+
+    def _invoke(self, runner, tmp_project, extra_args=None):
+        args = ["load"] + (extra_args or [])
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None):
+            return runner.invoke(cli, args)
+
+    def test_传platform时返回值包含platform字段(self, runner, tmp_project):
+        result = self._invoke(runner, tmp_project, ["--platform", "android"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "platform" in data
+        assert data["platform"] == "android"
+
+    def test_platform_iOS(self, runner, tmp_project):
+        result = self._invoke(runner, tmp_project, ["--platform", "iOS"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["platform"] == "iOS"
+
+    def test_platform_harmony(self, runner, tmp_project):
+        result = self._invoke(runner, tmp_project, ["--platform", "harmony"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["platform"] == "harmony"
+
+    def test_platform_kuikly(self, runner, tmp_project):
+        result = self._invoke(runner, tmp_project, ["--platform", "kuikly"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["platform"] == "kuikly"
+
+    def test_不传platform时返回值不含platform字段(self, runner, tmp_project):
+        result = self._invoke(runner, tmp_project)
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "platform" not in data
+
+    def test_platform字段在agents和system_prompt之间(self, runner, tmp_project):
+        """platform 字段顺序：在 agents 之后、system_prompt 之前"""
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.collect_agents", return_value=[{"name": "a", "description": "b", "path": "c"}]), \
+             patch("driving_cli.commands.load._collect_repo_system_prompts", return_value="some rules"), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None):
+            result = runner.invoke(cli, ["load", "--with", "agent", "--platform", "android"])
+        assert result.exit_code == 0
+        keys = list(json.loads(result.output).keys())
+        assert "platform" in keys
+        assert keys.index("agents") < keys.index("platform")
+        assert keys.index("platform") < keys.index("system_prompt")
+
+    def test_platform与关键词组合(self, runner, tmp_project):
+        """传关键词时 platform 仍然输出"""
+        result = self._invoke(runner, tmp_project, ["driving", "--platform", "android"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data.get("platform") == "android"

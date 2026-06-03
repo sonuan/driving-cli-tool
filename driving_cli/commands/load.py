@@ -219,12 +219,15 @@ def _build_notifications(repo_update_msg: str = "") -> str:
 @click.option("--debug", is_flag=True, default=False, help="输出调试日志")
 @click.option("--with", "with_modules", default="", metavar="MODULES",
               help="附带额外模块，逗号分隔，可选值：framework, agent")
-def load(keywords: tuple, debug: bool, with_modules: str):
+@click.option("--platform", default="", metavar="PLATFORM",
+              help="当前开发平台（android/iOS/harmony/kuikly），注入 platform 字段到返回值")
+def load(keywords: tuple, debug: bool, with_modules: str, platform: str):
     """一次性输出所有上下文数据（skills、rules、repos、prompts），供 AI 会话注入
 
     不传参数时加载 tags=base 的仓库内容。
     传入 repo-name 时只加载匹配仓库的 skills/rules。
     使用 --with 附带额外模块（framework、agent），关键词同样生效。
+    使用 --platform 指定当前开发平台，返回值中包含 platform 字段。
 
     示例：
         driving load
@@ -233,6 +236,7 @@ def load(keywords: tuple, debug: bool, with_modules: str):
         driving load --with framework,agent
         driving load driving --with framework,agent
         driving load xstatic --with framework
+        driving load --platform android
         driving load --debug
     """
     set_silent(not debug)
@@ -244,7 +248,7 @@ def load(keywords: tuple, debug: bool, with_modules: str):
     from driving_cli.utils.match import normalize_keywords
     keywords = normalize_keywords(keywords)
 
-    _dbg(f"driving load 开始，版本={__version__}，keywords={keywords}，with={with_modules}")
+    _dbg(f"driving load 开始，版本={__version__}，keywords={keywords}，with={with_modules}，platform={platform}")
     try:
         project_root = find_project_root()
         config_manager = ConfigManager(project_root)
@@ -307,6 +311,8 @@ def load(keywords: tuple, debug: bool, with_modules: str):
             result["frameworks"] = frameworks
         if agents_data:
             result["agents"] = agents_data
+        if platform:
+            result["platform"] = platform
 
         # 带关键词时不输出 system_prompt / user_prompt / notifications
         if not keywords:
