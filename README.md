@@ -238,9 +238,9 @@ driving feature list --detail                 # 输出完整字段
 ```
 
 `feature modules` 输出规则：
-- 遍历所有 `tags` 包含 `"features"` 的仓库
-- 仓库 `modules` 非空：每个 module 输出 `name`、`description`、`path`（`{repo.path}/{module.name}`）
-- 仓库 `modules` 为空：回退输出仓库自身，`path` 为 `{repo.path}/features`
+- 遍历**所有仓库**（不再限定 `tags=features`）
+- 仓库有 `modules`：每个 module 输出 `name`、`description`、`path`（`{repo.path}/{module.name}`）
+- 所有仓库：始终追加 `{repo.path}/features` 作为兜底条目
 
 `feature list` 从 `feature modules` 聚合的路径遍历，扫描各模块目录下的 feature 子目录。
 

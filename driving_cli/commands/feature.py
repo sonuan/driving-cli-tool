@@ -190,16 +190,15 @@ def feature_group():
 
 
 def _collect_feature_modules(config_manager: ConfigManager, project_root: Path) -> List[Dict]:
-    """聚合所有 tags 包含 'features' 的仓库的 modules 列表。
+    """聚合所有仓库的 modules 列表，同时兜底追加每个仓库的 features 目录。
 
-    - 若仓库的 modules 非空，则展开每个 module，path = {repo.path}/{module.name}
-    - 若仓库的 modules 为空，则返回仓库自身，path = {repo.path}/features
+    规则：
+    1. 若仓库有 modules，展开每个 module，path = {repo.path}/{module.name}
+    2. 无论是否有 modules，始终追加 {repo.path}/features 作为兜底条目
 
     Returns:
         List[Dict]: 每条包含 name、description、path
     """
-    from driving_cli.models.config import RepoConfig
-
     try:
         repos = config_manager.get_all_repos()
     except ValueError:
@@ -207,10 +206,6 @@ def _collect_feature_modules(config_manager: ConfigManager, project_root: Path) 
 
     result = []
     for repo in repos:
-        tags = repo.tags or []
-        if "features" not in tags:
-            continue
-
         if repo.modules:
             for mod in repo.modules:
                 result.append({
@@ -218,23 +213,23 @@ def _collect_feature_modules(config_manager: ConfigManager, project_root: Path) 
                     "description": mod.description,
                     "path": f"{repo.path}/{mod.name}",
                 })
-        else:
-            # modules 为空，回退到 repo 本身，path 指向 features 目录
-            result.append({
-                "name": repo.name,
-                "description": repo.description or "",
-                "path": f"{repo.path}/features",
-            })
+        # 始终追加 features 目录作为兜底
+        result.append({
+            "name": repo.name,
+            "description": repo.description or "",
+            "path": f"{repo.path}/features",
+        })
 
     return result
 
 
 @feature_group.command(name="modules")
 def feature_modules():
-    """列出所有 features 仓库的业务模块，以 JSON 数组格式输出
+    """列出所有仓库的 features 模块路径，以 JSON 数组格式输出
 
-    聚合所有 tags 包含 'features' 的仓库的 modules 字段。
-    若 modules 为空，则以仓库的 features 目录作为回退路径。
+    聚合所有仓库的 modules 字段，同时兜底追加每个仓库的 features 目录。
+    - 仓库有 modules：展开每个 module，path = {repo.path}/{module.name}
+    - 所有仓库：始终追加 {repo.path}/features 作为兜底条目
 
     输出字段：name、description、path
     """

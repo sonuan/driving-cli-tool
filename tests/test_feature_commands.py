@@ -501,19 +501,32 @@ def _make_config_with_tags(tmp_path: Path, repos: list) -> None:
 
 
 class TestFeatureModulesCommand:
-    def test_modules_empty_when_no_features_repos(self, runner, tmp_path):
-        """没有 tags=features 的仓库时，输出空数组"""
-        _make_config_with_tags(tmp_path, [
-            {"name": "base-repo", "type": "local", "path": "ai-driving/base-repo",
-             "local_path": None, "tags": ["base"], "modules": []},
-        ])
+    def test_modules_empty_when_no_repos(self, runner, tmp_path):
+        """没有仓库时，输出空数组"""
+        _make_config_with_tags(tmp_path, [])
         with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
             result = runner.invoke(cli, ["feature", "modules"])
         assert result.exit_code == 0
         assert json.loads(result.output) == []
 
+    def test_modules_always_includes_features_dir(self, runner, tmp_path):
+        """无论 tags 是什么，所有仓库的 features 目录都会出现在输出中"""
+        _make_config_with_tags(tmp_path, [
+            {"name": "base-repo", "type": "local", "path": "ai-driving/base-repo",
+             "local_path": None, "tags": ["base"], "modules": []},
+            {"name": "other-repo", "type": "local", "path": "ai-driving/other-repo",
+             "local_path": None, "tags": [], "modules": []},
+        ])
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["feature", "modules"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        paths = {item["path"] for item in data}
+        assert "ai-driving/base-repo/features" in paths
+        assert "ai-driving/other-repo/features" in paths
+
     def test_modules_returns_repo_modules_when_set(self, runner, tmp_path):
-        """仓库有 modules 时，返回每个 module 的 name/description/path"""
+        """仓库有 modules 时，返回每个 module 的 name/description/path，同时追加 features 目录"""
         _make_config_with_tags(tmp_path, [
             {
                 "name": "feature-repo", "type": "local", "path": "ai-driving/feature-repo",
@@ -528,12 +541,12 @@ class TestFeatureModulesCommand:
             result = runner.invoke(cli, ["feature", "modules"])
         assert result.exit_code == 0
         data = json.loads(result.output)
-        assert len(data) == 2
-        names = {item["name"] for item in data}
-        assert names == {"order", "pay"}
         paths = {item["path"] for item in data}
+        # modules 展开
         assert "ai-driving/feature-repo/order" in paths
         assert "ai-driving/feature-repo/pay" in paths
+        # features 目录兜底
+        assert "ai-driving/feature-repo/features" in paths
 
     def test_modules_path_format_is_repo_path_slash_module_name(self, runner, tmp_path):
         """modules 的 path 格式为 {repo.path}/{module.name}"""
@@ -548,10 +561,12 @@ class TestFeatureModulesCommand:
             result = runner.invoke(cli, ["feature", "modules"])
         assert result.exit_code == 0
         data = json.loads(result.output)
-        assert data[0]["path"] == "ai-driving/my-repo/chat"
+        paths = {item["path"] for item in data}
+        assert "ai-driving/my-repo/chat" in paths
+        assert "ai-driving/my-repo/features" in paths
 
-    def test_modules_fallback_to_features_dir_when_no_modules(self, runner, tmp_path):
-        """仓库 modules 为空时，回退返回 {repo.path}/features 路径"""
+    def test_modules_fallback_features_dir_always_present(self, runner, tmp_path):
+        """无论 modules 是否为空，{repo.path}/features 始终出现在输出中"""
         _make_config_with_tags(tmp_path, [
             {
                 "name": "no-modules-repo", "type": "local", "path": "ai-driving/no-modules-repo",
@@ -568,7 +583,7 @@ class TestFeatureModulesCommand:
         assert data[0]["path"] == "ai-driving/no-modules-repo/features"
 
     def test_modules_merges_multiple_repos(self, runner, tmp_path):
-        """多个 features 仓库的 modules 合并输出"""
+        """多个仓库的 modules 合并输出，同时每个仓库都有 features 目录兜底"""
         _make_config_with_tags(tmp_path, [
             {
                 "name": "repo-a", "type": "local", "path": "ai-driving/repo-a",
@@ -583,17 +598,21 @@ class TestFeatureModulesCommand:
             {
                 "name": "base-repo", "type": "local", "path": "ai-driving/base-repo",
                 "local_path": None, "tags": ["base"],
-                "modules": [{"name": "should-not-appear", "description": "不应出现"}],
+                "modules": [],
             },
         ])
         with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
             result = runner.invoke(cli, ["feature", "modules"])
         assert result.exit_code == 0
         data = json.loads(result.output)
-        # 只有 features 仓库的 modules 出现
-        names = {item["name"] for item in data}
-        assert names == {"mod1", "mod2"}
-        assert "should-not-appear" not in names
+        paths = {item["path"] for item in data}
+        # modules 展开
+        assert "ai-driving/repo-a/mod1" in paths
+        assert "ai-driving/repo-b/mod2" in paths
+        # 所有仓库的 features 目录都在
+        assert "ai-driving/repo-a/features" in paths
+        assert "ai-driving/repo-b/features" in paths
+        assert "ai-driving/base-repo/features" in paths
 
     def test_modules_output_contains_required_fields(self, runner, tmp_path):
         """modules 输出每条记录都包含 name、description、path 字段"""
@@ -615,7 +634,7 @@ class TestFeatureModulesCommand:
 
     def test_feature_list_traverses_modules_paths(self, runner, tmp_path):
         """feature list 从 modules 聚合的路径遍历，扫描各模块目录下的 features"""
-        # 创建仓库配置：包含 features tag 和两个 modules
+        # 创建仓库配置：包含两个 modules
         _make_config_with_tags(tmp_path, [
             {
                 "name": "app-repo", "type": "local", "path": "ai-driving/app-repo",
