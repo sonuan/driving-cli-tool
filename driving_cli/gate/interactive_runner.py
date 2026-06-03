@@ -21,6 +21,11 @@ def _echo(msg: str = "") -> None:
     sys.stdout.flush()
 
 
+def _is_interactive() -> bool:
+    """检测当前环境是否支持交互输入。"""
+    return sys.stdin.isatty()
+
+
 def _prompt(
     text: str,
     completer: Optional[WordCompleter] = None,
@@ -39,6 +44,12 @@ def _prompt(
     if bottom_toolbar:
         kwargs["bottom_toolbar"] = HTML(bottom_toolbar)
     return pt_prompt(text, **kwargs)
+
+
+class NonTTYInterrupt(Exception):
+    """非终端环境下无法进行交互时抛出，由调用方捕获处理。"""
+
+    pass
 
 
 class InteractiveRunner:
@@ -120,6 +131,10 @@ class InteractiveRunner:
             _echo(f"  {i}. {choice_text}")
 
         _echo()
+
+        # 非终端环境：输出提示后中断，由调用方处理
+        if not _is_interactive():
+            raise NonTTYInterrupt()
 
         # 支持输入数字或 action 名称，Tab 补全 + 底部工具栏提示
         action_keys_lower = [k.lower() for k in action_keys]

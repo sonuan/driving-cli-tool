@@ -353,6 +353,9 @@ class TestGateRequestInteractive:
         ), patch(
             "driving_cli.gate.interactive_runner._prompt",
             side_effect=["1"],  # 选择第一个操作（确认）
+        ), patch(
+            "driving_cli.gate.interactive_runner._is_interactive",
+            return_value=True,
         ):
             result = runner.invoke(
                 cli,
@@ -381,6 +384,9 @@ class TestGateRequestInteractive:
         ), patch(
             "driving_cli.gate.interactive_runner._prompt",
             side_effect=["2", "需要修改边界条件"],  # 选择第二个操作（修改），输入 note
+        ), patch(
+            "driving_cli.gate.interactive_runner._is_interactive",
+            return_value=True,
         ):
             result = runner.invoke(
                 cli,
@@ -433,6 +439,9 @@ class TestGateRequestReworkThreshold:
         ), patch(
             "driving_cli.gate.interactive_runner._prompt",
             side_effect=["1"],  # 选择确认
+        ), patch(
+            "driving_cli.gate.interactive_runner._is_interactive",
+            return_value=True,
         ):
             result = runner.invoke(
                 cli,
@@ -1089,3 +1098,139 @@ class TestGateWebhookConfig:
             mock_cm.return_value.load.return_value = mock_config
             url = _get_webhook_url()
         assert url == ""
+
+
+class TestGateRequestNonTTY:
+    """测试非终端环境下 gate request 的行为"""
+
+    def test_non_tty_outputs_template_and_hint(self, runner, tmp_path):
+        """非 TTY 环境下输出门禁模板和 gate respond 提示"""
+        mock_gate = _mock_gate_full_auto(path_target="{{path}}/nonexistent")
+        with patch(
+            "driving_cli.commands.gate._collect_all_gates_data",
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
+        ), patch(
+            "driving_cli.gate.interactive_runner._is_interactive",
+            return_value=False,
+        ):
+            result = runner.invoke(
+                cli,
+                ["gate", "request", "GATE-R5", "--path", str(tmp_path)],
+            )
+        assert result.exit_code == 0
+        assert "gate respond" in result.output
+        assert "确认" in result.output
+        assert "修改" in result.output
+
+    def test_non_tty_does_not_write_state(self, runner, tmp_path):
+        """非 TTY 环境下不记录状态"""
+        mock_gate = _mock_gate_full_auto(path_target="{{path}}/nonexistent")
+        with patch(
+            "driving_cli.commands.gate._collect_all_gates_data",
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
+        ), patch(
+            "driving_cli.gate.interactive_runner._is_interactive",
+            return_value=False,
+        ):
+            runner.invoke(
+                cli,
+                ["gate", "request", "GATE-R5", "--path", str(tmp_path)],
+            )
+        sm = GateStateManager(str(tmp_path))
+        state = sm.get_gate_state("GATE-R5")
+        assert state.request_count == 0
+
+
+class TestGateRespond:
+    """测试 gate respond 命令"""
+
+    def test_respond_pass_by_name(self, runner, tmp_path):
+        """通过 action 名称提交"""
+        mock_gate = _mock_gate_full_auto(path_target="{{path}}/nonexistent")
+        with patch(
+            "driving_cli.commands.gate._collect_all_gates_data",
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
+        ), patch("driving_cli.commands.gate.report_gate_event"):
+            result = runner.invoke(
+                cli,
+                ["gate", "respond", "GATE-R5", "--path", str(tmp_path), "--action", "确认"],
+            )
+        assert result.exit_code == 0
+        output_json = json.loads(result.output.split("门禁结果：\n")[1])
+        assert output_json["result"] == "pass"
+        assert output_json["action"] == "确认"
+
+    def test_respond_pass_by_number(self, runner, tmp_path):
+        """通过数字序号提交"""
+        mock_gate = _mock_gate_full_auto(path_target="{{path}}/nonexistent")
+        with patch(
+            "driving_cli.commands.gate._collect_all_gates_data",
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
+        ), patch("driving_cli.commands.gate.report_gate_event"):
+            result = runner.invoke(
+                cli,
+                ["gate", "respond", "GATE-R5", "--path", str(tmp_path), "--action", "1"],
+            )
+        assert result.exit_code == 0
+        output_json = json.loads(result.output.split("门禁结果：\n")[1])
+        assert output_json["result"] == "pass"
+        assert output_json["action"] == "确认"
+
+    def test_respond_amend_with_note(self, runner, tmp_path):
+        """修改操作需要 note"""
+        mock_gate = _mock_gate_full_auto(path_target="{{path}}/nonexistent")
+        with patch(
+            "driving_cli.commands.gate._collect_all_gates_data",
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
+        ), patch("driving_cli.commands.gate.report_gate_event"):
+            result = runner.invoke(
+                cli,
+                ["gate", "respond", "GATE-R5", "--path", str(tmp_path),
+                 "--action", "修改", "--note", "接口命名需要调整"],
+            )
+        assert result.exit_code == 0
+        output_json = json.loads(result.output.split("门禁结果：\n")[1])
+        assert output_json["result"] == "amend"
+        assert output_json["action"] == "修改"
+        assert output_json["note"] == "接口命名需要调整"
+
+    def test_respond_amend_without_note_fails(self, runner, tmp_path):
+        """requires_note 的操作缺少 note 时报错"""
+        mock_gate = _mock_gate_full_auto(path_target="{{path}}/nonexistent")
+        with patch(
+            "driving_cli.commands.gate._collect_all_gates_data",
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
+        ):
+            result = runner.invoke(
+                cli,
+                ["gate", "respond", "GATE-R5", "--path", str(tmp_path), "--action", "修改"],
+            )
+        assert result.exit_code != 0
+        assert "需要提供 --note" in result.output or "需要提供 --note" in (result.output + result.output)
+
+    def test_respond_invalid_action(self, runner, tmp_path):
+        """无效 action 报错"""
+        mock_gate = _mock_gate_full_auto(path_target="{{path}}/nonexistent")
+        with patch(
+            "driving_cli.commands.gate._collect_all_gates_data",
+            return_value=([mock_gate], "", "按 next 字段执行后续动作", 2),
+        ):
+            result = runner.invoke(
+                cli,
+                ["gate", "respond", "GATE-R5", "--path", str(tmp_path), "--action", "无效"],
+            )
+        assert result.exit_code != 0
+        assert "无效操作" in result.output or "无效操作" in result.output
+
+    def test_respond_gate_not_found(self, runner, tmp_path):
+        """gate 不存在时报错"""
+        with patch(
+            "driving_cli.commands.gate._collect_all_gates_data",
+            return_value=([], "", "", 2),
+        ):
+            result = runner.invoke(
+                cli,
+                ["gate", "respond", "GATE-UNKNOWN", "--path", str(tmp_path), "--action", "确认"],
+            )
+        assert result.exit_code != 0
+        assert "未找到门禁" in result.output

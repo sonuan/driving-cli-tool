@@ -5,7 +5,7 @@
 
 from driving_cli.gate.auto_pass_engine import AutoPassEngine
 from driving_cli.gate.condition_checker import ConditionChecker
-from driving_cli.gate.interactive_runner import InteractiveRunner
+from driving_cli.gate.interactive_runner import InteractiveRunner, NonTTYInterrupt
 from driving_cli.gate.models import (
     AutoPassResult,
     ConditionResult,
@@ -25,6 +25,7 @@ __all__ = [
     "ConditionResult",
     "AutoPassResult",
     "InteractiveRunner",
+    "NonTTYInterrupt",
     "RequiresChecker",
     "RequiresResult",
     "GateHistoryEntry",

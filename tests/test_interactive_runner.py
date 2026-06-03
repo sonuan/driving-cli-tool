@@ -12,6 +12,13 @@ from driving_cli.gate.interactive_runner import InteractiveRunner
 from driving_cli.gate.models import ConditionResult
 
 
+@pytest.fixture(autouse=True)
+def mock_isatty():
+    """测试环境下模拟 TTY，避免触发 NonTTYInterrupt"""
+    with patch("driving_cli.gate.interactive_runner._is_interactive", return_value=True):
+        yield
+
+
 @pytest.fixture
 def mock_renderer():
     """创建 mock TemplateRenderer"""

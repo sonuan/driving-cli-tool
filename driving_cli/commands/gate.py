@@ -18,6 +18,7 @@ from driving_cli.gate import (
     ConditionChecker,
     GateStateManager,
     InteractiveRunner,
+    NonTTYInterrupt,
     RequiresChecker,
     TemplateRenderer,
     build_result_json,
@@ -495,12 +496,27 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
         return
 
     # 6c. 交互模式（auto_pass 失败或跳过）
-    action_key, note = interactive_runner.run(
-        gate,
-        auto_pass_result.condition_results,
-        gate_state.user_amend_count,
-        auto_pass_result.forced_interactive,
-    )
+    try:
+        action_key, note = interactive_runner.run(
+            gate,
+            auto_pass_result.condition_results,
+            gate_state.user_amend_count,
+            auto_pass_result.forced_interactive,
+        )
+    except NonTTYInterrupt:
+        # 非终端环境：模板和选项已输出，提示使用 gate respond
+        actions = gate.get("actions", {})
+        action_names = list(actions.keys())
+        click.echo("")
+        click.echo(
+            f"💡 非交互环境，请使用以下命令提交选择："
+        )
+        click.echo(
+            f"  driving gate respond {gate_id} --path \"{path}\" --action <操作名> --note \"说明\""
+        )
+        if action_names:
+            click.echo(f"  可选操作: {', '.join(action_names)}")
+        return
 
     # 确定 result_type
     actions = gate.get("actions", {})
@@ -720,4 +736,127 @@ def gate_pass(gate_id: str, path: str, note: str):
         note=note,
         feature_path=path,
         gate_state=gate_state,
+    )
+
+
+@gate_group.command(name="respond")
+@click.argument("gate_id")
+@click.option("--path", required=True, help="feature 目录路径")
+@click.option("--action", required=True, help="操作名称（actions 中的 key）")
+@click.option("--note", default="", help="操作说明（修改类操作时必填）")
+@click.option("--context", default=None, help="JSON 字符串，用于模板变量渲染")
+def gate_respond(gate_id: str, path: str, action: str, note: str, context: str):
+    """非交互式提交门禁操作选择（配合 gate request 在非终端环境使用）"""
+    # 1. 解析 --context JSON
+    context_dict = {}
+    if context is not None:
+        try:
+            context_dict = json_module.loads(context)
+        except (json_module.JSONDecodeError, ValueError):
+            click.echo("错误：--context 参数不是有效的 JSON 格式", err=True)
+            sys.exit(1)
+
+    # 2. 加载 gate 定义
+    all_gates, _system_prompt, user_prompt, self_refine_threshold = _collect_all_gates_data()
+    gate = None
+    for g in all_gates:
+        if g.get("id", "").lower() == gate_id.lower():
+            gate = g
+            break
+
+    if gate is None:
+        click.echo(f"错误：未找到门禁 {gate_id}", err=True)
+        sys.exit(1)
+
+    # 3. 校验 action 是否有效
+    actions = gate.get("actions", {})
+    action_keys = list(actions.keys())
+    # 支持数字序号或名称（大小写不敏感）
+    action_key = None
+    if action.isdigit():
+        idx = int(action)
+        if 1 <= idx <= len(action_keys):
+            action_key = action_keys[idx - 1]
+    else:
+        for key in action_keys:
+            if key.lower() == action.lower():
+                action_key = key
+                break
+
+    if action_key is None:
+        valid_names = ", ".join(f"{i+1}={k}" for i, k in enumerate(action_keys))
+        click.echo(f"错误：无效操作 '{action}'，可选: {valid_names}", err=True)
+        sys.exit(1)
+
+    # 4. 初始化状态管理器
+    state_manager = GateStateManager(path)
+    gate_state = state_manager.get_gate_state(gate_id)
+
+    gate_state_dict = {
+        "request_count": gate_state.request_count,
+        "auto_pass_count": gate_state.auto_pass_count,
+        "user_pass_count": gate_state.user_pass_count,
+        "user_amend_count": gate_state.user_amend_count,
+        "pass_rate": gate_state.pass_rate,
+        "last_result": gate_state.last_result,
+    }
+    renderer = TemplateRenderer(path, context_dict, gate_state_dict)
+
+    # 5. 确定 result_type
+    selected_action = actions[action_key]
+    if isinstance(selected_action, str):
+        result_type = "amend" if note else "pass"
+        next_text = renderer.render(selected_action)
+    else:
+        if selected_action.get("requires_note", False):
+            result_type = "amend"
+            if not note:
+                click.echo(f"错误：操作 '{action_key}' 需要提供 --note 说明", err=True)
+                sys.exit(1)
+        else:
+            result_type = "pass"
+        next_text = renderer.render(selected_action.get("next", ""))
+
+    # 6. 记录状态
+    state_manager.record_result(gate_id, result_type, action_key, note, gate_name=gate.get("name", ""))
+
+    # 7. 读取最新状态
+    updated_state = state_manager.get_gate_state(gate_id)
+
+    # 8. 构建 self_refine（仅 pass 时触发）
+    self_refine = build_self_refine(updated_state, threshold=self_refine_threshold) if result_type == "pass" else None
+
+    # 9. 构建 user_prompt
+    effective_user_prompt = user_prompt
+    if self_refine is not None:
+        effective_user_prompt = (
+            f"⚠️ 本次通过前共返工 {updated_state.user_amend_count} 次，"
+            f"请先根据 self_refine.history 中的历史返工记录进行自我反思，分析根本原因并使用 `self-refine` 技能输出改进提案；完成后"
+            f"{user_prompt}"
+        )
+
+    # 10. 输出 Result_JSON
+    result_json = build_result_json(
+        gate_id=gate_id,
+        result=result_type,
+        action=action_key,
+        next_text=next_text,
+        note=note,
+        user_prompt=effective_user_prompt,
+        self_refine=self_refine,
+    )
+    click.echo("门禁结果：")
+    click.echo(json_module.dumps(result_json, ensure_ascii=False, indent=2))
+
+    # 11. 上报 webhook
+    report_gate_event(
+        gate_id=gate_id,
+        gate_name=gate.get("name", ""),
+        gate_level=gate.get("level", "blocking"),
+        result=result_type,
+        action=action_key,
+        note=note,
+        feature_path=path,
+        context=context_dict or None,
+        gate_state=updated_state,
     )

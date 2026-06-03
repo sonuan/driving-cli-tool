@@ -178,6 +178,8 @@ driving gate load <gate-id> <gate-id> ...  # 加载多个指定 gate
 driving gate request <gate-id> --path <dir>                  # 执行门禁请求（auto_pass → 交互选择）
 driving gate request <gate-id> --path <dir> --context '{}'   # 附带 JSON 上下文变量
 driving gate request <gate-id> --path <dir> --dry-run        # 仅预览模板，不执行交互
+driving gate respond <gate-id> --path <dir> --action <操作名>           # 非交互式提交门禁选择（配合非终端环境使用）
+driving gate respond <gate-id> --path <dir> --action <操作名> --note "" # 修改类操作附带说明
 driving gate status --path <dir>           # 查看所有 gate 状态
 driving gate status <gate-id> --path <dir> # 查看指定 gate 状态
 driving gate history <gate-id> --path <dir>  # 查看指定 gate 历史记录
