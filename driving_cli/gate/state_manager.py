@@ -19,16 +19,22 @@ class GateStateManager:
     负责 gate-state.json 的读取、写入、状态更新。
     """
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, platform: str = ""):
         """
         Args:
-            path: --path 参数值，state 文件位于 <path>/docs/gate-state.json
+            path: --path 参数值，feature 目录路径
+            platform: 开发平台（android/iOS/harmony/kuikly）。
+                      非空时 state 文件位于 <path>/docs/<platform>/gate-state.json；
+                      为空时保持旧路径 <path>/docs/gate-state.json（向后兼容）。
         """
         self._path = path
+        self._platform = platform
 
     @property
     def state_file(self) -> Path:
         """返回 gate-state.json 的完整路径"""
+        if self._platform:
+            return Path(self._path) / "docs" / self._platform / "gate-state.json"
         return Path(self._path) / "docs" / "gate-state.json"
 
     def load(self) -> dict:

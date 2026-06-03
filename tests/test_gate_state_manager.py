@@ -441,3 +441,83 @@ class TestRoundTrip:
         data_after = manager.load()
         gate_r5_after = json.dumps(data_after["gates"]["GATE-R5"], sort_keys=True)
         assert gate_r5_before == gate_r5_after
+
+
+class TestPlatform:
+    """测试 --platform 参数对 state_file 路径的影响"""
+
+    def test_不传platform时路径为docs下(self, tmp_path):
+        manager = GateStateManager(str(tmp_path))
+        expected = tmp_path / "docs" / "gate-state.json"
+        assert manager.state_file == expected
+
+    def test_传platform时路径为docs_platform下(self, tmp_path):
+        manager = GateStateManager(str(tmp_path), "android")
+        expected = tmp_path / "docs" / "android" / "gate-state.json"
+        assert manager.state_file == expected
+
+    def test_iOS平台路径正确(self, tmp_path):
+        manager = GateStateManager(str(tmp_path), "iOS")
+        expected = tmp_path / "docs" / "iOS" / "gate-state.json"
+        assert manager.state_file == expected
+
+    def test_harmony平台路径正确(self, tmp_path):
+        manager = GateStateManager(str(tmp_path), "harmony")
+        expected = tmp_path / "docs" / "harmony" / "gate-state.json"
+        assert manager.state_file == expected
+
+    def test_kuikly平台路径正确(self, tmp_path):
+        manager = GateStateManager(str(tmp_path), "kuikly")
+        expected = tmp_path / "docs" / "kuikly" / "gate-state.json"
+        assert manager.state_file == expected
+
+    def test_空字符串platform回退到旧路径(self, tmp_path):
+        manager = GateStateManager(str(tmp_path), "")
+        expected = tmp_path / "docs" / "gate-state.json"
+        assert manager.state_file == expected
+
+    def test_platform存储数据与无platform互不干扰(self, tmp_path):
+        manager_android = GateStateManager(str(tmp_path), "android")
+        manager_default = GateStateManager(str(tmp_path))
+
+        manager_android.record_result("GATE-R5", "pass", "确认", "")
+        manager_default.record_result("GATE-R5", "amend", "修改", "旧路径记录")
+
+        # android 平台数据
+        android_state = manager_android.get_gate_state("GATE-R5")
+        assert android_state.last_result == "pass"
+        assert android_state.user_pass_count == 1
+        assert android_state.user_amend_count == 0
+
+        # 默认路径数据不受影响
+        default_state = manager_default.get_gate_state("GATE-R5")
+        assert default_state.last_result == "amend"
+        assert default_state.user_amend_count == 1
+
+    def test_不同平台数据相互独立(self, tmp_path):
+        manager_android = GateStateManager(str(tmp_path), "android")
+        manager_ios = GateStateManager(str(tmp_path), "iOS")
+
+        manager_android.record_result("GATE-R5", "pass", "确认", "")
+        manager_ios.record_result("GATE-R5", "amend", "修改", "iOS修改")
+
+        android_state = manager_android.get_gate_state("GATE-R5")
+        assert android_state.last_result == "pass"
+        assert android_state.user_amend_count == 0
+
+        ios_state = manager_ios.get_gate_state("GATE-R5")
+        assert ios_state.last_result == "amend"
+        assert ios_state.user_amend_count == 1
+
+    def test_platform目录自动创建(self, tmp_path):
+        manager = GateStateManager(str(tmp_path), "android")
+        manager.record_result("GATE-R5", "pass", "确认", "")
+
+        assert (tmp_path / "docs" / "android").exists()
+        assert (tmp_path / "docs" / "android" / "gate-state.json").exists()
+
+    def test_platform文件不存在时返回默认state(self, tmp_path):
+        manager = GateStateManager(str(tmp_path), "android")
+        state = manager.get_gate_state("GATE-R5")
+        assert state.request_count == 0
+        assert state.history == []

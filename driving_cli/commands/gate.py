@@ -309,9 +309,10 @@ def gate_load(gate_ids: tuple):
 @gate_group.command(name="request")
 @click.argument("gate_id")
 @click.option("--path", required=True, help="feature 目录路径")
+@click.option("--platform", default="", help="开发平台（android/iOS/harmony/kuikly），决定 gate-state.json 写入路径")
 @click.option("--context", default=None, help="JSON 字符串，用于模板变量渲染")
 @click.option("--dry-run", is_flag=True, default=False, help="仅展示模板，不执行交互")
-def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
+def gate_request(gate_id: str, path: str, platform: str, context: str, dry_run: bool):
     """执行门禁请求"""
     # 1. 解析 --context JSON
     context_dict = {}
@@ -335,7 +336,7 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
         sys.exit(1)
 
     # 4. 初始化组件
-    state_manager = GateStateManager(path)
+    state_manager = GateStateManager(path, platform)
     gate_state = state_manager.get_gate_state(gate_id)
 
     gate_state_dict = {
@@ -507,12 +508,13 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
         # 非终端环境：模板和选项已输出，提示使用 gate respond
         actions = gate.get("actions", {})
         action_names = list(actions.keys())
+        platform_opt = f' --platform "{platform}"' if platform else ""
         click.echo("")
         click.echo(
             f"💡 非交互环境，请使用以下命令提交选择："
         )
         click.echo(
-            f"  driving gate respond {gate_id} --path \"{path}\" --action <操作名> --note \"说明\""
+            f"  driving gate respond {gate_id} --path \"{path}\"{platform_opt} --action <操作名> --note \"说明\""
         )
         if action_names:
             click.echo(f"  可选操作: {', '.join(action_names)}")
@@ -581,9 +583,10 @@ def gate_request(gate_id: str, path: str, context: str, dry_run: bool):
 @gate_group.command(name="status")
 @click.argument("gate_id", required=False, default=None)
 @click.option("--path", required=True, help="feature 目录路径")
-def gate_status(gate_id: Optional[str], path: str):
+@click.option("--platform", default="", help="开发平台（android/iOS/harmony/kuikly）")
+def gate_status(gate_id: Optional[str], path: str, platform: str):
     """查看门禁状态"""
-    state_manager = GateStateManager(path)
+    state_manager = GateStateManager(path, platform)
 
     # state 文件不存在时输出提示信息
     if not state_manager.state_file.exists():
@@ -606,9 +609,10 @@ def gate_status(gate_id: Optional[str], path: str):
 @gate_group.command(name="history")
 @click.argument("gate_id")
 @click.option("--path", required=True, help="feature 目录路径")
-def gate_history(gate_id: str, path: str):
+@click.option("--platform", default="", help="开发平台（android/iOS/harmony/kuikly）")
+def gate_history(gate_id: str, path: str, platform: str):
     """查看门禁历史"""
-    state_manager = GateStateManager(path)
+    state_manager = GateStateManager(path, platform)
     gate_state = state_manager.get_gate_state(gate_id)
 
     if not gate_state.history:
@@ -622,8 +626,9 @@ def gate_history(gate_id: str, path: str):
 @gate_group.command(name="pass")
 @click.argument("gate_id")
 @click.option("--path", required=True, help="feature 目录路径")
+@click.option("--platform", default="", help="开发平台（android/iOS/harmony/kuikly）")
 @click.option("--note", default="", help="通过说明")
-def gate_pass(gate_id: str, path: str, note: str):
+def gate_pass(gate_id: str, path: str, platform: str, note: str):
     """手动通过门禁"""
     # 1. 加载所有 gate 定义
     all_gates, _system_prompt, user_prompt, self_refine_threshold = _collect_all_gates_data()
@@ -640,7 +645,7 @@ def gate_pass(gate_id: str, path: str, note: str):
         sys.exit(1)
 
     # 3. 初始化状态管理器和前置依赖校验器
-    state_manager = GateStateManager(path)
+    state_manager = GateStateManager(path, platform)
     requires_checker = RequiresChecker(state_manager, all_gates)
 
     # 5. 前置依赖校验
@@ -742,10 +747,11 @@ def gate_pass(gate_id: str, path: str, note: str):
 @gate_group.command(name="respond")
 @click.argument("gate_id")
 @click.option("--path", required=True, help="feature 目录路径")
+@click.option("--platform", default="", help="开发平台（android/iOS/harmony/kuikly）")
 @click.option("--action", required=True, help="操作名称（actions 中的 key）")
 @click.option("--note", default="", help="操作说明（修改类操作时必填）")
 @click.option("--context", default=None, help="JSON 字符串，用于模板变量渲染")
-def gate_respond(gate_id: str, path: str, action: str, note: str, context: str):
+def gate_respond(gate_id: str, path: str, platform: str, action: str, note: str, context: str):
     """非交互式提交门禁操作选择（配合 gate request 在非终端环境使用）"""
     # 1. 解析 --context JSON
     context_dict = {}
@@ -789,7 +795,7 @@ def gate_respond(gate_id: str, path: str, action: str, note: str, context: str):
         sys.exit(1)
 
     # 4. 初始化状态管理器
-    state_manager = GateStateManager(path)
+    state_manager = GateStateManager(path, platform)
     gate_state = state_manager.get_gate_state(gate_id)
 
     gate_state_dict = {

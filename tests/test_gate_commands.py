@@ -664,3 +664,177 @@ def test_property7_重复ID返回第一个仓库(tmp_path_factory, gate, extra_r
     json_start = result.output.index("{")
     data = _json.loads(result.output[json_start:])
     assert data["gates"][0]["name"] == "FIRST_REPO_GATE"
+
+
+# ==================== --platform 参数测试 ====================
+
+
+def _make_blocking_gate(gate_id: str = "GATE-R5") -> dict:
+    """创建一个 blocking 门禁（human_only auto_pass，始终需要交互）"""
+    return {
+        "id": gate_id,
+        "name": f"Gate {gate_id}",
+        "level": "blocking",
+        "requires": [],
+        "location": "test",
+        "trigger": "测试触发",
+        "template": ["请确认"],
+        "actions": {
+            "确认": {"next": "继续", "requires_note": False},
+            "修改": {"next": "重新触发", "requires_note": True},
+        },
+        "auto_pass": {
+            "mode": "full_auto",
+            "conditions": [],
+            "on_pass": {"action": "确认", "next": "自动通过"},
+        },
+    }
+
+
+@pytest.fixture
+def project_with_auto_pass_gate(tmp_path):
+    """提供一个 full_auto 门禁（conditions 为空，始终自动通过）的测试项目"""
+    _make_config(tmp_path, [
+        {"name": "driving", "type": "local", "path": "ai-driving/driving", "local_path": None},
+    ])
+    repo_dir = tmp_path / "ai-driving" / "driving"
+    _make_manifest(repo_dir)
+    _make_gates_json(repo_dir, [_make_blocking_gate("GATE-R5")])
+    return tmp_path
+
+
+class TestGateRequestPlatformOption:
+    """gate request --platform 参数测试"""
+
+    def test_不传platform时state写入docs下(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "request", "GATE-R5",
+                "--path", str(feature_dir),
+            ])
+        assert result.exit_code == 0
+        state_file = feature_dir / "docs" / "gate-state.json"
+        assert state_file.exists()
+
+    def test_传platform_android时state写入docs_android下(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "request", "GATE-R5",
+                "--path", str(feature_dir),
+                "--platform", "android",
+            ])
+        assert result.exit_code == 0
+        state_file = feature_dir / "docs" / "android" / "gate-state.json"
+        assert state_file.exists()
+
+    def test_传platform_iOS时state写入docs_iOS下(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "request", "GATE-R5",
+                "--path", str(feature_dir),
+                "--platform", "iOS",
+            ])
+        assert result.exit_code == 0
+        state_file = feature_dir / "docs" / "iOS" / "gate-state.json"
+        assert state_file.exists()
+
+    def test_传platform时默认路径无state文件(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            runner.invoke(cli, [
+                "gate", "request", "GATE-R5",
+                "--path", str(feature_dir),
+                "--platform", "android",
+            ])
+        default_state_file = feature_dir / "docs" / "gate-state.json"
+        assert not default_state_file.exists()
+
+
+class TestGatePassPlatformOption:
+    """gate pass --platform 参数测试"""
+
+    def test_传platform时state写入正确路径(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "pass", "GATE-R5",
+                "--path", str(feature_dir),
+                "--platform", "harmony",
+            ])
+        assert result.exit_code == 0
+        state_file = feature_dir / "docs" / "harmony" / "gate-state.json"
+        assert state_file.exists()
+
+    def test_不传platform时state写入docs下(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "pass", "GATE-R5",
+                "--path", str(feature_dir),
+            ])
+        assert result.exit_code == 0
+        state_file = feature_dir / "docs" / "gate-state.json"
+        assert state_file.exists()
+
+
+class TestGateStatusPlatformOption:
+    """gate status --platform 参数测试"""
+
+    def test_传platform时读取正确路径的状态(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        # 先写入 android 平台状态
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            runner.invoke(cli, [
+                "gate", "request", "GATE-R5",
+                "--path", str(feature_dir),
+                "--platform", "android",
+            ])
+        # 再读取 android 平台状态
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "status",
+                "--path", str(feature_dir),
+                "--platform", "android",
+            ])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "GATE-R5" in data
+
+    def test_无platform时读取默认路径为空(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        # 只写入 android 平台，不写默认路径
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            runner.invoke(cli, [
+                "gate", "request", "GATE-R5",
+                "--path", str(feature_dir),
+                "--platform", "android",
+            ])
+        # 读取默认路径，应提示无状态
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "status",
+                "--path", str(feature_dir),
+            ])
+        assert result.exit_code == 0
+        assert "尚未记录" in result.output
