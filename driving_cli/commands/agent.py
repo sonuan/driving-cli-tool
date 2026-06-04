@@ -708,8 +708,13 @@ def _export_codex(agent_name: str, data: Dict, agent_dir: Path,
     lines = []
     lines.append(f'name = "{meta.get("name", agent_name)}"')
     if meta.get("description"):
-        desc = meta["description"].replace('"', '\\"')
-        lines.append(f'description = "{desc}"')
+        desc = str(meta["description"]).strip()
+        if "\n" in desc:
+            # 多行 description 使用 TOML 多行字符串，转义内部的 """
+            escaped_desc = desc.replace('\\', '\\\\').replace('"""', '\\"\\"\\"')
+            lines.append(f'description = """\n{escaped_desc}\n"""')
+        else:
+            lines.append(f'description = "{desc.replace(chr(34), chr(92) + chr(34))}"')
     if meta.get("codex_model"):
         lines.append(f'model = "{meta["codex_model"]}"')
     if meta.get("codex_reasoning_effort"):

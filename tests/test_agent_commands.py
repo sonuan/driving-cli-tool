@@ -866,6 +866,44 @@ class TestAgentExportCommand:
         assert 'name = "test-agent"' in content
         assert "developer_instructions" in content
 
+    def test_export_codex_多行description使用多行字符串(self, runner, tmp_path):
+        """description 含换行时应生成 TOML 多行字符串，而非单行双引号"""
+        _make_config(tmp_path, [
+            {"name": "my-local", "type": "local", "path": "ai-driving/my-local", "local_path": None},
+        ])
+        agent_dir = tmp_path / "ai-driving" / "my-local" / "agents" / "multi-desc"
+        agent_dir.mkdir(parents=True)
+        # 模拟 YAML | 块标量解析后含换行的 description
+        (agent_dir / "AGENTS.md").write_text(
+            "---\nname: multi-desc\ndescription: |\n  第一行描述\n\n  要求：\n  - 条件一\n---\n\n正文内容\n",
+            encoding="utf-8",
+        )
+        with patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["agent", "export", "multi-desc", "--tool", "codex"])
+        assert result.exit_code == 0
+        content = (tmp_path / ".codex" / "agents" / "multi-desc.toml").read_text(encoding="utf-8")
+        # 应使用多行字符串格式
+        assert 'description = """' in content
+        assert "第一行描述" in content
+        assert "条件一" in content
+
+    def test_export_codex_单行description使用单行格式(self, runner, tmp_path):
+        """description 无换行时应保持单行双引号格式"""
+        _make_config(tmp_path, [
+            {"name": "my-local", "type": "local", "path": "ai-driving/my-local", "local_path": None},
+        ])
+        agent_dir = tmp_path / "ai-driving" / "my-local" / "agents" / "single-desc"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "AGENTS.md").write_text(
+            "---\nname: single-desc\ndescription: 单行描述内容\n---\n\n正文\n",
+            encoding="utf-8",
+        )
+        with patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["agent", "export", "single-desc", "--tool", "codex"])
+        assert result.exit_code == 0
+        content = (tmp_path / ".codex" / "agents" / "single-desc.toml").read_text(encoding="utf-8")
+        assert 'description = "单行描述内容"' in content
+
     def test_export_codex_sandbox_mode写入TOML(self, runner, tmp_path):
         """codex_sandbox_mode 合法值应写入 TOML sandbox_mode 字段"""
         _make_config(tmp_path, [
