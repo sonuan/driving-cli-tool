@@ -444,6 +444,7 @@ def gate_request(gate_id: str, path: str, platform: str, context: str, dry_run: 
             action="requires_not_met",
             note=requires_result.message,
             feature_path=path,
+            platform=platform,
             context=context_dict or None,
         )
         return
@@ -534,6 +535,7 @@ def gate_request(gate_id: str, path: str, platform: str, context: str, dry_run: 
             result="auto_pass",
             action=action_key,
             feature_path=path,
+            platform=platform,
             context=context_dict or None,
             gate_state=updated_state,
         )
@@ -618,6 +620,7 @@ def gate_request(gate_id: str, path: str, platform: str, context: str, dry_run: 
         action=action_key,
         note=note,
         feature_path=path,
+        platform=platform,
         context=context_dict or None,
         gate_state=updated_state,
     )
@@ -717,6 +720,7 @@ def gate_pass(gate_id: str, path: str, platform: str, note: str):
             action="requires_not_met",
             note=requires_result.message,
             feature_path=path,
+            platform=platform,
         )
         return
 
@@ -783,6 +787,7 @@ def gate_pass(gate_id: str, path: str, platform: str, note: str):
         action=action_key,
         note=note,
         feature_path=path,
+        platform=platform,
         gate_state=gate_state,
     )
 
@@ -906,6 +911,7 @@ def gate_respond(gate_id: str, path: str, platform: str, action: str, note: str,
         action=action_key,
         note=note,
         feature_path=path,
+        platform=platform,
         context=context_dict or None,
         gate_state=updated_state,
     )

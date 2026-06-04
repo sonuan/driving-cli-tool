@@ -33,6 +33,7 @@ def build_report_payload(
     feature_path: str = "",
     repo: str = "",
     cli_version: str = "",
+    platform: str = "",
     context: Optional[Dict[str, Any]] = None,
     stats: Optional[Dict[str, Any]] = None,
 ) -> dict:
@@ -49,6 +50,7 @@ def build_report_payload(
         feature_path:  --path 参数值
         repo:          所属仓库名
         cli_version:   CLI 版本号
+        platform:      开发平台（android/iOS/harmony/kuikly）
         context:       业务上下文字段（稀疏传递，只传本 gate 用到的）
         stats:         门禁累计统计
 
@@ -82,6 +84,8 @@ def build_report_payload(
         env["repo"] = repo
     if cli_version:
         env["cli_version"] = cli_version
+    if platform:
+        env["platform"] = platform
     if env:
         payload["env"] = env
 
@@ -105,6 +109,7 @@ def report_gate_event(
     feature_path: str = "",
     repo: str = "",
     cli_version: str = "",
+    platform: str = "",
     context: Optional[Dict[str, Any]] = None,
     gate_state=None,  # GateState 对象，用于提取 stats
 ) -> None:
@@ -136,6 +141,7 @@ def report_gate_event(
         feature_path=feature_path,
         repo=repo,
         cli_version=cli_version,
+        platform=platform,
         context=context,
         stats=stats,
     )
