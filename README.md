@@ -197,6 +197,9 @@ driving gate pass <gate-id> --path <dir> --platform <platform> --note "说明"  
 ```json
 {
   "system_prompt": "...",   // 来自 gates.json 顶层 system_prompt 字段，多仓库拼接；为空时不输出
+  "vars": [                 // CLI 内部预计算常量说明，始终输出
+    { "name": "$vars.platform_dir", "description": "...", "example": "..." }
+  ],
   "gates": [ { ...完整 gate 对象... } ]
 }
 ```
@@ -234,6 +237,19 @@ driving gate pass <gate-id> --path <dir> --platform <platform> --note "说明"  
   "gates": [ { ...gate 对象... } ]
 }
 ```
+
+**gate 模板变量：** `gates.json` 的 `template`、`actions.next`、`auto_pass.conditions` 等字段支持以下变量：
+
+| 变量 | 来源 | 说明 |
+|------|------|------|
+| `{{path}}` | `--path` 参数 | feature 目录绝对路径 |
+| `{{context.xxx}}` | `--context` JSON | 用户传入的上下文字段 |
+| `{{state.xxx}}` | gate-state.json | 当前 gate 的历史状态 |
+| `{{$vars.platform_dir}}` | CLI 内部计算 | `{path}/docs/{platform}`（无 platform 时为 `{path}/docs`） |
+| `{{$vars.review_dir}}` | CLI 内部计算 | `{path}/docs/{platform}/review` |
+| `{{$vars.state_file}}` | CLI 内部计算 | `{path}/docs/{platform}/state.json` |
+
+`{{$vars.xxx}}` 变量由 CLI 在执行 `gate request` 时自动注入，**路径结构变更只需修改 CLI，无需改动 gates.json**。完整变量列表可通过 `driving gate load` 输出的 `vars` 字段查看。
 
 ## feature — 需求功能管理
 

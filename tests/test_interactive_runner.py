@@ -24,6 +24,8 @@ def mock_renderer():
     """创建 mock TemplateRenderer"""
     renderer = MagicMock()
     renderer.render_lines.return_value = "渲染后的模板内容\n第二行"
+    # render 透传原始字符串，模拟无变量需要替换的情况
+    renderer.render.side_effect = lambda s: s
     return renderer
 
 
@@ -494,3 +496,74 @@ class TestCompleteFlow:
         )
 
         assert warning_idx < rework_idx < failed_idx < template_idx < action_idx
+
+
+class TestActionNextRendering:
+    """验证 action 菜单里 next 字段经过 renderer 渲染"""
+
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
+    def test_action_next_is_rendered_via_renderer(
+        self, mock_echo, mock_input, mock_renderer
+    ):
+        """action.next 字符串应通过 renderer.render() 渲染后展示，而非原始字符串"""
+        # renderer.render 将 {{$vars.state_file}} 替换为真实路径
+        mock_renderer.render.side_effect = lambda s: s.replace(
+            "{{$vars.state_file}}", "/features/login/docs/android/state.json"
+        )
+        mock_input.return_value = "1"
+
+        gate_with_vars = {
+            "id": "GATE-R5",
+            "template": [],
+            "actions": {
+                "确认": {
+                    "next": "将 `{{$vars.state_file}}` 中 `stages.xxx.status` 更新为 `completed`",
+                    "requires_note": False,
+                },
+            },
+        }
+        runner = InteractiveRunner(renderer=mock_renderer)
+        runner.run(
+            gate=gate_with_vars,
+            condition_results=[],
+            user_amend_count=0,
+            forced_interactive=False,
+        )
+
+        echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
+        # 展示的文本应包含渲染后的路径，而不是原始模板变量
+        assert any(
+            "/features/login/docs/android/state.json" in text for text in echo_texts
+        )
+        assert not any("{{$vars.state_file}}" in text for text in echo_texts)
+
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
+    def test_renderer_render_called_for_each_action(
+        self, mock_echo, mock_input, mock_renderer
+    ):
+        """每个 action 的 next 都应调用 renderer.render()"""
+        mock_renderer.render.side_effect = lambda s: s
+        mock_input.return_value = "1"
+
+        gate_with_two_actions = {
+            "id": "GATE-R5",
+            "template": [],
+            "actions": {
+                "确认": {"next": "next_a", "requires_note": False},
+                "修改": {"next": "next_b", "requires_note": True},
+            },
+        }
+        runner = InteractiveRunner(renderer=mock_renderer)
+        runner.run(
+            gate=gate_with_two_actions,
+            condition_results=[],
+            user_amend_count=0,
+            forced_interactive=False,
+        )
+
+        # render 被调用了两次（每个 action 各一次）
+        render_calls = [call[0][0] for call in mock_renderer.render.call_args_list]
+        assert "next_a" in render_calls
+        assert "next_b" in render_calls

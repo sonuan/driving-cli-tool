@@ -176,6 +176,49 @@ def _get_user_prompt() -> str:
     return user_prompt
 
 
+def _build_gate_vars(path: str, platform: str) -> dict:
+    """预计算 gates.json 模板中可用的 CLI 内部常量（{{$vars.xxx}} 变量）。
+
+    所有常量以 $vars. 为前缀，集中在此处维护，修改路径结构只需改这一个函数。
+
+    当前常量：
+      $vars.platform_dir  → {path}/docs/{platform}（无 platform 时为 {path}/docs）
+      $vars.review_dir    → $vars.platform_dir/review
+      $vars.state_file    → $vars.platform_dir/state.json
+    """
+    if platform:
+        platform_dir = f"{path}/docs/{platform}"
+    else:
+        platform_dir = f"{path}/docs"
+
+    return {
+        "$vars.platform_dir": platform_dir,
+        "$vars.review_dir": f"{platform_dir}/review",
+        "$vars.state_file": f"{platform_dir}/state.json",
+    }
+
+
+# 内部常量的静态说明，注入到 gate load 输出的 vars 字段
+# 供用户了解 gates.json 中可用的 {{$vars.xxx}} 变量
+_GATE_VARS_SCHEMA = [
+    {
+        "name": "$vars.platform_dir",
+        "description": "平台文档根目录：{path}/docs/{platform}，未传 --platform 时为 {path}/docs",
+        "example": "{{$vars.platform_dir}}/state.json",
+    },
+    {
+        "name": "$vars.review_dir",
+        "description": "审查结果目录：{path}/docs/{platform}/review，未传 --platform 时为 {path}/docs/review",
+        "example": "{{$vars.review_dir}}/review-result.json",
+    },
+    {
+        "name": "$vars.state_file",
+        "description": "工作流状态文件：{path}/docs/{platform}/state.json，未传 --platform 时为 {path}/docs/state.json",
+        "example": "{{$vars.state_file}}",
+    },
+]
+
+
 @click.group(name="gate")
 def gate_group():
     """门禁规则管理
@@ -255,9 +298,9 @@ def gate_load(gate_ids: tuple):
 
     if not gate_ids:
         # 不传 ID：返回全部
-        result: Dict = {"gates": all_gates}
+        result: Dict = {"vars": _GATE_VARS_SCHEMA, "gates": all_gates}
         if system_prompt:
-            result = {"system_prompt": system_prompt, "gates": all_gates}
+            result = {"system_prompt": system_prompt, "vars": _GATE_VARS_SCHEMA, "gates": all_gates}
         click.echo(json_module.dumps(result, ensure_ascii=False, indent=2))
         return
 
@@ -292,17 +335,17 @@ def gate_load(gate_ids: tuple):
     # 任一 ID 找不到 → gates 为空数组
     missing = [gid for gid in gate_ids if gid.lower() not in found]
     if missing:
-        result = {"gates": []}
+        result = {"vars": _GATE_VARS_SCHEMA, "gates": []}
         if system_prompt:
-            result = {"system_prompt": system_prompt, "gates": []}
+            result = {"system_prompt": system_prompt, "vars": _GATE_VARS_SCHEMA, "gates": []}
         click.echo(json_module.dumps(result, ensure_ascii=False, indent=2))
         return
 
     # 按传入顺序排列结果
     matched_gates = [found[gid.lower()] for gid in gate_ids]
-    result = {"gates": matched_gates}
+    result = {"vars": _GATE_VARS_SCHEMA, "gates": matched_gates}
     if system_prompt:
-        result = {"system_prompt": system_prompt, "gates": matched_gates}
+        result = {"system_prompt": system_prompt, "vars": _GATE_VARS_SCHEMA, "gates": matched_gates}
     click.echo(json_module.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -348,7 +391,7 @@ def gate_request(gate_id: str, path: str, platform: str, context: str, dry_run: 
         "last_result": gate_state.last_result,
     }
 
-    renderer = TemplateRenderer(path, context_dict, gate_state_dict)
+    renderer = TemplateRenderer(path, context_dict, gate_state_dict, _build_gate_vars(path, platform))
     checker = ConditionChecker(renderer)
     auto_pass_engine = AutoPassEngine(checker)
     requires_checker = RequiresChecker(state_manager, all_gates)
@@ -370,9 +413,9 @@ def gate_request(gate_id: str, path: str, platform: str, context: str, dry_run: 
             for key, action_def in actions.items():
                 # 兼容 actions 值为字符串的旧格式
                 if isinstance(action_def, str):
-                    next_desc = action_def
+                    next_desc = renderer.render(action_def)
                 else:
-                    next_desc = action_def.get("next", "")
+                    next_desc = renderer.render(action_def.get("next", ""))
                 click.echo(f"  - {key} — {next_desc}")
         return
 
@@ -694,7 +737,7 @@ def gate_pass(gate_id: str, path: str, platform: str, note: str):
         "pass_rate": gate_state.pass_rate,
         "last_result": gate_state.last_result,
     }
-    renderer = TemplateRenderer(path, {}, gate_state_dict)
+    renderer = TemplateRenderer(path, {}, gate_state_dict, _build_gate_vars(path, platform))
     next_text = ""
     if action_key and action_key in actions:
         action_def = actions[action_key]
@@ -806,7 +849,7 @@ def gate_respond(gate_id: str, path: str, platform: str, action: str, note: str,
         "pass_rate": gate_state.pass_rate,
         "last_result": gate_state.last_result,
     }
-    renderer = TemplateRenderer(path, context_dict, gate_state_dict)
+    renderer = TemplateRenderer(path, context_dict, gate_state_dict, _build_gate_vars(path, platform))
 
     # 5. 确定 result_type
     selected_action = actions[action_key]

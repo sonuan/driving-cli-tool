@@ -838,3 +838,55 @@ class TestGateStatusPlatformOption:
             ])
         assert result.exit_code == 0
         assert "尚未记录" in result.output
+
+
+class TestGateLoadVarsField:
+    """gate load 输出中 vars 字段测试"""
+
+    def test_load全部时输出包含vars字段(self, runner, project_with_gates):
+        with patch("driving_cli.commands.gate.find_project_root", return_value=project_with_gates):
+            result = runner.invoke(cli, ["gate", "load"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "vars" in data
+
+    def test_vars字段为列表(self, runner, project_with_gates):
+        with patch("driving_cli.commands.gate.find_project_root", return_value=project_with_gates):
+            result = runner.invoke(cli, ["gate", "load"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert isinstance(data["vars"], list)
+
+    def test_vars每条记录包含三个必需字段(self, runner, project_with_gates):
+        with patch("driving_cli.commands.gate.find_project_root", return_value=project_with_gates):
+            result = runner.invoke(cli, ["gate", "load"])
+        assert result.exit_code == 0
+        for item in json.loads(result.output)["vars"]:
+            assert "name" in item
+            assert "description" in item
+            assert "example" in item
+
+    def test_vars包含三个内置常量(self, runner, project_with_gates):
+        with patch("driving_cli.commands.gate.find_project_root", return_value=project_with_gates):
+            result = runner.invoke(cli, ["gate", "load"])
+        assert result.exit_code == 0
+        names = [v["name"] for v in json.loads(result.output)["vars"]]
+        assert "$vars.platform_dir" in names
+        assert "$vars.review_dir" in names
+        assert "$vars.state_file" in names
+
+    def test_load指定id时也包含vars字段(self, runner, project_with_gates):
+        with patch("driving_cli.commands.gate.find_project_root", return_value=project_with_gates):
+            result = runner.invoke(cli, ["gate", "load", "GATE-R1"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "vars" in data
+        assert isinstance(data["vars"], list)
+
+    def test_load不存在id时也包含vars字段(self, runner, project_with_gates):
+        with patch("driving_cli.commands.gate.find_project_root", return_value=project_with_gates):
+            result = runner.invoke(cli, ["gate", "load", "GATE-MISSING"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "vars" in data
+        assert data["gates"] == []

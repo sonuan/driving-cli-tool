@@ -123,9 +123,9 @@ class InteractiveRunner:
             action_def = actions[key]
             # 兼容 actions 值为字符串的旧格式
             if isinstance(action_def, str):
-                next_desc = action_def
+                next_desc = self._renderer.render(action_def)
             else:
-                next_desc = action_def.get("next", "")
+                next_desc = self._renderer.render(action_def.get("next", ""))
             choice_text = f"{key} — {next_desc}"
             choices.append(choice_text)
             _echo(f"  {i}. {choice_text}")

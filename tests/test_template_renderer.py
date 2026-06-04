@@ -180,3 +180,152 @@ class TestRenderLines:
         renderer = TemplateRenderer(path="hello", context={}, state={})
         result = renderer.render_lines(["{{path}}"])
         assert result == "hello"
+
+
+class TestRenderVarsVariable:
+    """测试 {{$vars.xxx}} CLI 内部预计算变量替换"""
+
+    def test_渲染已注入的vars变量(self):
+        renderer = TemplateRenderer(
+            path="/features/login",
+            context={},
+            state={},
+            vars={"$vars.platform_dir": "/features/login/docs/android"},
+        )
+        result = renderer.render("路径: {{$vars.platform_dir}}")
+        assert result == "路径: /features/login/docs/android"
+
+    def test_渲染多个vars变量(self):
+        renderer = TemplateRenderer(
+            path="/features/login",
+            context={},
+            state={},
+            vars={
+                "$vars.platform_dir": "/features/login/docs/android",
+                "$vars.review_dir": "/features/login/docs/android/review",
+                "$vars.state_file": "/features/login/docs/android/state.json",
+            },
+        )
+        result = renderer.render(
+            "{{$vars.platform_dir}} / {{$vars.review_dir}} / {{$vars.state_file}}"
+        )
+        assert result == (
+            "/features/login/docs/android"
+            " / /features/login/docs/android/review"
+            " / /features/login/docs/android/state.json"
+        )
+
+    def test_vars未注入时返回空字符串(self):
+        renderer = TemplateRenderer(path="", context={}, state={})
+        result = renderer.render("{{$vars.missing}}")
+        assert result == ""
+
+    def test_vars为None时返回空字符串(self):
+        renderer = TemplateRenderer(path="", context={}, state={}, vars=None)
+        result = renderer.render("{{$vars.platform_dir}}")
+        assert result == ""
+
+    def test_vars变量和其他变量混合渲染(self):
+        renderer = TemplateRenderer(
+            path="/features/login",
+            context={"stage": "requirement"},
+            state={},
+            vars={"$vars.state_file": "/features/login/docs/android/state.json"},
+        )
+        result = renderer.render(
+            "将 `{{$vars.state_file}}` 中 `stages.{{context.stage}}.status` 更新为 `completed`"
+        )
+        assert result == (
+            "将 `/features/login/docs/android/state.json` 中 "
+            "`stages.requirement.status` 更新为 `completed`"
+        )
+
+    def test_vars不影响同名context变量(self):
+        """$vars.xxx 前缀与 context.xxx 独立，互不干扰"""
+        renderer = TemplateRenderer(
+            path="",
+            context={"platform_dir": "context_value"},
+            state={},
+            vars={"$vars.platform_dir": "vars_value"},
+        )
+        assert renderer.render("{{$vars.platform_dir}}") == "vars_value"
+        assert renderer.render("{{context.platform_dir}}") == "context_value"
+
+    def test_旧格式不以vars前缀则不匹配(self):
+        """不带 $vars. 前缀的旧格式无法匹配"""
+        renderer = TemplateRenderer(
+            path="",
+            context={},
+            state={},
+            vars={"$vars.platform_dir": "correct_value"},
+        )
+        # 旧格式 {{$platform_dir}} 不能匹配到新 key
+        result = renderer.render("{{$platform_dir}}")
+        assert result == ""
+
+    def test_vars键不以dollar_vars开头时不匹配(self):
+        """vars 中不以 $vars. 开头的键，通过 {{$vars.xxx}} 无法匹配"""
+        renderer = TemplateRenderer(
+            path="",
+            context={},
+            state={},
+            vars={"platform_dir": "should_not_match"},
+        )
+        result = renderer.render("{{$vars.platform_dir}}")
+        assert result == ""
+
+
+class TestBuildGateVars:
+    """测试 _build_gate_vars 内部常量计算函数"""
+
+    def test_有platform时platform_dir包含platform(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        vars_ = _build_gate_vars("/features/login", "android")
+        assert vars_["$vars.platform_dir"] == "/features/login/docs/android"
+
+    def test_有platform时review_dir在platform_dir下(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        vars_ = _build_gate_vars("/features/login", "android")
+        assert vars_["$vars.review_dir"] == "/features/login/docs/android/review"
+
+    def test_有platform时state_file在platform_dir下(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        vars_ = _build_gate_vars("/features/login", "android")
+        assert vars_["$vars.state_file"] == "/features/login/docs/android/state.json"
+
+    def test_无platform时platform_dir为docs(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        vars_ = _build_gate_vars("/features/login", "")
+        assert vars_["$vars.platform_dir"] == "/features/login/docs"
+
+    def test_无platform时review_dir在docs下(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        vars_ = _build_gate_vars("/features/login", "")
+        assert vars_["$vars.review_dir"] == "/features/login/docs/review"
+
+    def test_无platform时state_file在docs下(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        vars_ = _build_gate_vars("/features/login", "")
+        assert vars_["$vars.state_file"] == "/features/login/docs/state.json"
+
+    def test_不同platform产生不同paths(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        android = _build_gate_vars("/p", "android")
+        ios = _build_gate_vars("/p", "iOS")
+        assert android["$vars.platform_dir"] != ios["$vars.platform_dir"]
+        assert android["$vars.review_dir"] != ios["$vars.review_dir"]
+        assert android["$vars.state_file"] != ios["$vars.state_file"]
+
+    def test_三个常量key全部存在(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        vars_ = _build_gate_vars("/p", "android")
+        assert "$vars.platform_dir" in vars_
+        assert "$vars.review_dir" in vars_
+        assert "$vars.state_file" in vars_
+
+    def test_path和platform组合正确拼接(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        vars_ = _build_gate_vars("/workspace/feature-x", "harmony")
+        assert vars_["$vars.platform_dir"] == "/workspace/feature-x/docs/harmony"
+        assert vars_["$vars.state_file"].startswith("/workspace/feature-x/docs/harmony/")
+        assert vars_["$vars.review_dir"].startswith("/workspace/feature-x/docs/harmony/")
