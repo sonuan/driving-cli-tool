@@ -84,10 +84,12 @@ def build_report_payload(
         env["repo"] = repo
     if cli_version:
         env["cli_version"] = cli_version
-    if platform:
-        env["platform"] = platform
     if env:
         payload["env"] = env
+
+    # platform 直接挂顶层
+    if platform:
+        payload["platform"] = platform
 
     # actor：从 git config 读取执行者姓名
     actor = get_git_user()

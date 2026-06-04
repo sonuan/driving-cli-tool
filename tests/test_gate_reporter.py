@@ -35,33 +35,36 @@ class TestBuildReportPayload:
         assert payload["last_event"]["result"] == "pass"
         assert payload["last_event"]["action"] == "确认"
 
-    def test_platform有值时写入env(self):
+    def test_platform有值时写入顶层(self):
         payload = build_report_payload(**self._base_kwargs(platform="android"))
-        assert "env" in payload
-        assert payload["env"]["platform"] == "android"
+        assert payload["platform"] == "android"
+        # platform 不再在 env 内
+        assert "platform" not in payload.get("env", {})
 
-    def test_platform为空时不写入env(self):
+    def test_platform为空时不写入顶层(self):
         payload = build_report_payload(**self._base_kwargs(platform=""))
-        # env 字段要么不存在，要么不含 platform
-        env = payload.get("env", {})
-        assert "platform" not in env
+        assert "platform" not in payload
 
-    def test_platform不传时不写入env(self):
+    def test_platform不传时不写入顶层(self):
         payload = build_report_payload(**self._base_kwargs())
-        env = payload.get("env", {})
-        assert "platform" not in env
+        assert "platform" not in payload
 
-    def test_platform与repo和cli_version共存于env(self):
+    def test_platform与repo和cli_version分离(self):
         payload = build_report_payload(
             **self._base_kwargs(platform="harmony", repo="driving", cli_version="1.2.8")
         )
-        assert payload["env"]["platform"] == "harmony"
+        # platform 在顶层
+        assert payload["platform"] == "harmony"
+        # repo/cli_version 仍在 env
         assert payload["env"]["repo"] == "driving"
         assert payload["env"]["cli_version"] == "1.2.8"
+        # env 不含 platform
+        assert "platform" not in payload["env"]
 
-    def test_platform单独存在时env只含platform(self):
+    def test_platform单独存在时env不存在(self):
         payload = build_report_payload(**self._base_kwargs(platform="iOS"))
-        assert payload["env"] == {"platform": "iOS"}
+        assert payload["platform"] == "iOS"
+        assert "env" not in payload
 
     def test_repo有值时写入env(self):
         payload = build_report_payload(**self._base_kwargs(repo="driving-base"))
@@ -122,9 +125,10 @@ class TestBuildReportPayload:
         assert payload["last_event"]["triggered_at"] == "2026/06/04 12:00"
 
     @pytest.mark.parametrize("platform", ["android", "iOS", "harmony", "kuikly"])
-    def test_所有平台值均正确写入env(self, platform):
+    def test_所有平台值均正确写入顶层(self, platform):
         payload = build_report_payload(**self._base_kwargs(platform=platform))
-        assert payload["env"]["platform"] == platform
+        assert payload["platform"] == platform
+        assert "platform" not in payload.get("env", {})
 
 
 # ==================== report_gate_event ====================
@@ -164,14 +168,14 @@ class TestReportGateEvent:
 
         return captured
 
-    def test_platform传入时payload的env含platform(self):
+    def test_platform传入时payload顶层含platform(self):
         captured = self._invoke({"platform": "android"})
-        assert captured["payload"]["env"]["platform"] == "android"
+        assert captured["payload"]["platform"] == "android"
+        assert "platform" not in captured["payload"].get("env", {})
 
-    def test_platform未传时payload的env不含platform(self):
+    def test_platform未传时payload顶层不含platform(self):
         captured = self._invoke()
-        env = captured.get("payload", {}).get("env", {})
-        assert "platform" not in env
+        assert "platform" not in captured.get("payload", {})
 
     def test_webhook未配置时静默跳过不抛异常(self):
         with patch(
