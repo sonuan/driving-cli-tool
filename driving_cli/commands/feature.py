@@ -14,12 +14,12 @@ from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.logger import log_error, log_info, log_warning
 
 # 精简摘要字段集合
-SUMMARY_FIELDS = {"name", "title", "description", "status", "urls", "path", "repo"}
+SUMMARY_FIELDS = {"name", "title", "description", "status", "urls", "path", "repo", "quarter"}
 
 # 完整字段集合（含计算字段）
 ALL_FIELDS = {
     "name", "title", "description", "status", "priority",
-    "module", "assignee", "tags", "urls", "path", "repo",
+    "module", "assignee", "tags", "urls", "path", "repo", "quarter",
 }
 
 
@@ -95,6 +95,57 @@ def scan_features_from_dir(repo_name: str, features_dir: Path, quiet: bool = Fal
 
         if not quiet:
             log_info(f"发现 feature: {feature_info['name']} (来自仓库 {repo_name})")
+
+    return features
+
+
+def scan_features_deep(module_name: str, module_dir: Path, repo_path: str, quiet: bool = False) -> List[Dict]:
+    """深度扫描模块目录，兼容多层目录结构（如 {年度-季度}/{日期}-{feature}/FEATURE.md）
+
+    使用 glob 递归查找所有 FEATURE.md，适用于 tags 包含 "features" 的仓库。
+    path 字段记录相对于项目 ai-driving 根的完整路径。
+
+    Args:
+        module_name: 业务模块名称（如 "family"）
+        module_dir: 模块目录绝对路径
+        repo_path: 仓库相对路径（如 "ai-driving/aidoc"）
+        quiet: 静默模式，不输出日志
+
+    Returns:
+        List[Dict]: feature 列表，每条包含所有 frontmatter 字段及 path、repo、quarter
+    """
+    features = []
+
+    for feature_md in sorted(module_dir.glob("**/FEATURE.md")):
+        feature_dir = feature_md.parent
+
+        feature_info = parse_feature_yaml(feature_md)
+        if feature_info is None:
+            if not quiet:
+                log_warning(f"跳过 {feature_dir.name}：FEATURE.md 缺少 name 字段或解析失败")
+            continue
+
+        # 计算相对于 module_dir 的路径，提取中间层级（如 "2026-Q2"）
+        try:
+            rel_parts = feature_dir.relative_to(module_dir).parts
+        except ValueError:
+            rel_parts = (feature_dir.name,)
+
+        # 构建完整路径：{repo_path}/{module_name}/{...中间层级...}/{feature_dir}/
+        path_parts = [repo_path, module_name] + list(rel_parts)
+        feature_info["path"] = "/".join(path_parts) + "/"
+        feature_info["repo"] = module_name
+
+        # 将中间层级（如季度 "2026-Q2"）存入 quarter 字段，方便过滤
+        if len(rel_parts) >= 2:
+            feature_info["quarter"] = rel_parts[0]
+        else:
+            feature_info["quarter"] = ""
+
+        features.append(feature_info)
+
+        if not quiet:
+            log_info(f"发现 feature: {feature_info['name']} (来自模块 {module_name})")
 
     return features
 
@@ -195,9 +246,10 @@ def _collect_feature_modules(config_manager: ConfigManager, project_root: Path) 
     规则：
     1. 若仓库有 modules，展开每个 module，path = {repo.path}/{module.name}
     2. 无论是否有 modules，始终追加 {repo.path}/features 作为兜底条目
+    3. 仓库 tags 包含 "features" 时，标记 deep=True，扫描时使用深度递归模式
 
     Returns:
-        List[Dict]: 每条包含 name、description、path
+        List[Dict]: 每条包含 name、description、path、deep（bool）、repo_path（str）
     """
     try:
         repos = config_manager.get_all_repos()
@@ -206,25 +258,34 @@ def _collect_feature_modules(config_manager: ConfigManager, project_root: Path) 
 
     result = []
     for repo in repos:
+        is_deep = bool(repo.tags and "features" in repo.tags)
+        has_modules = bool(repo.modules)  # 有具体 module 条目时为 True
         if repo.modules:
             for mod in repo.modules:
                 result.append({
                     "name": mod.name,
                     "description": mod.description,
                     "path": f"{repo.path}/{mod.name}",
+                    "deep": is_deep,
+                    "repo_path": repo.path,
                 })
-        # 始终追加 features 目录作为兜底
-        result.append({
-            "name": repo.name,
-            "description": repo.description or "",
-            "path": f"{repo.path}/features",
-        })
+        # 非 deep 仓库始终追加 features 兜底；deep 仓库在无 modules 条目时也追加兜底
+        if not is_deep or not has_modules:
+            result.append({
+                "name": repo.name,
+                "description": repo.description or "",
+                "path": f"{repo.path}/features",
+                "deep": False,
+                "repo_path": repo.path,
+            })
 
     return result
 
 
 @feature_group.command(name="modules")
-def feature_modules():
+@click.option("--features-only", "features_only", is_flag=True, default=False,
+              help="只输出 tags 包含 'features' 的仓库的模块")
+def feature_modules(features_only: bool):
     """列出所有仓库的 features 模块路径，以 JSON 数组格式输出
 
     聚合所有仓库的 modules 字段，同时兜底追加每个仓库的 features 目录。
@@ -232,13 +293,25 @@ def feature_modules():
     - 所有仓库：始终追加 {repo.path}/features 作为兜底条目
 
     输出字段：name、description、path
+
+    \b
+    示例：
+        driving feature modules
+        driving feature modules --features-only
     """
     import json as _json
 
     project_root = find_project_root()
     config_manager = ConfigManager(project_root)
 
-    result = _collect_feature_modules(config_manager, project_root)
+    raw = _collect_feature_modules(config_manager, project_root)
+
+    # --features-only：只保留 deep=True（即 tags 含 features）的条目
+    if features_only:
+        raw = [m for m in raw if m.get("deep")]
+
+    # 只输出对外字段，过滤内部辅助字段
+    result = [{"name": m["name"], "description": m["description"], "path": m["path"]} for m in raw]
     click.echo(_json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -292,10 +365,20 @@ def feature_list(repo_name: Optional[str], keywords: Tuple[str, ...], detail: bo
                     mod_path = project_root / mod_entry["path"]
                     if not mod_path.exists():
                         continue
-                    # mod_path 本身就是 features 根目录，扫描其子目录
-                    mod_features = scan_features_from_dir(
-                        mod_entry["name"], mod_path, quiet=True
-                    )
+                    if mod_entry.get("deep"):
+                        # 深度递归模式：适用于 tags 含 "features" 的仓库
+                        # 结构：{module}/{年度-季度}/{日期}-{feature}/FEATURE.md
+                        mod_features = scan_features_deep(
+                            module_name=mod_entry["name"],
+                            module_dir=mod_path,
+                            repo_path=mod_entry["repo_path"],
+                            quiet=True,
+                        )
+                    else:
+                        # 普通模式：mod_path 本身就是 features 根目录，扫描其子目录
+                        mod_features = scan_features_from_dir(
+                            mod_entry["name"], mod_path, quiet=True
+                        )
                     all_features.extend(mod_features)
 
         # 关键词过滤（支持逗号分割，如 --keywords kw1,kw2,kw3）

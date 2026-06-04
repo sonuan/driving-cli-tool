@@ -526,7 +526,7 @@ class TestFeatureModulesCommand:
         assert "ai-driving/other-repo/features" in paths
 
     def test_modules_returns_repo_modules_when_set(self, runner, tmp_path):
-        """仓库有 modules 时，返回每个 module 的 name/description/path，同时追加 features 目录"""
+        """tags=features 的仓库有 modules 时，只返回每个 module 的 name/description/path，不追加 features 兜底"""
         _make_config_with_tags(tmp_path, [
             {
                 "name": "feature-repo", "type": "local", "path": "ai-driving/feature-repo",
@@ -545,11 +545,11 @@ class TestFeatureModulesCommand:
         # modules 展开
         assert "ai-driving/feature-repo/order" in paths
         assert "ai-driving/feature-repo/pay" in paths
-        # features 目录兜底
-        assert "ai-driving/feature-repo/features" in paths
+        # tags=features 且有 modules 时，不追加 features 兜底
+        assert "ai-driving/feature-repo/features" not in paths
 
     def test_modules_path_format_is_repo_path_slash_module_name(self, runner, tmp_path):
-        """modules 的 path 格式为 {repo.path}/{module.name}"""
+        """modules 的 path 格式为 {repo.path}/{module.name}，tags=features 有 modules 时不追加 features 兜底"""
         _make_config_with_tags(tmp_path, [
             {
                 "name": "my-repo", "type": "local", "path": "ai-driving/my-repo",
@@ -563,10 +563,11 @@ class TestFeatureModulesCommand:
         data = json.loads(result.output)
         paths = {item["path"] for item in data}
         assert "ai-driving/my-repo/chat" in paths
-        assert "ai-driving/my-repo/features" in paths
+        # tags=features 且有 modules 时，不追加 features 兜底
+        assert "ai-driving/my-repo/features" not in paths
 
     def test_modules_fallback_features_dir_always_present(self, runner, tmp_path):
-        """无论 modules 是否为空，{repo.path}/features 始终出现在输出中"""
+        """tags=features 但 modules 为空时，兜底追加 {repo.path}/features"""
         _make_config_with_tags(tmp_path, [
             {
                 "name": "no-modules-repo", "type": "local", "path": "ai-driving/no-modules-repo",
@@ -583,7 +584,7 @@ class TestFeatureModulesCommand:
         assert data[0]["path"] == "ai-driving/no-modules-repo/features"
 
     def test_modules_merges_multiple_repos(self, runner, tmp_path):
-        """多个仓库的 modules 合并输出，同时每个仓库都有 features 目录兜底"""
+        """多个仓库的 modules 合并输出；tags=features 有 modules 的仓库不追加 features 兜底，非 features 仓库追加"""
         _make_config_with_tags(tmp_path, [
             {
                 "name": "repo-a", "type": "local", "path": "ai-driving/repo-a",
@@ -609,9 +610,10 @@ class TestFeatureModulesCommand:
         # modules 展开
         assert "ai-driving/repo-a/mod1" in paths
         assert "ai-driving/repo-b/mod2" in paths
-        # 所有仓库的 features 目录都在
-        assert "ai-driving/repo-a/features" in paths
-        assert "ai-driving/repo-b/features" in paths
+        # tags=features 且有 modules 的仓库，不追加 features 兜底
+        assert "ai-driving/repo-a/features" not in paths
+        assert "ai-driving/repo-b/features" not in paths
+        # 非 features 仓库始终追加 features 兜底
         assert "ai-driving/base-repo/features" in paths
 
     def test_modules_output_contains_required_fields(self, runner, tmp_path):
@@ -631,6 +633,66 @@ class TestFeatureModulesCommand:
             assert "name" in item
             assert "description" in item
             assert "path" in item
+
+    def test_modules_features_only_过滤非features仓库(self, runner, tmp_path):
+        """--features-only 只输出 tags 含 features 的仓库模块，过滤其余仓库"""
+        _make_config_with_tags(tmp_path, [
+            {
+                "name": "aidoc", "type": "local", "path": "ai-driving/aidoc",
+                "local_path": None, "tags": ["features"],
+                "modules": [{"name": "family", "description": "家族"}],
+            },
+            {
+                "name": "base-repo", "type": "local", "path": "ai-driving/base-repo",
+                "local_path": None, "tags": ["base"],
+                "modules": [],
+            },
+        ])
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["feature", "modules", "--features-only"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        paths = {item["path"] for item in data}
+        # 只保留 features 仓库的 module
+        assert "ai-driving/aidoc/family" in paths
+        # base-repo 的兜底条目被过滤掉
+        assert "ai-driving/base-repo/features" not in paths
+
+    def test_modules_features_only_无features仓库时返回空(self, runner, tmp_path):
+        """--features-only 时若无任何 tags=features 的仓库，返回空数组"""
+        _make_config_with_tags(tmp_path, [
+            {
+                "name": "base-repo", "type": "local", "path": "ai-driving/base-repo",
+                "local_path": None, "tags": ["base"],
+                "modules": [],
+            },
+        ])
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["feature", "modules", "--features-only"])
+        assert result.exit_code == 0
+        assert json.loads(result.output) == []
+
+    def test_modules_不加参数时仍输出全部(self, runner, tmp_path):
+        """不加 --features-only 时行为不变，输出所有仓库的模块"""
+        _make_config_with_tags(tmp_path, [
+            {
+                "name": "aidoc", "type": "local", "path": "ai-driving/aidoc",
+                "local_path": None, "tags": ["features"],
+                "modules": [{"name": "family", "description": "家族"}],
+            },
+            {
+                "name": "base-repo", "type": "local", "path": "ai-driving/base-repo",
+                "local_path": None, "tags": ["base"],
+                "modules": [],
+            },
+        ])
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["feature", "modules"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        paths = {item["path"] for item in data}
+        assert "ai-driving/aidoc/family" in paths
+        assert "ai-driving/base-repo/features" in paths
 
     def test_feature_list_traverses_modules_paths(self, runner, tmp_path):
         """feature list 从 modules 聚合的路径遍历，扫描各模块目录下的 features"""
@@ -661,7 +723,136 @@ class TestFeatureModulesCommand:
         assert "pay-confirm" in names
 
 
-# ==================== 属性测试 ====================
+# ==================== scan_features_deep 单元测试 ====================
+
+
+from driving_cli.commands.feature import scan_features_deep
+
+
+class TestScanFeaturesDeep:
+    def _make_deep_feature(self, module_dir: Path, quarter: str, feature_name: str, name: str, **kwargs) -> Path:
+        """在 module_dir/{quarter}/{feature_name}/FEATURE.md 创建测试用文件"""
+        feature_dir = module_dir / quarter / feature_name
+        return _make_feature_md(feature_dir.parent, feature_name, name, **kwargs)
+
+    def test_扫描多层目录结构(self, tmp_path):
+        """能正确扫描 {module}/{quarter}/{feature}/FEATURE.md 结构"""
+        module_dir = tmp_path / "family"
+        self._make_deep_feature(module_dir, "2026-Q2", "feat-a", "feat-a", title="功能A")
+        self._make_deep_feature(module_dir, "2026-Q2", "feat-b", "feat-b", title="功能B")
+
+        result = scan_features_deep("family", module_dir, "ai-driving/aidoc", quiet=True)
+        assert len(result) == 2
+        names = {f["name"] for f in result}
+        assert names == {"feat-a", "feat-b"}
+
+    def test_quarter字段正确提取(self, tmp_path):
+        """quarter 字段应等于第一层子目录名（如 2026-Q2）"""
+        module_dir = tmp_path / "message"
+        self._make_deep_feature(module_dir, "2026-Q2", "msg-feat", "msg-feat")
+
+        result = scan_features_deep("message", module_dir, "ai-driving/aidoc", quiet=True)
+        assert len(result) == 1
+        assert result[0]["quarter"] == "2026-Q2"
+
+    def test_path格式含完整层级(self, tmp_path):
+        """path 字段应包含 repo_path/module/quarter/feature_dir/"""
+        module_dir = tmp_path / "family"
+        self._make_deep_feature(module_dir, "2026-Q2", "family-bounty", "family-bounty")
+
+        result = scan_features_deep("family", module_dir, "ai-driving/aidoc", quiet=True)
+        assert len(result) == 1
+        assert result[0]["path"] == "ai-driving/aidoc/family/2026-Q2/family-bounty/"
+
+    def test_repo字段等于module_name(self, tmp_path):
+        """repo 字段应等于传入的 module_name"""
+        module_dir = tmp_path / "chatroom"
+        self._make_deep_feature(module_dir, "2026-Q2", "chat-feat", "chat-feat")
+
+        result = scan_features_deep("chatroom", module_dir, "ai-driving/aidoc", quiet=True)
+        assert result[0]["repo"] == "chatroom"
+
+    def test_跨多个季度目录(self, tmp_path):
+        """跨多个季度目录时，所有 feature 都能扫描到"""
+        module_dir = tmp_path / "family"
+        self._make_deep_feature(module_dir, "2026-Q1", "feat-q1", "feat-q1")
+        self._make_deep_feature(module_dir, "2026-Q2", "feat-q2", "feat-q2")
+
+        result = scan_features_deep("family", module_dir, "ai-driving/aidoc", quiet=True)
+        assert len(result) == 2
+        quarters = {f["quarter"] for f in result}
+        assert quarters == {"2026-Q1", "2026-Q2"}
+
+    def test_跳过缺少name的FEATURE_MD(self, tmp_path):
+        """FEATURE.md 缺少 name 字段时跳过"""
+        module_dir = tmp_path / "family"
+        self._make_deep_feature(module_dir, "2026-Q2", "valid", "valid-feat")
+        # 无效的 FEATURE.md
+        bad_dir = module_dir / "2026-Q2" / "bad-feat"
+        bad_dir.mkdir(parents=True, exist_ok=True)
+        (bad_dir / "FEATURE.md").write_text("---\ntitle: 没有 name\n---\n", encoding="utf-8")
+
+        result = scan_features_deep("family", module_dir, "ai-driving/aidoc", quiet=True)
+        assert len(result) == 1
+        assert result[0]["name"] == "valid-feat"
+
+    def test_空模块目录返回空列表(self, tmp_path):
+        """模块目录下没有任何 FEATURE.md 时返回空列表"""
+        module_dir = tmp_path / "empty-module"
+        module_dir.mkdir(parents=True, exist_ok=True)
+
+        result = scan_features_deep("empty-module", module_dir, "ai-driving/aidoc", quiet=True)
+        assert result == []
+
+    def test_feature_list_deep模式集成(self, runner, tmp_path):
+        """feature list 对 tags=features 的仓库使用深度扫描，能正确输出 quarter 字段"""
+        _make_config_with_tags(tmp_path, [
+            {
+                "name": "aidoc", "type": "local", "path": "ai-driving/aidoc",
+                "local_path": None, "tags": ["features"],
+                "modules": [
+                    {"name": "family", "description": "家族"},
+                    {"name": "message", "description": "私信"},
+                ],
+            },
+        ])
+        # 创建深层结构
+        family_dir = tmp_path / "ai-driving" / "aidoc" / "family"
+        msg_dir = tmp_path / "ai-driving" / "aidoc" / "message"
+        _make_feature_md(family_dir / "2026-Q2", "family-feat", "family-feat", title="家族功能")
+        _make_feature_md(msg_dir / "2026-Q2", "msg-feat", "msg-feat", title="私信功能")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["feature", "list"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        names = {item["name"] for item in data}
+        assert "family-feat" in names
+        assert "msg-feat" in names
+        # quarter 字段应存在
+        for item in data:
+            assert "quarter" in item
+            assert item["quarter"] == "2026-Q2"
+
+    def test_feature_list_deep模式关键词过滤(self, runner, tmp_path):
+        """深度扫描模式下，关键词过滤仍然正常工作"""
+        _make_config_with_tags(tmp_path, [
+            {
+                "name": "aidoc", "type": "local", "path": "ai-driving/aidoc",
+                "local_path": None, "tags": ["features"],
+                "modules": [{"name": "family", "description": "家族"}],
+            },
+        ])
+        family_dir = tmp_path / "ai-driving" / "aidoc" / "family"
+        _make_feature_md(family_dir / "2026-Q2", "bounty-task", "bounty-task", title="悬赏任务")
+        _make_feature_md(family_dir / "2026-Q2", "score-card", "score-card", title="积分卡片")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["feature", "list", "--keywords", "悬赏"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["name"] == "bounty-task"
 
 _feature_name_st = st.from_regex(r"[a-z][a-z0-9-]{0,15}", fullmatch=True)
 _repo_name_st = st.from_regex(r"[a-zA-Z][a-zA-Z0-9_-]{0,9}", fullmatch=True)

@@ -255,6 +255,7 @@ driving gate pass <gate-id> --path <dir> --platform <platform> --note "说明"  
 
 ```bash
 driving feature modules                       # 列出所有 features 仓库的业务模块（JSON）
+driving feature modules --features-only       # 只输出 tags 含 features 的仓库模块
 driving feature list                          # 列出所有 features（从 modules 聚合路径遍历）
 driving feature list --repo <name>            # 只扫描指定仓库
 driving feature list --keywords game,list     # 关键词过滤（OR 关系）
@@ -262,11 +263,29 @@ driving feature list --detail                 # 输出完整字段
 ```
 
 `feature modules` 输出规则：
-- 遍历**所有仓库**（不再限定 `tags=features`）
 - 仓库有 `modules`：每个 module 输出 `name`、`description`、`path`（`{repo.path}/{module.name}`）
-- 所有仓库：始终追加 `{repo.path}/features` 作为兜底条目
+- `tags` 含 `"features"` 且 `modules` 非空的仓库：只输出 module 条目，**不追加** `features` 兜底
+- 其余仓库（含 `tags=features` 但 `modules` 为空）：追加 `{repo.path}/features` 兜底条目
 
-`feature list` 从 `feature modules` 聚合的路径遍历，扫描各模块目录下的 feature 子目录。
+`feature list` 扫描规则：
+- 普通仓库（无 `features` tag）：扫描 `{module_path}/` 下各子目录，查找 `FEATURE.md`（单层）
+- `tags` 含 `"features"` 的仓库：使用**深度递归扫描**，兼容多层目录结构（如 `{module}/{年度-季度}/{日期}-{feature}/FEATURE.md`），并自动提取 `quarter` 字段（如 `2026-Q2`）
+
+`feature list` 输出字段（精简模式）：`name`、`title`、`description`、`status`、`path`、`repo`、`quarter`、`urls`
+
+`driving.config.json` 配置示例（多层目录仓库）：
+```json
+{
+  "name": "aidoc",
+  "type": "remote",
+  "path": "ai-driving/aidoc",
+  "tags": ["features"],
+  "modules": [
+    {"name": "family",  "description": "家族项目"},
+    {"name": "message", "description": "私信项目"}
+  ]
+}
+```
 
 ## agent — Agent 管理
 
@@ -438,7 +457,7 @@ trigger: manual                 # Windsurf 所需
   
 - `tags` 含 `"base"` 的仓库在无关键词时默认加载；传入关键词时忽略 tags，repo.name 精确匹配（不区分大小写）或 name/description 模糊匹配（子串包含即命中）。
 
-- `modules`：业务模块列表，每项包含 `name` 和 `description`。`tags` 含 `"features"` 的仓库设置 modules 后，`driving feature modules` 会展开每个 module，`driving feature list` 从各 module 目录扫描需求。
+- `modules`：业务模块列表，每项包含 `name` 和 `description`。`tags` 含 `"features"` 的仓库设置 modules 后，`driving feature modules` 会展开每个 module，`driving feature list` 从各 module 目录扫描需求（支持多层目录结构，如 `{module}/{年度-季度}/{feature}/FEATURE.md`）。
 
 - `skills` / `rules` / `agents` 均支持白名单（`enabled` 非空）和黑名单（`disabled` 非空）两种模式。
 
