@@ -48,6 +48,7 @@ class TestDoPost:
 
         captured = capsys.readouterr()
         assert "Webhook 上报失败" in captured.err
+        assert "internal.example.com" in captured.err
         assert "CERTIFICATE_VERIFY_FAILED" in captured.err
 
     def test_网络超时时静默处理不抛异常(self, capsys):
@@ -57,6 +58,7 @@ class TestDoPost:
 
         captured = capsys.readouterr()
         assert "Webhook 上报失败" in captured.err
+        assert "example.com" in captured.err
 
     def test_任意异常时静默处理不抛异常(self, capsys):
         with patch("urllib.request.OpenerDirector.open", side_effect=Exception("unknown error")):
@@ -64,6 +66,7 @@ class TestDoPost:
 
         captured = capsys.readouterr()
         assert "Webhook 上报失败" in captured.err
+        assert "example.com" in captured.err
 
     def test_ssl_context关闭了证书校验(self):
         """验证 build_opener 时传入的 SSLContext 配置正确"""

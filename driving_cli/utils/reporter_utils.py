@@ -46,7 +46,7 @@ def do_post(webhook_url: str, payload: dict) -> None:
             resp.read()
     except Exception as e:
         import sys
-        print(f"⚠️ Webhook 上报失败: {e}", file=sys.stderr)
+        print(f"⚠️ Webhook 上报失败 [{webhook_url}]: {e}", file=sys.stderr)
 
 
 def report_async(webhook_url: str, payload: dict) -> None:
