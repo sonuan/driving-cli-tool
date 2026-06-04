@@ -569,7 +569,7 @@ def memory_clear(agent_name: str, yes: bool):
 # ---------------------------------------------------------------------------
 
 # 支持的导出目标工具
-SUPPORTED_TOOLS = ["kiro", "claude-code", "cursor", "windsurf"]
+SUPPORTED_TOOLS = ["kiro", "claude-code", "cursor", "windsurf", "codex"]
 
 
 
@@ -662,11 +662,76 @@ def _export_windsurf(agent_name: str, data: Dict, agent_dir: Path,
     return out_file
 
 
+def _read_agents_md_body(agents_md: Path) -> str:
+    """提取 AGENTS.md frontmatter 之后的正文内容。
+
+    跳过开头的 --- ... --- frontmatter 块，返回剩余正文。
+    若无 frontmatter，返回完整文件内容。
+    """
+    content = agents_md.read_text(encoding="utf-8")
+    if not content.startswith("---"):
+        return content
+    # 找第二个 ---
+    second = content.find("\n---", 3)
+    if second == -1:
+        return content
+    # 跳过 \n--- 以及紧随的换行
+    body_start = second + 4  # len("\n---") == 4
+    if body_start < len(content) and content[body_start] == "\n":
+        body_start += 1
+    return content[body_start:]
+
+
+def _export_codex(agent_name: str, data: Dict, agent_dir: Path,
+                  output_dir: Path) -> Path:
+    """生成 OpenAI Codex sub-agent TOML 配置文件。
+
+    输出：<output_dir>/.codex/agents/<name>.toml
+    Codex CLI 支持项目级 .codex/agents/ 目录下的 TOML 自定义 agent。
+    格式：name / description / model / model_reasoning_effort / sandbox_mode / developer_instructions
+
+    AGENTS.md 正文内容会写入 developer_instructions 字段。
+    frontmatter 中可选字段：
+      - codex_model（映射到 TOML model）
+      - codex_reasoning_effort（映射到 TOML model_reasoning_effort）
+      - codex_sandbox_mode（映射到 TOML sandbox_mode，可选值：read-only、workspace-write）
+    """
+    meta = data["meta"]
+    out_dir = output_dir / ".codex" / "agents"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / f"{agent_name}.toml"
+
+    agents_md = agent_dir / "AGENTS.md"
+    body = _read_agents_md_body(agents_md).strip()
+
+    # 构建 TOML 内容
+    lines = []
+    lines.append(f'name = "{meta.get("name", agent_name)}"')
+    if meta.get("description"):
+        desc = meta["description"].replace('"', '\\"')
+        lines.append(f'description = "{desc}"')
+    if meta.get("codex_model"):
+        lines.append(f'model = "{meta["codex_model"]}"')
+    if meta.get("codex_reasoning_effort"):
+        lines.append(f'model_reasoning_effort = "{meta["codex_reasoning_effort"]}"')
+    if meta.get("codex_sandbox_mode"):
+        lines.append(f'sandbox_mode = "{meta["codex_sandbox_mode"]}"')
+    # developer_instructions 使用多行字符串
+    escaped_body = body.replace('\\', '\\\\').replace('"""', '\\"\\"\\"')
+    lines.append(f'developer_instructions = """\n{escaped_body}\n"""')
+
+    if out_file.exists() or out_file.is_symlink():
+        out_file.unlink()
+    out_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out_file
+
+
 _EXPORTERS = {
     "kiro": _export_kiro,
     "claude-code": _export_claude_code,
     "cursor": _export_cursor,
     "windsurf": _export_windsurf,
+    "codex": _export_codex,
 }
 
 
@@ -676,6 +741,7 @@ _TOOL_OUTPUT_PATHS = {
     "claude-code": lambda name: Path(".claude") / "agents" / f"{name}.md",
     "cursor":      lambda name: Path(".cursor") / "rules" / f"{name}.mdc",
     "windsurf":    lambda name: Path(".windsurf") / "rules" / f"{name}.md",
+    "codex":       lambda name: Path(".codex") / "agents" / f"{name}.toml",
 }
 
 
@@ -685,7 +751,7 @@ _TOOL_OUTPUT_PATHS = {
     "--tool", "-t",
     type=click.Choice(SUPPORTED_TOOLS, case_sensitive=False),
     required=True,
-    help="目标 AI 工具",
+    help="目标 AI 工具（kiro、claude-code、cursor、windsurf、codex）",
 )
 @click.option(
     "--output", "-o",
@@ -702,11 +768,12 @@ def agent_export(agent_name: str, tool: str, output: Optional[str], force: bool)
     """将 driving agent 导出为指定 AI 工具的软链接配置。
 
     文件已存在时默认跳过，使用 --force 强制重建。
-    支持的工具：kiro、claude-code、cursor、windsurf
+    支持的工具：kiro、claude-code、cursor、windsurf、codex
 
     示例：
         driving agent export android-reviewer --tool kiro
         driving agent export android-reviewer --tool claude-code
+        driving agent export android-reviewer --tool codex
         driving agent export android-reviewer --tool kiro --force
         driving agent export android-reviewer --tool kiro --output /path/to/project
     """
@@ -741,6 +808,8 @@ def agent_export(agent_name: str, tool: str, output: Optional[str], force: bool)
         log_success(f"已生成：{out_file.relative_to(output_dir)}")
         if tool.lower() == "kiro":
             log_info("硬链接模式：AGENTS.md 更新后自动生效，无需重新导出")
+        elif tool.lower() == "codex":
+            log_info("TOML 文件模式：AGENTS.md 更新后需重新执行 export（使用 --force）才能同步")
         else:
             log_info("软链接模式：AGENTS.md 更新后自动生效，无需重新导出")
 

@@ -315,6 +315,7 @@ driving agent export <name> --tool kiro              # → .kiro/agents/<name>.m
 driving agent export <name> --tool claude-code       # → .claude/agents/<name>.md（软链接）
 driving agent export <name> --tool cursor            # → .cursor/rules/<name>.mdc（软链接，需含 alwaysApply 字段）
 driving agent export <name> --tool windsurf          # → .windsurf/rules/<name>.md（软链接，需含 trigger 字段）
+driving agent export <name> --tool codex             # → .codex/agents/<name>.toml（TOML 文件，内容从 AGENTS.md 转换生成）
 driving agent export <name> --tool kiro --force      # 强制重建硬链接
 
 # 上报子 agent 启动事件（由子 agent 在加载步骤第 0 步调用）
@@ -410,6 +411,7 @@ tools: ["read", "shell"]        # Kiro 所需
 alwaysApply: false              # Cursor 所需
 trigger: manual                 # Windsurf 所需
 # claude-code 无需额外字段
+# codex 无需额外字段；可选：codex_model、codex_reasoning_effort、codex_sandbox_mode（read-only / workspace-write）
 ---
 ```
 

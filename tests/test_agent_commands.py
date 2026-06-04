@@ -848,6 +848,120 @@ class TestAgentExportCommand:
             result = runner.invoke(cli, ["agent", "export", "nonexistent", "--tool", "kiro"])
         assert result.exit_code != 0
 
+    def test_export_codex生成TOML文件(self, runner, project_with_full_agent):
+        with patch("driving_cli.commands.agent.find_project_root",
+                   return_value=project_with_full_agent):
+            result = runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "codex"])
+        assert result.exit_code == 0
+        out = project_with_full_agent / ".codex" / "agents" / "test-agent.toml"
+        assert out.exists()
+        assert not out.is_symlink()  # TOML 是实体文件，不是软链接
+
+    def test_export_codex_TOML包含必需字段(self, runner, project_with_full_agent):
+        with patch("driving_cli.commands.agent.find_project_root",
+                   return_value=project_with_full_agent):
+            runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "codex"])
+        out = project_with_full_agent / ".codex" / "agents" / "test-agent.toml"
+        content = out.read_text(encoding="utf-8")
+        assert 'name = "test-agent"' in content
+        assert "developer_instructions" in content
+
+    def test_export_codex_sandbox_mode写入TOML(self, runner, tmp_path):
+        """codex_sandbox_mode 合法值应写入 TOML sandbox_mode 字段"""
+        _make_config(tmp_path, [
+            {"name": "my-local", "type": "local", "path": "ai-driving/my-local", "local_path": None},
+        ])
+        agent_dir = tmp_path / "ai-driving" / "my-local" / "agents" / "sandbox-agent"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "AGENTS.md").write_text(
+            "---\nname: sandbox-agent\ndescription: 测试\ncodex_sandbox_mode: read-only\n---\n\n内容\n",
+            encoding="utf-8",
+        )
+        with patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["agent", "export", "sandbox-agent", "--tool", "codex"])
+        assert result.exit_code == 0
+        content = (tmp_path / ".codex" / "agents" / "sandbox-agent.toml").read_text(encoding="utf-8")
+        assert 'sandbox_mode = "read-only"' in content
+
+    def test_export_codex_sandbox_mode_workspace_write(self, runner, tmp_path):
+        """workspace-write 也是合法值"""
+        _make_config(tmp_path, [
+            {"name": "my-local", "type": "local", "path": "ai-driving/my-local", "local_path": None},
+        ])
+        agent_dir = tmp_path / "ai-driving" / "my-local" / "agents" / "sandbox-agent"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "AGENTS.md").write_text(
+            "---\nname: sandbox-agent\ndescription: 测试\ncodex_sandbox_mode: workspace-write\n---\n\n内容\n",
+            encoding="utf-8",
+        )
+        with patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["agent", "export", "sandbox-agent", "--tool", "codex"])
+        assert result.exit_code == 0
+        content = (tmp_path / ".codex" / "agents" / "sandbox-agent.toml").read_text(encoding="utf-8")
+        assert 'sandbox_mode = "workspace-write"' in content
+
+    def test_export_codex_sandbox_mode非法值不报错(self, runner, tmp_path):
+        """sandbox_mode 不做枚举校验，任意字符串值均直接写入 TOML"""
+        _make_config(tmp_path, [
+            {"name": "my-local", "type": "local", "path": "ai-driving/my-local", "local_path": None},
+        ])
+        agent_dir = tmp_path / "ai-driving" / "my-local" / "agents" / "bad-sandbox"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "AGENTS.md").write_text(
+            "---\nname: bad-sandbox\ndescription: 测试\ncodex_sandbox_mode: full-access\n---\n\n内容\n",
+            encoding="utf-8",
+        )
+        with patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["agent", "export", "bad-sandbox", "--tool", "codex"])
+        assert result.exit_code == 0
+        content = (tmp_path / ".codex" / "agents" / "bad-sandbox.toml").read_text(encoding="utf-8")
+        assert 'sandbox_mode = "full-access"' in content
+
+    def test_export_codex_无sandbox_mode时不输出该字段(self, runner, project_with_full_agent):
+        """未设置 codex_sandbox_mode 时，TOML 中不应包含 sandbox_mode"""
+        with patch("driving_cli.commands.agent.find_project_root",
+                   return_value=project_with_full_agent):
+            runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "codex"])
+        content = (project_with_full_agent / ".codex" / "agents" / "test-agent.toml").read_text(encoding="utf-8")
+        assert "sandbox_mode" not in content
+
+    def test_export_codex无需额外frontmatter字段(self, runner, tmp_path):
+        """codex 不要求任何额外 frontmatter 字段"""
+        _make_config(tmp_path, [
+            {"name": "my-local", "type": "local", "path": "ai-driving/my-local", "local_path": None},
+        ])
+        agent_dir = tmp_path / "ai-driving" / "my-local" / "agents" / "minimal-agent"
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "AGENTS.md").write_text(
+            "---\nname: minimal-agent\ndescription: 最简单的 agent\n---\n\n内容\n",
+            encoding="utf-8"
+        )
+        with patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["agent", "export", "minimal-agent", "--tool", "codex"])
+        assert result.exit_code == 0
+        out = tmp_path / ".codex" / "agents" / "minimal-agent.toml"
+        assert out.exists()
+
+    def test_export_codex已存在时跳过(self, runner, project_with_full_agent):
+        with patch("driving_cli.commands.agent.find_project_root",
+                   return_value=project_with_full_agent):
+            runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "codex"])
+            result = runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "codex"])
+        assert result.exit_code == 0
+        assert "已存在" in result.output
+
+    def test_export_codex_force强制重建(self, runner, project_with_full_agent):
+        with patch("driving_cli.commands.agent.find_project_root",
+                   return_value=project_with_full_agent):
+            runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "codex"])
+            result = runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "codex", "--force"])
+        assert result.exit_code == 0
+        assert "已生成" in result.output
+        # 验证重建后文件内容正常
+        out = project_with_full_agent / ".codex" / "agents" / "test-agent.toml"
+        assert out.exists()
+        assert "developer_instructions" in out.read_text(encoding="utf-8")
+
 
 # ==================== agent report ====================
 
