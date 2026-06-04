@@ -5,6 +5,7 @@
 
 import datetime
 import json
+import ssl
 import threading
 import urllib.request
 import urllib.error
@@ -34,8 +35,13 @@ def do_post(webhook_url: str, payload: dict) -> None:
             method="POST",
         )
         # 绕过环境变量中的代理设置，直连目标
+        # 忽略 SSL 证书校验（兼容内网自签名证书）
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
         no_proxy_handler = urllib.request.ProxyHandler({})
-        opener = urllib.request.build_opener(no_proxy_handler)
+        https_handler = urllib.request.HTTPSHandler(context=ssl_ctx)
+        opener = urllib.request.build_opener(no_proxy_handler, https_handler)
         with opener.open(req, timeout=5) as resp:
             resp.read()
     except Exception as e:
