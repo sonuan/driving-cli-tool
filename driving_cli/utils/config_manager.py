@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from driving_cli.models.config import DrivingConfig, RepoConfig
-from driving_cli.models.power import PowerConfig, PowerEntry
+from driving_cli.models.power_config import PowerConfig, PowerEntry
 
 # 配置文件名称
 CONFIG_FILE_NAME = "driving.config.json"

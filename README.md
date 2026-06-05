@@ -69,12 +69,15 @@ Power 模式允许将多个目录下的 `driving.config.json` 合并使用，解
 ```bash
 # 远程模式：将远程仓库作为 git submodule 安装并注册为 power
 # 幂等安装：根据本地状态自动判断执行路径
-driving power add --url https://git.xxx.com/config.git
-driving power add --url https://git.xxx.com/config.git --name feature
-driving power add --url https://git.xxx.com/config.git --force  # 强制重新安装
+driving power install --url https://git.xxx.com/config.git
+driving power install --url https://git.xxx.com/config.git --name feature
+driving power install --url https://git.xxx.com/config.git --force  # 强制重新安装
 
 # 本地模式：注册已存在的本地目录（须包含 driving.config.json）
-driving power add --name main --path ai-driving/my-local
+driving power install --name main --path ai-driving/my-local
+
+# 无参数：初始化 driving.power.json 中所有未就绪的 power（clone 缺失的远程 power）
+driving power install
 
 # 拉取远程 power 更新
 driving power pull              # 更新所有远程 power
@@ -82,7 +85,7 @@ driving power pull feature      # 更新指定 power
 
 # 管理
 driving power list              # 列出所有已配置的 power
-driving power remove feature    # 移除一个 power 条目
+driving power uninstall feature # 卸载一个 power 条目
 ```
 
 **合并规则：**
@@ -91,18 +94,24 @@ driving power remove feature    # 移除一个 power 条目
 - 某个 power 的 `driving.config.json` 不存在时自动跳过该 power
 - 所有 power 均无有效配置时，降级读取项目根目录的 `driving.config.json`
 
-**`driving power add --url` 安装逻辑（幂等）：**
+**`driving power install --url` 安装逻辑（幂等）：**
 1. 本地目录不存在 → clone + 注册
 2. 本地目录存在但未注册 → 直接注册到 `driving.power.json`
 3. 已注册但无 `driving.config.json` → 提示运行 `driving repo install --power <name>` 生成配置
 4. 已完整安装 → 提示已存在，加 `--force` 可重新安装
+
+**`driving power install`（无参数）初始化逻辑：**
+- remote power，目录不存在 → `submodule update --init` 或 `submodule add`
+- remote power，目录已初始化 → 跳过
+- local power，目录存在 → 跳过
+- local power，目录不存在 → warning 提示，跳过（本地目录需手动准备）
 
 **`driving load` 自动更新：** 每次执行 `driving load` 时，会先检查所有远程 power 是否有更新并自动拉取，再检查各 `driving.config.json` 里的 repos 更新。
 
 
 ```bash
 # 1. 从远程安装 power（作为 submodule，跟随主项目 git）
-driving power add --url https://git.xxx.com/branch-config.git --name feature
+driving power install --url https://git.xxx.com/branch-config.git --name feature
 
 # 2. 安装新仓库时指定写入哪个 power 的配置
 driving repo install --url https://... --power feature

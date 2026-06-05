@@ -5,7 +5,7 @@
 - PowerManager：add_power_local、remove_power、load_merged_config
 - _merge_configs：repos 去重、单值字段冲突检测
 - ConfigManager.load() Power 模式分支
-- driving power 命令：add（本地）、remove、list
+- driving power 命令：install（本地/远程/无参数）、uninstall、list
 """
 
 import json
@@ -17,7 +17,7 @@ from click.testing import CliRunner
 
 from driving_cli.cli import cli
 from driving_cli.models.config import DrivingConfig, RepoConfig
-from driving_cli.models.power import PowerConfig, PowerEntry
+from driving_cli.models.power_config import PowerConfig, PowerEntry
 from driving_cli.utils.config_manager import (
     CONFIG_FILE_NAME,
     POWER_FILE_NAME,
@@ -450,12 +450,12 @@ def project_with_power_dirs(tmp_path):
     return tmp_path
 
 
-class TestPowerAddCommand:
-    def test_add_local_power_success(self, runner, project_with_power_dirs):
+class TestPowerInstallCommand:
+    def test_install_local_power_success(self, runner, project_with_power_dirs):
         tmp_path = project_with_power_dirs
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
             result = runner.invoke(cli, [
-                "power", "add", "--name", "p1", "--path", "ai-driving/p1"
+                "power", "install", "--name", "p1", "--path", "ai-driving/p1"
             ])
         assert result.exit_code == 0, result.output
         assert "p1" in result.output
@@ -465,58 +465,53 @@ class TestPowerAddCommand:
         data = json.loads(power_file.read_text(encoding="utf-8"))
         assert any(p["name"] == "p1" for p in data["powers"])
 
-    def test_add_local_power_no_config_fails(self, runner, tmp_path):
+    def test_install_local_power_no_config_fails(self, runner, tmp_path):
         """目录下没有 driving.config.json 时命令失败"""
         (tmp_path / "ai-driving" / "empty").mkdir(parents=True)
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
             result = runner.invoke(cli, [
-                "power", "add", "--name", "empty", "--path", "ai-driving/empty"
+                "power", "install", "--name", "empty", "--path", "ai-driving/empty"
             ])
         assert result.exit_code != 0 or "driving.config.json" in result.output
 
-    def test_add_without_url_or_path_fails(self, runner, tmp_path):
-        """既没有 --url 也没有 --path 时报错"""
+    def test_install_without_url_or_path_no_power_file_fails(self, runner, tmp_path):
+        """无参数且 driving.power.json 不存在时报错"""
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
-            result = runner.invoke(cli, ["power", "add", "--name", "p1"])
-        assert result.exit_code != 0 or "--url" in result.output or "--path" in result.output
+            result = runner.invoke(cli, ["power", "install"])
+        assert result.exit_code != 0
+        assert "未启用 Power 模式" in result.output or "不存在" in result.output
 
-    def test_add_remote_duplicate_name_without_force_shows_info(self, runner, project_with_power_dirs):
+    def test_install_remote_duplicate_name_without_force_shows_info(self, runner, project_with_power_dirs):
         """--url 模式下已完整安装（name+目录+config 都存在）时，无 --force 提示已安装，不报错"""
         tmp_path = project_with_power_dirs
-        # p1 目录有 config，且已注册
         write_power_config(tmp_path, PowerConfig(powers=[
             PowerEntry(name="p1", path="ai-driving/p1"),
         ]))
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
             result = runner.invoke(cli, [
-                "power", "add", "--url", "https://github.com/example/r.git", "--name", "p1"
+                "power", "install", "--url", "https://github.com/example/r.git", "--name", "p1"
             ])
         assert result.exit_code == 0
         assert "已完整安装" in result.output or "--force" in result.output
 
-    def test_add_remote_duplicate_name_with_force_removes_old_entry(self, runner, project_with_power_dirs):
+    def test_install_remote_duplicate_name_with_force_removes_old_entry(self, runner, project_with_power_dirs):
         """--url 模式下已完整安装，加 --force 时先移除旧注册记录"""
         tmp_path = project_with_power_dirs
-        # p1 已注册且有 config
         write_power_config(tmp_path, PowerConfig(powers=[
             PowerEntry(name="p1", path="ai-driving/p1"),
         ]))
-        # patch add_power_remote 避免真实 git 操作
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
             with patch.object(PowerManager, "add_power_remote") as mock_add:
                 with patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path):
                     result = runner.invoke(cli, [
-                        "power", "add", "--url", "https://github.com/example/r.git",
+                        "power", "install", "--url", "https://github.com/example/r.git",
                         "--name", "p1", "--force"
                     ])
-        # --force 时旧记录应被移除（power.json 中 p1 不再存在）
         power_cfg = PowerManager(tmp_path).load_power_config()
-        # add_power_remote 被调用（尝试重新 clone）或旧记录已被清除
         assert not any(p.name == "p1" for p in power_cfg.powers) or mock_add.called
 
-    def test_add_remote_existing_nonempty_dir_without_force_registers_and_hints(self, runner, tmp_path):
+    def test_install_remote_existing_nonempty_dir_without_force_registers_and_hints(self, runner, tmp_path):
         """--url 模式下本地目录已存在且非空但未注册，应注册并提示运行 repo install"""
-        # 创建非空目录（无 driving.config.json）
         nonempty = tmp_path / "ai-driving" / "mypower"
         nonempty.mkdir(parents=True)
         (nonempty / "somefile.txt").write_text("content")
@@ -524,33 +519,32 @@ class TestPowerAddCommand:
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
             with patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path):
                 result = runner.invoke(cli, [
-                    "power", "add", "--url", "https://github.com/example/r.git", "--name", "mypower"
+                    "power", "install", "--url", "https://github.com/example/r.git", "--name", "mypower"
                 ])
-        # 应注册成功（exit 0）并提示运行 repo install
         assert result.exit_code == 0, result.output
         assert "driving repo install" in result.output
 
 
-class TestPowerRemoveCommand:
-    def test_remove_existing_power(self, runner, project_with_power_dirs):
+class TestPowerUninstallCommand:
+    def test_uninstall_existing_power(self, runner, project_with_power_dirs):
         tmp_path = project_with_power_dirs
-        # 先添加
+        # 先安装
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
-            runner.invoke(cli, ["power", "add", "--name", "p1", "--path", "ai-driving/p1"])
-            result = runner.invoke(cli, ["power", "remove", "p1"])
+            runner.invoke(cli, ["power", "install", "--name", "p1", "--path", "ai-driving/p1"])
+            result = runner.invoke(cli, ["power", "uninstall", "p1"])
         assert result.exit_code == 0, result.output
         data = json.loads((tmp_path / POWER_FILE_NAME).read_text(encoding="utf-8"))
         assert not any(p["name"] == "p1" for p in data["powers"])
 
-    def test_remove_nonexistent_power_fails(self, runner, tmp_path):
+    def test_uninstall_nonexistent_power_fails(self, runner, tmp_path):
         write_power_config(tmp_path, PowerConfig(powers=[]))
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
-            result = runner.invoke(cli, ["power", "remove", "ghost"])
+            result = runner.invoke(cli, ["power", "uninstall", "ghost"])
         assert result.exit_code != 0 or "不存在" in result.output
 
-    def test_remove_without_power_file_fails(self, runner, tmp_path):
+    def test_uninstall_without_power_file_fails(self, runner, tmp_path):
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
-            result = runner.invoke(cli, ["power", "remove", "p1"])
+            result = runner.invoke(cli, ["power", "uninstall", "p1"])
         assert result.exit_code != 0 or "不存在" in result.output
 
 
@@ -633,7 +627,7 @@ class TestPowerGitErrorMessages:
             with patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path):
                 with patch("subprocess.run", return_value=failed_result):
                     result = runner.invoke(cli, [
-                        "power", "add",
+                        "power", "install",
                         "--url", "git@github.com:org/repo.git",
                         "--name", "mypower",
                     ])
@@ -657,7 +651,7 @@ class TestPowerGitErrorMessages:
             with patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path):
                 with patch("subprocess.run", return_value=failed_result):
                     result = runner.invoke(cli, [
-                        "power", "add",
+                        "power", "install",
                         "--url", "git@github.com:org/repo.git",
                         "--name", "mypower",
                     ])
@@ -700,3 +694,116 @@ class TestPowerGitErrorMessages:
                 result = runner.invoke(cli, ["power", "pull", "p1"])
 
         assert "超时" in result.output or "SSH" in result.output or result.exit_code != 0
+
+
+class TestPowerInstallNoArgs:
+    """power install 无参数模式：初始化 driving.power.json 中未就绪的 power"""
+
+    def test_no_power_file_fails(self, runner, tmp_path):
+        """driving.power.json 不存在时报错"""
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["power", "install"])
+        assert result.exit_code != 0
+        assert "未启用 Power 模式" in result.output or "不存在" in result.output
+
+    def test_empty_powers_shows_info(self, runner, tmp_path):
+        """driving.power.json 中没有任何 power 时给出提示"""
+        write_power_config(tmp_path, PowerConfig(powers=[]))
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["power", "install"])
+        assert result.exit_code == 0
+        assert "没有配置任何 power" in result.output
+
+    def test_local_power_dir_exists_skipped(self, runner, project_with_power_dirs):
+        """本地 power 目录已存在时跳过"""
+        tmp_path = project_with_power_dirs
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1", url=None),
+        ]))
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["power", "install"])
+        assert result.exit_code == 0
+        assert "跳过" in result.output
+
+    def test_local_power_dir_missing_warns(self, runner, tmp_path):
+        """本地 power 目录不存在时给出 warning，不报错"""
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="ghost", path="ai-driving/ghost", url=None),
+        ]))
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["power", "install"])
+        assert result.exit_code == 0
+        assert "不存在" in result.output or "跳过" in result.output
+
+    def test_remote_power_already_initialized_skipped(self, runner, project_with_power_dirs):
+        """remote power 目录已初始化（非空）时跳过"""
+        tmp_path = project_with_power_dirs
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1", url="https://github.com/org/p1.git"),
+        ]))
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path):
+                result = runner.invoke(cli, ["power", "install"])
+        assert result.exit_code == 0
+        assert "已初始化" in result.output or "跳过" in result.output
+
+    def test_remote_power_uninitialized_calls_submodule_update(self, runner, tmp_path):
+        """remote power 目录不存在时，调用 submodule update --init"""
+        import git as _git
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1", url="https://github.com/org/p1.git"),
+        ]))
+
+        mock_git_repo = MagicMock()
+        mock_git_repo.git.submodule.return_value = None  # update --init 成功
+
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path):
+                with patch("git.Repo", return_value=mock_git_repo):
+                    result = runner.invoke(cli, ["power", "install"])
+
+        assert result.exit_code == 0
+        mock_git_repo.git.submodule.assert_called_once_with("update", "--init", "ai-driving/p1")
+        assert "初始化成功" in result.output
+
+    def test_remote_power_update_init_fails_then_submodule_add(self, runner, tmp_path):
+        """update --init 失败后降级执行 submodule add"""
+        import git as _git
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1", url="https://github.com/org/p1.git"),
+        ]))
+
+        # 创建 .gitmodules（submodule add 需要）
+        (tmp_path / ".gitmodules").write_text(
+            '[submodule "ai-driving/p1"]\n\tpath = ai-driving/p1\n\turl = https://github.com/org/p1.git\n',
+            encoding="utf-8",
+        )
+
+        mock_git_repo = MagicMock()
+        update_err = _git.exc.GitCommandError("submodule update", 128)
+        update_err.stderr = "not registered"
+        mock_git_repo.git.submodule.side_effect = [
+            update_err,  # update --init 失败
+            None,        # submodule add 成功
+        ]
+
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path):
+                with patch("git.Repo", return_value=mock_git_repo):
+                    result = runner.invoke(cli, ["power", "install"])
+
+        assert result.exit_code == 0
+        assert "成功" in result.output
+
+    def test_summary_counts_shown(self, runner, project_with_power_dirs):
+        """输出汇总行：初始化 N 个，跳过 M 个"""
+        tmp_path = project_with_power_dirs
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1", url=None),  # 已就绪，跳过
+            PowerEntry(name="p2", path="ai-driving/p2", url=None),  # 已就绪，跳过
+        ]))
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["power", "install"])
+        assert result.exit_code == 0
+        assert "完成" in result.output
+        assert "跳过" in result.output
