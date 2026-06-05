@@ -137,8 +137,61 @@ def _init_unloaded_submodules() -> None:
         _dbg(f"find_project_root 失败：{e}")
         return
 
-    def _git_submodule_init(rel_path: str, label: str) -> bool:
-        """执行 git submodule update --init <rel_path>，返回是否成功"""
+    def _git_submodule_add(rel_path: str, url: str, label: str) -> bool:
+        """降级方案：submodule 未注册时用 git submodule add 重新添加，返回是否成功"""
+        import shutil
+
+        # 清理 .git/modules 里可能残留的数据，避免 git submodule add 报冲突
+        git_root = project_root  # load.py 场景下 project_root 即 git 根目录
+        modules_dir = git_root / ".git" / "modules"
+        parts = Path(rel_path).parts
+        for depth in range(len(parts), 0, -1):
+            partial = Path(*parts[:depth])
+            modules_path = modules_dir / partial
+            work_path = git_root / partial
+            work_empty = not work_path.exists() or (work_path.is_dir() and not any(work_path.iterdir()))
+            if modules_path.exists() and work_empty:
+                _dbg(f"  清理残留 git modules 数据：{modules_path}")
+                try:
+                    shutil.rmtree(modules_path)
+                except Exception as rm_err:
+                    _dbg(f"  清理失败：{rm_err}")
+                break
+
+        try:
+            (project_root / rel_path).parent.mkdir(parents=True, exist_ok=True)
+            result = _sp.run(
+                ["git", "submodule", "add", url, rel_path],
+                cwd=str(project_root),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode == 0:
+                _dbg(f"  ✓ {label} 重新添加并初始化成功")
+                return True
+            else:
+                stderr = (result.stderr or "").strip()
+                _dbg(f"  ✗ {label} 重新添加失败（returncode={result.returncode}）：{stderr}")
+                click.echo(
+                    f"[driving load] 警告：{label} 重新添加失败：{stderr}",
+                    file=sys.stderr,
+                )
+                return False
+        except _sp.TimeoutExpired:
+            _dbg(f"  ✗ {label} 重新添加超时")
+            click.echo(f"[driving load] 警告：{label} 重新添加超时", file=sys.stderr)
+            return False
+        except Exception as e:
+            _dbg(f"  ✗ {label} 重新添加异常：{e}")
+            click.echo(f"[driving load] 警告：{label} 重新添加异常：{e}", file=sys.stderr)
+            return False
+
+    def _git_submodule_init(rel_path: str, label: str, url: str = "") -> bool:
+        """执行 git submodule update --init <rel_path>，返回是否成功。
+
+        若失败且提供了 url，自动降级为 git submodule add 重新注册（对齐 driving repo install 行为）。
+        """
         try:
             result = _sp.run(
                 ["git", "submodule", "update", "--init", rel_path],
@@ -152,7 +205,10 @@ def _init_unloaded_submodules() -> None:
                 return True
             else:
                 stderr = (result.stderr or "").strip()
-                _dbg(f"  ✗ {label} 初始化失败（returncode={result.returncode}）：{stderr}")
+                _dbg(f"  ✗ {label} update --init 失败（returncode={result.returncode}）：{stderr}")
+                if url:
+                    _dbg(f"  {label} 降级为 submodule add，url={url}")
+                    return _git_submodule_add(rel_path, url, label)
                 click.echo(
                     f"[driving load] 警告：{label} 初始化失败：{stderr}",
                     file=sys.stderr,
@@ -160,6 +216,9 @@ def _init_unloaded_submodules() -> None:
                 return False
         except _sp.TimeoutExpired:
             _dbg(f"  ✗ {label} 初始化超时")
+            if url:
+                _dbg(f"  {label} 超时后降级为 submodule add，url={url}")
+                return _git_submodule_add(rel_path, url, label)
             click.echo(f"[driving load] 警告：{label} 初始化超时", file=sys.stderr)
             return False
         except Exception as e:
@@ -253,12 +312,13 @@ def _init_unloaded_submodules() -> None:
             repo_path_str = repo.get("path", "")
             repo_name = repo.get("name", repo_path_str)
             repo_type = repo.get("type", "remote")
+            repo_url = repo.get("url", "")
             if repo_type != "remote" or not repo_path_str:
                 continue
             repo_dir = project_root / repo_path_str
             if _needs_init(repo_dir):
                 _dbg(f"  检测到未初始化的 repo '{repo_name}'（{repo_path_str}），正在初始化...")
-                _git_submodule_init(repo_path_str, f"repo '{repo_name}'")
+                _git_submodule_init(repo_path_str, f"repo '{repo_name}'", url=repo_url)
 
     # ---- 1. Power 模式检测 ----
     from driving_cli.utils.config_manager import PowerManager, POWER_FILE_NAME, CONFIG_FILE_NAME

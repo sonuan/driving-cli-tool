@@ -760,7 +760,81 @@ class TestInitUnloadedSubmodules:
         assert result.exit_code == 0
         mock_init.assert_not_called()
 
-# ==================== _ensure_power_config ====================
+    def test_update_init失败时降级为submodule_add(self, tmp_path):
+        """update --init 失败（pathspec not matched）时，应降级为 git submodule add"""
+        _make_config(tmp_path, [
+            {"name": "aidoc", "type": "remote", "url": "https://github.com/org/aidoc.git",
+             "path": "ai-driving/aidoc", "tags": ["base"]},
+        ])
+        repo_dir = tmp_path / "ai-driving" / "aidoc"
+        repo_dir.mkdir(parents=True)  # 空目录，模拟未初始化
+
+        import subprocess
+        call_args_list = []
+
+        def fake_run(cmd, **kwargs):
+            call_args_list.append(list(cmd))
+            # update --init 模拟失败（pathspec not matched）
+            if "update" in cmd and "--init" in cmd:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="",
+                    stderr="error: pathspec 'ai-driving/aidoc' did not match any file(s) known to git",
+                )
+            # submodule add 成功
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        from driving_cli.commands.load import _init_unloaded_submodules
+        # 确保 .git/modules 父目录存在，避免 shutil.rmtree 路径问题
+        (tmp_path / ".git" / "modules").mkdir(parents=True, exist_ok=True)
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("subprocess.run", side_effect=fake_run):
+            _init_unloaded_submodules()
+
+        cmds = [" ".join(c) for c in call_args_list]
+        # 先尝试 update --init
+        assert any("submodule update --init" in c for c in cmds), f"未调用 update --init，实际调用：{cmds}"
+        # 降级为 submodule add，并传入正确的 url 和 path
+        assert any(
+            "submodule add" in c and "aidoc.git" in c and "ai-driving/aidoc" in c
+            for c in cmds
+        ), f"未降级调用 submodule add，实际调用：{cmds}"
+
+    def test_update_init失败且无url时不降级(self, tmp_path):
+        """update --init 失败但 config 中没有 url 时，不应尝试 submodule add"""
+        _make_config(tmp_path, [
+            {"name": "aidoc", "type": "remote", "path": "ai-driving/aidoc", "tags": ["base"]},
+            # 故意不设置 url
+        ])
+        repo_dir = tmp_path / "ai-driving" / "aidoc"
+        repo_dir.mkdir(parents=True)
+
+        import subprocess
+        call_args_list = []
+
+        def fake_run(cmd, **kwargs):
+            call_args_list.append(list(cmd))
+            if "update" in cmd and "--init" in cmd:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="",
+                    stderr="error: pathspec 'ai-driving/aidoc' did not match any file(s) known to git",
+                )
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        from driving_cli.commands.load import _init_unloaded_submodules
+        err_output = []
+        from unittest.mock import patch as _patch
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("subprocess.run", side_effect=fake_run), \
+             _patch("click.echo", side_effect=lambda msg, **kw: err_output.append(str(msg))):
+            _init_unloaded_submodules()
+
+        cmds = [" ".join(c) for c in call_args_list]
+        # 没有 url，不应尝试 submodule add
+        assert not any("submodule add" in c for c in cmds), f"不应调用 submodule add，实际：{cmds}"
+        # 应向 stderr 输出失败警告
+        assert any("警告" in m or "失败" in m for m in err_output)
+
+
 
 class TestEnsurePowerConfig:
     """_ensure_power_config：power 初始化后检查 driving.config.json，按 branch 配置自动切换"""
