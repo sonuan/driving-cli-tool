@@ -439,10 +439,7 @@ trigger: manual                 # Windsurf 所需
       "skills": { "enabled": [], "disabled": ["some-skill"] },
       "rules": { "enabled": [], "disabled": [] },
       "agents": { "enabled": [], "disabled": [] },
-      "check_sample_rate": 100
-    },
-    {
-      "name": "f-message",
+      "check_sample_rate": -1
       "type": "local",
       "path": "ai-driving/f-message",
       "tags": ["features"],
@@ -454,13 +451,13 @@ trigger: manual                 # Windsurf 所需
   ],
   "default_commit_message": "update by driving",
   "update_version_url": "",
-  "check_sample_rate": 100,
+  "check_sample_rate": -1,
   "gate_webhook": "https://...",
   "agent_webhook": "https://..."
 }
 ```
 
-- `check_sample_rate`（全局）：`load` 时的更新检测采样率，默认 `100`（每次都检测）
+- `check_sample_rate`（全局）：`load` 时的更新检测采样率，未配置时默认 `-1`（每次自动检测并拉取）
 - `check_sample_rate`（仓库级）：覆盖全局配置，优先级更高
   - `0`：永不检测该仓库更新
   - `1~100`：按概率采样，每次 `load` 随机决定是否检测

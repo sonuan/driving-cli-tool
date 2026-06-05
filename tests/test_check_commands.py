@@ -179,16 +179,16 @@ class TestCollectUpdatableSampleRate:
         repo_dir.mkdir(parents=True)
         (repo_dir / ".git").mkdir()
 
-    def test_全局rate为None时兜底为100(self, tmp_path):
-        """全局 check_sample_rate 未配置（None）时应兜底为 100，仓库参与检测"""
+    def test_全局rate为None时兜底为负一(self, tmp_path):
+        """全局 check_sample_rate 未配置（None）时应兜底为 -1，仓库自动拉取"""
         self._make_config_with_rate(tmp_path, global_rate=None)
         with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path), \
              patch("driving_cli.commands.check._compare_local_remote", return_value=False):
             _, updatable, warnings, auto_pull, sample_log = _collect_updatable(fetch=False)
-        # 采样率兜底为100，仓库应被命中（rate=100 始终 hit）
+        # 采样率兜底为 -1，仓库应进入 auto_pull 流程
         assert len(sample_log) == 1
         name, rate, hit, _ = sample_log[0]
-        assert rate == 100
+        assert rate == -1
         assert hit is True
 
     def test_全局rate为0时仓库被跳过(self, tmp_path):

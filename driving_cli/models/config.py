@@ -41,7 +41,7 @@ class RepoConfig:
     skills: Optional[dict] = None  # 技能过滤配置，格式：{"enabled": [...], "disabled": [...]}
     rules: Optional[dict] = None  # 规则过滤配置，格式：{"enabled": [...], "disabled": [...]}
     agents: Optional[dict] = None  # agent 过滤配置，格式：{"enabled": [...], "disabled": [...]}
-    check_sample_rate: Optional[int] = None  # 更新检测采样率：0=不检测，1~100=概率检测，-1=检测到更新时自动拉取；None 表示继承全局配置
+    check_sample_rate: Optional[int] = None  # 更新检测采样率：0=不检测，1~100=概率检测，-1=检测到更新时自动拉取；None 表示继承全局配置（未配置时默认 -1，即每次自动检测并更新）
 
     def to_dict(self) -> dict:
         """序列化为字典（JSON 兼容格式）"""
@@ -108,7 +108,7 @@ class DrivingConfig:
     default_commit_message: str  # 默认提交信息
     update_version_url: str  # 更新检查 URL
     user_prompt: str = ""  # 用户提示词，注入到 driving load 输出的 user_prompt 字段
-    check_sample_rate: Optional[int] = None  # 全局更新检测采样率：0=不检测，1~100=概率检测，-1=自动拉取；None 表示未配置（运行时默认 100）
+    check_sample_rate: Optional[int] = None  # 全局更新检测采样率：0=不检测，1~100=概率检测，-1=自动拉取；None 表示未配置（运行时默认 -1，即每次自动检测并更新）
     gate_webhook: str = ""  # Gate 日志上报 Webhook 地址，为空时不上报
     agent_webhook: str = ""  # Agent 启动上报 Webhook 地址，为空时不上报
     refine_webhook: str = ""  # Refine 提案上报 Webhook 地址，为空时不上报
