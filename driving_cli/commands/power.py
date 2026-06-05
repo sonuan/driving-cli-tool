@@ -13,6 +13,7 @@ from driving_cli.models.power_config import PowerEntry
 from driving_cli.utils.config_manager import PowerManager, find_project_root
 from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
 from driving_cli.utils.validators import infer_repo_name_from_url, validate_git_url, validate_repo_name
+from driving_cli.commands.repo import _checkout_branch_after_install
 
 
 @click.group(name="power")
@@ -145,7 +146,10 @@ def power_install(url: Optional[str], power_name: Optional[str], power_path: Opt
             log_info("下一步提交 submodule：")
             log_info(f"  git add .gitmodules {submodule_path}")
             log_info(f"  git commit -m 'Add power {power_name}'")
-            # clone 完成后检查 driving.config.json
+            # clone 完成后若指定了分支则自动切换
+            if branch:
+                _checkout_branch_after_install(abs_install_path, power_name, branch)
+            # 检查 driving.config.json
             if config_json_path.exists():
                 log_success("driving.config.json 已就绪，power 配置完整 ✓")
                 return
@@ -260,6 +264,9 @@ def _install_all_uninitialized(pm: PowerManager, project_root):
             git_repo.git.submodule("update", "--init", submodule_path)
             log_success(f"Power '{entry.name}' 初始化成功")
             initialized_count += 1
+            # 初始化成功后，若配置了分支则自动切换
+            if entry.branch:
+                _checkout_branch_after_install(project_root / entry.path, entry.name, entry.branch)
             continue
         except git.exc.GitCommandError as e:
             stderr_msg = e.stderr.strip() if e.stderr else str(e)
@@ -280,6 +287,9 @@ def _install_all_uninitialized(pm: PowerManager, project_root):
             _set_submodule_ignore(git_root, submodule_path)
             log_success(f"Power '{entry.name}' 添加并初始化成功")
             initialized_count += 1
+            # 添加成功后，若配置了分支则自动切换
+            if entry.branch:
+                _checkout_branch_after_install(project_root / entry.path, entry.name, entry.branch)
         except git.exc.GitCommandError as e:
             stderr_msg = e.stderr.strip() if e.stderr else str(e)
             log_error(f"Power '{entry.name}' 初始化失败：{stderr_msg}")

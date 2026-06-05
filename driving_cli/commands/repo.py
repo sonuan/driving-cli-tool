@@ -50,7 +50,8 @@ def repo_group():
 @click.option("--module", "modules", multiple=True, metavar="NAME:DESCRIPTION", help="新增业务模块（格式：name:description，可多次指定）")
 @click.option("--force", is_flag=True, default=False, help="强制覆盖已存在的同名仓库")
 @click.option("--power", "power_name", default=None, help="Power 模式下指定写入哪个 power 的 driving.config.json")
-def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[str], description: Optional[str], desc: Optional[str], tags: tuple, modules: tuple, force: bool, power_name: Optional[str]):
+@click.option("--branch", default=None, help="指定分支（安装后自动 checkout；未配置时缺少 driving.config.json 会给出警告）")
+def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[str], description: Optional[str], desc: Optional[str], tags: tuple, modules: tuple, force: bool, power_name: Optional[str], branch: Optional[str]):
     """安装仓库
 
     无参数：读取配置初始化所有未初始化的远程仓库。\n
@@ -60,6 +61,7 @@ def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[s
     --desc <desc>：仓库描述（--description 的简写）。\n
     --module <name:description>：新增业务模块（可多次指定）。\n
     --power <name>：Power 模式下指定写入哪个 power 的配置文件（不指定则写入第一个 power）。\n
+    --branch <branch>：指定仓库分支，安装后自动 checkout；未配置时若缺少 driving.config.json 会给出警告。\n
     """
     from driving_cli.utils.config_manager import PowerManager
     project_root = find_project_root()
@@ -108,7 +110,7 @@ def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[s
     # 安装远程仓库
     if url is not None:
         _install_remote(config_mgr, project_root, url, repo_name, force, effective_description,
-                        list(tags) or None, parsed_modules or None)
+                        list(tags) or None, parsed_modules or None, branch=branch)
         return
 
     # 注册本地仓库（local_path 为 "" 表示 --local 无值，为具体路径表示有值）
@@ -205,6 +207,40 @@ def _cleanup_stale_git_modules(git_root: Path, submodule_path: str):
             break  # 清理最小范围后停止
 
 
+def _checkout_branch_after_install(repo_dir: Path, repo_name: str, branch: str):
+    """submodule 安装/初始化后切换到指定分支
+
+    若当前分支已是目标分支则跳过，否则先 fetch 再 checkout。
+    切换失败只给出警告，不中断整体流程。
+    """
+    if not repo_dir.exists():
+        log_warning(f"仓库 '{repo_name}' 目录不存在，跳过分支切换")
+        return
+    try:
+        repo = git.Repo(repo_dir)
+        # 已在目标分支则跳过
+        try:
+            if not repo.head.is_detached and repo.active_branch.name == branch:
+                log_info(f"仓库 '{repo_name}' 已在分支 '{branch}'，跳过切换")
+                return
+        except Exception:
+            pass  # detached HEAD 等异常情况，继续尝试 checkout
+        if repo.remotes:
+            try:
+                repo.remotes.origin.fetch()
+            except git.exc.GitCommandError as e:
+                log_warning(f"仓库 '{repo_name}' fetch 失败，将使用本地分支信息（{e.stderr.strip() if e.stderr else str(e)}）")
+        repo.git.checkout(branch)
+        log_success(f"仓库 '{repo_name}' 已切换到分支 '{branch}'")
+    except git.exc.GitCommandError as e:
+        if "did not match any" in str(e) or "pathspec" in str(e):
+            log_warning(f"仓库 '{repo_name}' 分支 '{branch}' 不存在，请检查分支名称")
+        else:
+            log_warning(f"仓库 '{repo_name}' 切换分支 '{branch}' 失败：{e}")
+    except Exception as e:
+        log_warning(f"仓库 '{repo_name}' 切换分支 '{branch}' 失败：{e}")
+
+
 def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
     """无参数 install：初始化所有未初始化的远程仓库"""
     try:
@@ -253,6 +289,9 @@ def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
             git_repo.git.submodule("update", "--init", submodule_path)
             log_success(f"仓库 '{repo_cfg.name}' 初始化成功")
             initialized_count += 1
+            # 初始化成功后，若配置了分支则自动切换
+            if repo_cfg.branch:
+                _checkout_branch_after_install(project_root / repo_cfg.path, repo_cfg.name, repo_cfg.branch)
         except git.exc.GitCommandError as update_err:
             # update --init 失败，说明 submodule 尚未注册，改用 add
             log_info(f"submodule update --init 失败，尝试重新添加（原因：{update_err.stderr.strip() if update_err.stderr else str(update_err)}）")
@@ -268,6 +307,9 @@ def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
                 _set_submodule_ignore(git_root, submodule_path)
                 log_success(f"仓库 '{repo_cfg.name}' 添加并初始化成功")
                 initialized_count += 1
+                # 添加成功后，若配置了分支则自动切换
+                if repo_cfg.branch:
+                    _checkout_branch_after_install(project_root / repo_cfg.path, repo_cfg.name, repo_cfg.branch)
             except git.exc.GitCommandError as e:
                 log_error(f"添加仓库 '{repo_cfg.name}' 失败: {e}")
 
@@ -362,7 +404,7 @@ def _migrate_local_to_remote(config_mgr: ConfigManager, project_root: Path, repo
     log_info(f"已清理本地目录：{repo_cfg.path}")
 
 
-def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, repo_name: Optional[str], force: bool, description: Optional[str] = None, tags: Optional[list] = None, modules: Optional[list] = None):
+def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, repo_name: Optional[str], force: bool, description: Optional[str] = None, tags: Optional[list] = None, modules: Optional[list] = None, branch: Optional[str] = None):
     """安装远程 Git 仓库（submodule）"""
     # 校验 Git URL 格式
     if not validate_git_url(url):
@@ -460,6 +502,7 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
         description=description,
         tags=tags if tags is not None else [],
         modules=modules,
+        branch=branch,
     )
     try:
         config_mgr.add_repo(repo_cfg)
@@ -469,6 +512,11 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
 
     log_success(f"远程仓库 '{repo_name}' 安装成功！")
     log_info(f"安装路径：{install_path}")
+
+    # 安装后自动切换到指定分支
+    if branch:
+        _checkout_branch_after_install(project_root / install_path, repo_name, branch)
+
     log_info("下一步：")
     log_info(f"  git add .gitmodules {submodule_path}")
     log_info(f"  git commit -m 'Add repo {repo_name}'")

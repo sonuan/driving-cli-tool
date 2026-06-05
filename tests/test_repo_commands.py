@@ -12,7 +12,14 @@ import pytest
 from click.testing import CliRunner
 
 from driving_cli.cli import cli
-from driving_cli.commands.repo import _resolve_repos, _set_submodule_config, _set_submodule_ignore, repo_group
+from driving_cli.commands.repo import (
+    _checkout_branch_after_install,
+    _git_checkout,
+    _resolve_repos,
+    _set_submodule_config,
+    _set_submodule_ignore,
+    repo_group,
+)
 from driving_cli.models.config import DrivingConfig, RepoConfig
 from driving_cli.utils.config_manager import ConfigManager
 
@@ -1041,3 +1048,276 @@ class TestGitCheckoutFetchWarning:
         mock_repo.git.checkout.assert_called_once_with("main")
         captured = capsys.readouterr()
         assert "切换到分支" in captured.out or "切换到分支" in captured.err
+
+# ==================== --branch 选项测试 ====================
+
+class TestRepoInstallBranch:
+    """验证 repo install --branch 的行为"""
+
+    def test_branch_saved_to_config(self, runner, tmp_project):
+        """--branch 参数应保存到 driving.config.json 的 repo.branch 字段"""
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.git.Repo") as mock_repo_cls, \
+             patch("driving_cli.commands.repo._cleanup_stale_git_modules"), \
+             patch("driving_cli.commands.repo._set_submodule_ignore"), \
+             patch("driving_cli.commands.repo._checkout_branch_after_install") as mock_checkout:
+            mock_git_repo = MagicMock()
+            mock_git_repo.git.submodule.return_value = None
+            mock_repo_cls.return_value = mock_git_repo
+
+            result = runner.invoke(cli, [
+                "repo", "install",
+                "--url", "https://github.com/org/repo.git",
+                "--name", "main",
+                "--branch", "develop",
+            ])
+
+        assert result.exit_code == 0, result.output
+        # branch 应写入配置
+        from driving_cli.utils.config_manager import ConfigManager
+        cm = ConfigManager(tmp_project)
+        repo = cm.get_repo("main")
+        assert repo is not None
+        assert repo.branch == "develop"
+        # checkout 辅助函数应被调用
+        mock_checkout.assert_called_once()
+        call_args = mock_checkout.call_args
+        assert call_args[0][1] == "main"   # repo_name
+        assert call_args[0][2] == "develop"  # branch
+
+    def test_no_branch_option_branch_is_none(self, runner, tmp_project):
+        """不传 --branch 时，repo.branch 应为 None（不写入 config.json）"""
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.git.Repo") as mock_repo_cls, \
+             patch("driving_cli.commands.repo._cleanup_stale_git_modules"), \
+             patch("driving_cli.commands.repo._set_submodule_ignore"), \
+             patch("driving_cli.commands.repo._checkout_branch_after_install") as mock_checkout:
+            mock_git_repo = MagicMock()
+            mock_git_repo.git.submodule.return_value = None
+            mock_repo_cls.return_value = mock_git_repo
+
+            result = runner.invoke(cli, [
+                "repo", "install",
+                "--url", "https://github.com/org/repo.git",
+                "--name", "main",
+            ])
+
+        assert result.exit_code == 0, result.output
+        from driving_cli.utils.config_manager import ConfigManager
+        cm = ConfigManager(tmp_project)
+        repo = cm.get_repo("main")
+        assert repo is not None
+        assert repo.branch is None
+        # 未配置 branch 时不应调用 checkout
+        mock_checkout.assert_not_called()
+
+
+class TestCheckoutBranchAfterInstall:
+    """验证 _checkout_branch_after_install 辅助函数行为"""
+
+    def test_checkout_success(self, tmp_project, capsys):
+        """checkout 成功时输出成功日志"""
+        repo_dir = tmp_project / "ai-driving" / "main"
+        repo_dir.mkdir(parents=True)
+
+        mock_repo = MagicMock()
+        mock_repo.remotes.__bool__ = lambda self: True
+        mock_repo.remotes.__len__ = lambda self: 1
+        mock_repo.git.checkout.return_value = None
+
+        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo):
+            _checkout_branch_after_install(repo_dir, "main", "develop")
+
+        mock_repo.git.checkout.assert_called_once_with("develop")
+        captured = capsys.readouterr()
+        assert "develop" in captured.out
+
+    def test_checkout_nonexistent_branch_warns(self, tmp_project, capsys):
+        """checkout 不存在的分支时输出 warning，不抛异常"""
+        import git as _git
+        repo_dir = tmp_project / "ai-driving" / "main"
+        repo_dir.mkdir(parents=True)
+
+        mock_repo = MagicMock()
+        mock_repo.remotes.__bool__ = lambda self: True
+        mock_repo.remotes.__len__ = lambda self: 1
+        err = _git.exc.GitCommandError("checkout", 1)
+        err.stderr = "pathspec 'no-such-branch' did not match any"
+        mock_repo.git.checkout.side_effect = err
+
+        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo):
+            _checkout_branch_after_install(repo_dir, "main", "no-such-branch")  # 不应抛异常
+
+        captured = capsys.readouterr()
+        assert "不存在" in captured.out or "warning" in captured.out.lower() or "警告" in captured.out
+
+    def test_checkout_fetch_failure_does_not_block(self, tmp_project, capsys):
+        """fetch 失败时仍继续 checkout，不中断流程"""
+        import git as _git
+        repo_dir = tmp_project / "ai-driving" / "main"
+        repo_dir.mkdir(parents=True)
+
+        mock_repo = MagicMock()
+        mock_repo.remotes.__bool__ = lambda self: True
+        mock_repo.remotes.__len__ = lambda self: 1
+        fetch_err = _git.exc.GitCommandError("fetch", 128)
+        fetch_err.stderr = "Permission denied (publickey)."
+        mock_repo.remotes.origin.fetch.side_effect = fetch_err
+        mock_repo.git.checkout.return_value = None
+
+        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo):
+            _checkout_branch_after_install(repo_dir, "main", "develop")
+
+        # fetch 失败后 checkout 仍应被调用
+        mock_repo.git.checkout.assert_called_once_with("develop")
+
+    def test_repo_dir_not_exist_warns(self, tmp_project, capsys):
+        """仓库目录不存在时输出 warning，不抛异常"""
+        repo_dir = tmp_project / "ai-driving" / "nonexistent"
+        # 不创建目录，直接调用
+
+        _checkout_branch_after_install(repo_dir, "nonexistent", "main")
+
+        captured = capsys.readouterr()
+        assert "不存在" in captured.out or "跳过" in captured.out
+
+
+class TestRepoConfigBranchSerialization:
+    """验证 RepoConfig.branch 序列化/反序列化"""
+
+    def test_branch_serialized_when_set(self):
+        """branch 有值时应序列化到 dict"""
+        from driving_cli.models.config import RepoConfig
+        cfg = RepoConfig(name="r", type="remote", path="ai-driving/r", branch="develop")
+        d = cfg.to_dict()
+        assert d.get("branch") == "develop"
+
+    def test_branch_not_serialized_when_none(self):
+        """branch 为 None 时不写入 dict（保持 config.json 简洁）"""
+        from driving_cli.models.config import RepoConfig
+        cfg = RepoConfig(name="r", type="remote", path="ai-driving/r", branch=None)
+        d = cfg.to_dict()
+        assert "branch" not in d
+
+    def test_branch_deserialized_from_dict(self):
+        """from_dict 应正确读取 branch 字段"""
+        from driving_cli.models.config import RepoConfig
+        d = {"name": "r", "type": "remote", "path": "ai-driving/r", "branch": "main"}
+        cfg = RepoConfig.from_dict(d)
+        assert cfg.branch == "main"
+
+    def test_branch_defaults_to_none_when_missing(self):
+        """旧 config.json 无 branch 字段时应默认 None（向后兼容）"""
+        from driving_cli.models.config import RepoConfig
+        d = {"name": "r", "type": "remote", "path": "ai-driving/r"}
+        cfg = RepoConfig.from_dict(d)
+        assert cfg.branch is None
+
+
+class TestInstallAllUninitializedWithBranch:
+    """验证无参数 repo install 初始化后自动 checkout 配置的分支"""
+
+    def test_checkout_called_after_update_init(self, runner, tmp_project, config_mgr):
+        """update --init 成功后，若配置了 branch 应自动 checkout"""
+        import git as _git
+        config_mgr.add_repo(RepoConfig(
+            name="main", type="remote",
+            url="git@github.com:org/repo.git",
+            path="ai-driving/main",
+            branch="develop",
+        ))
+
+        mock_git_repo = MagicMock()
+        mock_git_repo.git.submodule.return_value = None  # update --init 成功
+
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.git.Repo", return_value=mock_git_repo), \
+             patch("driving_cli.commands.repo._checkout_branch_after_install") as mock_checkout:
+            result = runner.invoke(cli, ["repo", "install"])
+
+        assert result.exit_code == 0, result.output
+        mock_checkout.assert_called_once()
+        assert mock_checkout.call_args[0][1] == "main"
+        assert mock_checkout.call_args[0][2] == "develop"
+
+    def test_no_checkout_when_branch_not_configured(self, runner, tmp_project, config_mgr):
+        """未配置 branch 时，update --init 成功后不调用 checkout"""
+        config_mgr.add_repo(RepoConfig(
+            name="main", type="remote",
+            url="git@github.com:org/repo.git",
+            path="ai-driving/main",
+            branch=None,
+        ))
+
+        mock_git_repo = MagicMock()
+        mock_git_repo.git.submodule.return_value = None
+
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.git.Repo", return_value=mock_git_repo), \
+             patch("driving_cli.commands.repo._checkout_branch_after_install") as mock_checkout:
+            runner.invoke(cli, ["repo", "install"])
+
+        mock_checkout.assert_not_called()
+
+# ==================== _checkout_branch_after_install 已在目标分支跳过测试 ====================
+
+class TestCheckoutBranchSkipWhenAlreadyOnBranch:
+    """验证已在目标分支时 _checkout_branch_after_install 跳过 checkout"""
+
+    def test_skips_when_already_on_target_branch(self, tmp_project, capsys):
+        """当前分支已是目标分支时，不执行 checkout"""
+        repo_dir = tmp_project / "ai-driving" / "main"
+        repo_dir.mkdir(parents=True)
+
+        mock_repo = MagicMock()
+        mock_repo.head.is_detached = False
+        mock_repo.active_branch.name = "develop"
+        mock_repo.remotes.__bool__ = lambda self: True
+        mock_repo.remotes.__len__ = lambda self: 1
+
+        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo):
+            _checkout_branch_after_install(repo_dir, "main", "develop")
+
+        # 已在目标分支，不应调用 checkout
+        mock_repo.git.checkout.assert_not_called()
+        # 也不应调用 fetch
+        mock_repo.remotes.origin.fetch.assert_not_called()
+        captured = capsys.readouterr()
+        assert "已在分支" in captured.out
+
+    def test_checkouts_when_on_different_branch(self, tmp_project, capsys):
+        """当前分支不是目标分支时，正常执行 checkout"""
+        repo_dir = tmp_project / "ai-driving" / "main"
+        repo_dir.mkdir(parents=True)
+
+        mock_repo = MagicMock()
+        mock_repo.head.is_detached = False
+        mock_repo.active_branch.name = "master"  # 当前在 master
+        mock_repo.remotes.__bool__ = lambda self: True
+        mock_repo.remotes.__len__ = lambda self: 1
+        mock_repo.git.checkout.return_value = None
+
+        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo):
+            _checkout_branch_after_install(repo_dir, "main", "develop")  # 要切到 develop
+
+        mock_repo.git.checkout.assert_called_once_with("develop")
+
+    def test_attempts_checkout_when_detached_head(self, tmp_project, capsys):
+        """detached HEAD 时跳过分支比较，直接尝试 checkout"""
+        repo_dir = tmp_project / "ai-driving" / "main"
+        repo_dir.mkdir(parents=True)
+
+        mock_repo = MagicMock()
+        mock_repo.head.is_detached = True
+        mock_repo.remotes.__bool__ = lambda self: True
+        mock_repo.remotes.__len__ = lambda self: 1
+        mock_repo.git.checkout.return_value = None
+
+        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo):
+            _checkout_branch_after_install(repo_dir, "main", "develop")
+
+        mock_repo.git.checkout.assert_called_once_with("develop")

@@ -42,6 +42,7 @@ class RepoConfig:
     rules: Optional[dict] = None  # 规则过滤配置，格式：{"enabled": [...], "disabled": [...]}
     agents: Optional[dict] = None  # agent 过滤配置，格式：{"enabled": [...], "disabled": [...]}
     check_sample_rate: Optional[int] = None  # 更新检测采样率：0=不检测，1~100=概率检测，-1=检测到更新时自动拉取；None 表示继承全局配置（未配置时默认 -1，即每次自动检测并更新）
+    branch: Optional[str] = None  # 指定分支（安装后自动 checkout；未配置时缺少 driving.config.json 会给出警告）
 
     def to_dict(self) -> dict:
         """序列化为字典（JSON 兼容格式）"""
@@ -69,6 +70,8 @@ class RepoConfig:
             d["agents"] = self.agents
         if self.check_sample_rate is not None:
             d["check_sample_rate"] = self.check_sample_rate
+        if self.branch is not None:
+            d["branch"] = self.branch
         return d
 
     @classmethod
@@ -96,6 +99,7 @@ class RepoConfig:
             rules=data.get("rules"),
             agents=data.get("agents"),
             check_sample_rate=data.get("check_sample_rate"),
+            branch=data.get("branch"),
         )
 
 

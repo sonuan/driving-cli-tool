@@ -227,7 +227,25 @@ def _init_unloaded_submodules() -> None:
             return False
 
     def _git_checkout_branch(repo_dir: Path, branch: str, label: str) -> bool:
-        """在指定 submodule 目录执行 git checkout <branch>，返回是否成功"""
+        """在指定 submodule 目录执行 git checkout <branch>，返回是否成功。
+
+        若当前分支已经是目标分支，直接返回 True（跳过切换）。
+        """
+        try:
+            # 检查当前分支，已在目标分支则跳过
+            current = _sp.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=str(repo_dir),
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if current.returncode == 0 and current.stdout.strip() == branch:
+                _dbg(f"  {label} 已在分支 '{branch}'，跳过切换")
+                return True
+        except Exception:
+            pass  # 获取当前分支失败，继续尝试 checkout
+
         try:
             result = _sp.run(
                 ["git", "checkout", branch],
@@ -253,39 +271,34 @@ def _init_unloaded_submodules() -> None:
             return False
 
     def _ensure_power_config(power_dir: Path, entry, after_init: bool = False) -> None:
-        """检查 power 目录下是否有 driving.config.json。
+        """确保 power 处于正确的分支并检查 driving.config.json。
 
         处理策略：
-        - 有 branch 配置 → 执行 git checkout <branch>，切换后再检查
-        - 无 branch 配置 → 打印警告，提示用户配置 branch 字段
+        - 有 branch 配置 → 检查当前分支，不是目标分支则 checkout；checkout 后检查 config
+        - 无 branch 配置 → 仅在 config 缺失时打印警告
         """
         from driving_cli.utils.config_manager import CONFIG_FILE_NAME
         config_path = power_dir / CONFIG_FILE_NAME
         label = f"power '{entry.name}'"
 
-        if config_path.exists():
-            return  # 已就绪，无需处理
-
         if entry.branch:
-            _dbg(f"  {label} 缺少 driving.config.json，尝试切换到配置的分支 '{entry.branch}' ...")
+            _dbg(f"  {label} 配置了分支 '{entry.branch}'，检查并切换...")
             ok = _git_checkout_branch(power_dir, entry.branch, label)
-            if ok and config_path.exists():
-                _dbg(f"  ✓ {label} 切换到 '{entry.branch}' 后 driving.config.json 就绪")
-                return
-            if not config_path.exists():
+            if ok and not config_path.exists():
                 click.echo(
                     f"[driving load] 警告：{label} 切换到分支 '{entry.branch}' 后仍缺少 driving.config.json",
                     file=sys.stderr,
                 )
         else:
-            # 无 branch 配置，给出明确提示
-            hint = "建议在 driving.power.json 中为该 power 配置 branch 字段以自动切换。"
-            _dbg(f"  {label} 缺少 driving.config.json，{hint}")
-            click.echo(
-                f"[driving load] 警告：{label} 缺少 driving.config.json，"
-                f"可能位于错误的分支。{hint}",
-                file=sys.stderr,
-            )
+            # 无 branch 配置，仅在 config 缺失时警告
+            if not config_path.exists():
+                hint = "建议在 driving.power.json 中为该 power 配置 branch 字段以自动切换。"
+                _dbg(f"  {label} 缺少 driving.config.json，{hint}")
+                click.echo(
+                    f"[driving load] 警告：{label} 缺少 driving.config.json，"
+                    f"可能位于错误的分支。{hint}",
+                    file=sys.stderr,
+                )
 
     def _is_empty_dir(path: Path) -> bool:
         """目录存在但为空（submodule 未初始化的典型状态）"""

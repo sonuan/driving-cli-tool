@@ -40,6 +40,7 @@ driving load --debug                 # 同上，同时输出调试日志
 
 ```bash
 driving repo install --url <url>              # 安装远程仓库（Git submodule）
+driving repo install --url <url> --branch main              # 安装时指定分支（推荐）
 driving repo install --url <url> --tag base --tag features  # 安装时指定标签（可多次指定）
 driving repo install --url <url> --desc "描述"              # 安装时指定描述（--description 的简写）
 driving repo install --url <url> --module "order:订单模块" --module "pay:支付模块"  # 安装时指定业务模块
@@ -56,6 +57,7 @@ driving repo checkout <name> <branch>         # 切换仓库分支
 ```
 
 `repo install` 新增参数说明：
+- `--branch <branch>`：指定仓库分支，安装后自动 checkout；`driving repo install`（无参数）初始化时也会自动切换已配置的分支
 - `--tag <tag>`：新增仓库标签，可多次指定，如 `--tag base --tag features`
 - `--desc <desc>`：仓库描述，`--description` 的简写
 - `--module <name:description>`：新增业务模块（格式 `name:description`），可多次指定
