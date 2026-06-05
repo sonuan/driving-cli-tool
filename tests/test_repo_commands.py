@@ -918,3 +918,126 @@ class TestGitPush:
         captured = capsys.readouterr()
         assert "推送失败" in captured.out or "推送失败" in captured.err
         assert "冲突" in captured.out or "冲突" in captured.err
+
+
+# ==================== _install_all_uninitialized 错误信息测试 ====================
+
+from driving_cli.commands.repo import _git_checkout
+
+
+class TestInstallAllUninitializedErrorMessage:
+    """验证 update --init 失败时错误原因被打印（而不是静默吞掉）"""
+
+    def test_update_init_failure_reason_logged(self, runner, tmp_project, config_mgr, capsys):
+        """submodule update --init 失败时，应打印失败原因，而不是完全静默"""
+        import git as _git
+        config_mgr.add_repo(RepoConfig(
+            name="main", type="remote",
+            url="git@github.com:org/repo.git",
+            path="ai-driving/main",
+        ))
+
+        mock_git_repo = MagicMock()
+        ssh_error = _git.exc.GitCommandError("submodule update", 128)
+        ssh_error.stderr = "Permission denied (publickey)."
+        # update --init 抛 SSH 错误
+        mock_git_repo.git.submodule.side_effect = [
+            ssh_error,          # 第一次 update --init 失败
+            ssh_error,          # 第二次 submodule add 也失败（触发最终 log_error）
+        ]
+
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.git.Repo", return_value=mock_git_repo):
+            result = runner.invoke(cli, ["repo", "install"])
+
+        # 关键：update --init 的失败原因应出现在输出中，不能完全静默
+        assert "Permission denied" in result.output or "失败" in result.output
+
+    def test_update_init_failure_then_add_success(self, runner, tmp_project, config_mgr):
+        """update --init 失败后降级 submodule add 成功时，最终应显示成功"""
+        import git as _git
+        config_mgr.add_repo(RepoConfig(
+            name="main", type="remote",
+            url="git@github.com:org/repo.git",
+            path="ai-driving/main",
+        ))
+
+        gitmodules = tmp_project / ".gitmodules"
+        gitmodules.write_text(
+            '[submodule "ai-driving/main"]\n\tpath = ai-driving/main\n\turl = git@github.com:org/repo.git\n',
+            encoding="utf-8",
+        )
+
+        mock_git_repo = MagicMock()
+        update_err = _git.exc.GitCommandError("submodule update", 128)
+        update_err.stderr = "not registered"
+        mock_git_repo.git.submodule.side_effect = [
+            update_err,   # update --init 失败
+            None,         # submodule add 成功
+        ]
+
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.git.Repo", return_value=mock_git_repo):
+            result = runner.invoke(cli, ["repo", "install"])
+
+        assert "成功" in result.output or result.exit_code == 0
+
+
+# ==================== _git_checkout fetch 失败提示测试 ====================
+
+class TestGitCheckoutFetchWarning:
+    """验证 checkout 时 fetch 失败会打印 warning 而不是静默 pass"""
+
+    def _make_repo_cfg(self, name="main"):
+        return RepoConfig(name=name, type="remote",
+                          url="git@github.com:org/repo.git", path=f"ai-driving/{name}")
+
+    def test_fetch_failure_shows_warning(self, tmp_project, capsys):
+        """fetch 失败（如 SSH 错误）时应显示 warning，不能静默"""
+        import git as _git
+        repo_dir = tmp_project / "ai-driving" / "main"
+        repo_dir.mkdir(parents=True)
+        cfg = self._make_repo_cfg()
+
+        mock_repo = MagicMock()
+        mock_repo.is_dirty.return_value = False
+        # 有 remotes，fetch 抛 SSH 错误
+        fetch_err = _git.exc.GitCommandError("fetch", 128)
+        fetch_err.stderr = "Permission denied (publickey)."
+        mock_repo.remotes.origin.fetch.side_effect = fetch_err
+        mock_repo.remotes.__bool__ = lambda self: True
+        mock_repo.remotes.__len__ = lambda self: 1
+
+        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo):
+            _git_checkout(cfg, tmp_project, "main")
+
+        captured = capsys.readouterr()
+        # fetch 失败应有 warning 提示，不能完全静默
+        assert "fetch 失败" in captured.out or "fetch 失败" in captured.err \
+               or "Permission" in captured.out or "Permission" in captured.err
+
+    def test_fetch_failure_does_not_block_checkout(self, tmp_project, capsys):
+        """fetch 失败后仍继续执行 checkout（不阻断流程）"""
+        import git as _git
+        repo_dir = tmp_project / "ai-driving" / "main"
+        repo_dir.mkdir(parents=True)
+        cfg = self._make_repo_cfg()
+
+        mock_repo = MagicMock()
+        mock_repo.is_dirty.return_value = False
+        fetch_err = _git.exc.GitCommandError("fetch", 128)
+        fetch_err.stderr = "Permission denied (publickey)."
+        mock_repo.remotes.origin.fetch.side_effect = fetch_err
+        mock_repo.remotes.__bool__ = lambda self: True
+        mock_repo.remotes.__len__ = lambda self: 1
+        mock_repo.git.checkout.return_value = None  # checkout 成功
+
+        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo):
+            _git_checkout(cfg, tmp_project, "main")
+
+        # checkout 应该被调用（fetch 失败不应阻断）
+        mock_repo.git.checkout.assert_called_once_with("main")
+        captured = capsys.readouterr()
+        assert "切换到分支" in captured.out or "切换到分支" in captured.err

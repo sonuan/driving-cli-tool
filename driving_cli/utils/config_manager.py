@@ -308,18 +308,23 @@ class PowerManager:
 
         # git submodule add
         try:
-            _sp.check_call(
+            result = _sp.run(
                 ["git", "submodule", "add", "--force", entry.url, submodule_path],
                 cwd=str(git_root),
-                stderr=_sp.DEVNULL,
+                stderr=_sp.PIPE,
+                text=True,
             )
+            if result.returncode != 0:
+                raise _sp.CalledProcessError(result.returncode, "git submodule add", stderr=result.stderr)
         except _sp.CalledProcessError as e:
             # 主仓库尚无 commit 时 checkout 会失败，但 clone 已完成
             gitmodules = git_root / ".gitmodules"
             if gitmodules.exists() and submodule_path in gitmodules.read_text(encoding="utf-8"):
                 pass  # clone 成功，继续
             else:
-                raise ValueError(f"git submodule add 失败：{e}") from e
+                stderr_msg = (e.stderr or "").strip()
+                detail = f"\n{stderr_msg}" if stderr_msg else ""
+                raise ValueError(f"git submodule add 失败（returncode={e.returncode}）{detail}") from e
 
         # 设置 ignore = all，避免主项目 git status 显示 power 内部变更
         self._set_submodule_ignore(git_root, submodule_path)
@@ -351,16 +356,25 @@ class PowerManager:
             return False
 
         try:
-            _sp.check_call(
+            result = _sp.run(
                 ["git", "pull", "--quiet"],
                 cwd=str(repo_dir),
                 stdout=_sp.DEVNULL,
-                stderr=_sp.DEVNULL,
+                stderr=_sp.PIPE,
+                text=True,
                 timeout=30,
             )
+            if result.returncode != 0:
+                stderr_msg = (result.stderr or "").strip()
+                detail = f"：{stderr_msg}" if stderr_msg else ""
+                raise ValueError(f"git pull 失败（returncode={result.returncode}）{detail}")
             return True
-        except Exception:
-            return False
+        except _sp.TimeoutExpired:
+            raise ValueError("git pull 超时，请检查网络连接或 SSH 配置")
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"git pull 失败：{e}") from e
 
     def check_power_updates(self) -> list:
         """检查所有远程 power 是否有更新（纯本地对比，不 fetch）

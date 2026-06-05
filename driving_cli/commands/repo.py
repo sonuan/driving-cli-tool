@@ -253,8 +253,9 @@ def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
             git_repo.git.submodule("update", "--init", submodule_path)
             log_success(f"仓库 '{repo_cfg.name}' 初始化成功")
             initialized_count += 1
-        except git.exc.GitCommandError:
+        except git.exc.GitCommandError as update_err:
             # update --init 失败，说明 submodule 尚未注册，改用 add
+            log_info(f"submodule update --init 失败，尝试重新添加（原因：{update_err.stderr.strip() if update_err.stderr else str(update_err)}）")
             if not repo_cfg.url:
                 log_error(f"仓库 '{repo_cfg.name}' 缺少 URL，无法添加 submodule")
                 continue
@@ -895,8 +896,8 @@ def _git_checkout(repo_cfg: RepoConfig, project_root: Path, branch: str):
         if repo.remotes:
             try:
                 repo.remotes.origin.fetch()
-            except git.exc.GitCommandError:
-                pass  # fetch 失败不阻断，可能是离线环境
+            except git.exc.GitCommandError as e:
+                log_warning(f"仓库 '{repo_cfg.name}' fetch 失败，将使用本地分支信息（{e.stderr.strip() if e.stderr else str(e)}）")
 
         # 执行 checkout
         repo.git.checkout(branch)

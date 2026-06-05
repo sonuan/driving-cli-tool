@@ -612,3 +612,91 @@ class TestPowerPullCommand:
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
             result = runner.invoke(cli, ["power", "pull"])
         assert result.exit_code != 0 or "不存在" in result.output
+
+
+class TestPowerGitErrorMessages:
+    """验证 git 操作失败时错误信息能正确透传给用户（原 stderr=DEVNULL 会吞掉错误）"""
+
+    def test_add_remote_git_failure_shows_stderr(self, runner, tmp_path):
+        """add --url 时 git submodule add 失败，错误信息（如 SSH 权限拒绝）应显示给用户"""
+        import subprocess
+        (tmp_path / ".git").mkdir()
+        (tmp_path / ".gitmodules").write_text("", encoding="utf-8")
+
+        ssh_error = "Permission denied (publickey).\nfatal: Could not read from remote repository."
+
+        failed_result = MagicMock()
+        failed_result.returncode = 128
+        failed_result.stderr = ssh_error
+
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path):
+                with patch("subprocess.run", return_value=failed_result):
+                    result = runner.invoke(cli, [
+                        "power", "add",
+                        "--url", "git@github.com:org/repo.git",
+                        "--name", "mypower",
+                    ])
+
+        # 退出码非 0，且 SSH 错误信息出现在输出中
+        assert result.exit_code != 0
+        assert "Permission denied" in result.output or "128" in result.output
+
+    def test_add_remote_git_failure_no_silent_swallow(self, runner, tmp_path):
+        """git submodule add 失败且 .gitmodules 中没有注册记录时，不能静默成功"""
+        import subprocess
+        (tmp_path / ".git").mkdir()
+        # .gitmodules 不包含该 submodule（模拟 clone 完全失败的情况）
+        (tmp_path / ".gitmodules").write_text("", encoding="utf-8")
+
+        failed_result = MagicMock()
+        failed_result.returncode = 128
+        failed_result.stderr = "fatal: repository 'git@github.com:org/repo.git' not found"
+
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path):
+                with patch("subprocess.run", return_value=failed_result):
+                    result = runner.invoke(cli, [
+                        "power", "add",
+                        "--url", "git@github.com:org/repo.git",
+                        "--name", "mypower",
+                    ])
+
+        assert result.exit_code != 0
+        # 不能出现"成功"字样
+        assert "成功" not in result.output
+
+    def test_pull_power_git_failure_shows_error(self, runner, tmp_path):
+        """pull_power 底层 git pull 失败时，错误信息应透传给用户而不是静默吞掉"""
+        import subprocess
+        repo_dir = tmp_path / "ai-driving" / "p1"
+        repo_dir.mkdir(parents=True)
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1", url="git@github.com:org/p1.git"),
+        ]))
+
+        failed_result = MagicMock()
+        failed_result.returncode = 128
+        failed_result.stderr = "Permission denied (publickey)."
+
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            with patch("subprocess.run", return_value=failed_result):
+                result = runner.invoke(cli, ["power", "pull", "p1"])
+
+        # 应报错，而不是静默返回 0
+        assert result.exit_code != 0 or "失败" in result.output or "Permission" in result.output
+
+    def test_pull_power_timeout_shows_hint(self, runner, tmp_path):
+        """git pull 超时时，提示用户检查网络/SSH 配置"""
+        import subprocess
+        repo_dir = tmp_path / "ai-driving" / "p1"
+        repo_dir.mkdir(parents=True)
+        write_power_config(tmp_path, PowerConfig(powers=[
+            PowerEntry(name="p1", path="ai-driving/p1", url="git@github.com:org/p1.git"),
+        ]))
+
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path):
+            with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="git", timeout=30)):
+                result = runner.invoke(cli, ["power", "pull", "p1"])
+
+        assert "超时" in result.output or "SSH" in result.output or result.exit_code != 0
