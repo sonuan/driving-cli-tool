@@ -504,3 +504,207 @@ class TestLoadPlatformOption:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data.get("platform") == "android"
+
+    def test_platform与关键词组合(self, runner, tmp_project):
+        """带关键词时 platform 字段仍然输出"""
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None):
+            result = runner.invoke(cli, ["load", "driving", "--platform", "android"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data.get("platform") == "android"
+        # 带关键词时不输出 repos / system_prompt
+        assert "repos" not in data
+        assert "system_prompt" not in data
+
+
+# ==================== _init_unloaded_submodules ====================
+
+class TestInitUnloadedSubmodules:
+    """_init_unloaded_submodules：自动初始化空目录 submodule"""
+
+    def _make_power_config(self, tmp_path: Path, powers: list) -> None:
+        (tmp_path / "driving.power.json").write_text(
+            json.dumps({"version": "1", "powers": powers}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def test_无power文件时静默跳过(self, tmp_path):
+        """传统模式且无 driving.config.json 时不报错"""
+        from driving_cli.commands.load import _init_unloaded_submodules
+        import driving_cli.commands.load as _load_mod
+        orig = _load_mod._debug_enabled
+        try:
+            _load_mod._debug_enabled = False
+            with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path):
+                _init_unloaded_submodules()  # 不应抛出异常
+        finally:
+            _load_mod._debug_enabled = orig
+
+    def test_传统模式空repo目录触发初始化(self, tmp_path):
+        """driving.config.json 中的 remote repo 目录为空时，应执行 git submodule update --init"""
+        _make_config(tmp_path, [
+            {"name": "driving", "type": "remote", "url": "https://github.com/org/driving",
+             "path": "ai-driving/driving", "tags": ["base"]},
+        ])
+        repo_dir = tmp_path / "ai-driving" / "driving"
+        repo_dir.mkdir(parents=True)  # 空目录，模拟 submodule 未初始化
+
+        import subprocess
+        from driving_cli.commands.load import _init_unloaded_submodules
+        mock_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("subprocess.run", return_value=mock_result) as mock_run:
+            _init_unloaded_submodules()
+
+        # 应调用过 git submodule update --init
+        calls = [str(c) for c in mock_run.call_args_list]
+        assert any("submodule" in c and "update" in c for c in calls)
+
+    def test_传统模式已初始化的repo跳过(self, tmp_path):
+        """已有内容的 repo 目录不应触发 git 命令"""
+        _make_config(tmp_path, [
+            {"name": "driving", "type": "remote", "url": "https://github.com/org/driving",
+             "path": "ai-driving/driving", "tags": ["base"]},
+        ])
+        repo_dir = tmp_path / "ai-driving" / "driving"
+        repo_dir.mkdir(parents=True)
+        (repo_dir / "some_file.md").write_text("content")  # 非空，已初始化
+
+        from driving_cli.commands.load import _init_unloaded_submodules
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("subprocess.run") as mock_run:
+            _init_unloaded_submodules()
+
+        # 目录非空，不应调用 git submodule update --init
+        assert not any(
+            "submodule" in str(c) and "update" in str(c)
+            for c in mock_run.call_args_list
+        )
+
+    def test_local类型repo不触发初始化(self, tmp_path):
+        """local 类型的 repo 不应触发 git submodule 操作"""
+        _make_config(tmp_path, [
+            {"name": "my-local", "type": "local", "path": "ai-driving/my-local"},
+        ])
+        repo_dir = tmp_path / "ai-driving" / "my-local"
+        repo_dir.mkdir(parents=True)  # 空目录，但 local 类型
+
+        from driving_cli.commands.load import _init_unloaded_submodules
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("subprocess.run") as mock_run:
+            _init_unloaded_submodules()
+
+        assert not any(
+            "submodule" in str(c) for c in mock_run.call_args_list
+        )
+
+    def test_power模式空目录触发初始化(self, tmp_path):
+        """Power 模式下，空的 remote power 目录应触发初始化"""
+        self._make_power_config(tmp_path, [
+            {"name": "my-power", "type": "remote",
+             "url": "https://github.com/org/power.git", "path": "ai-driving/my-power"},
+        ])
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        power_dir.mkdir(parents=True)  # 空目录
+
+        import subprocess
+        from driving_cli.commands.load import _init_unloaded_submodules
+        mock_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("subprocess.run", return_value=mock_result) as mock_run:
+            _init_unloaded_submodules()
+
+        assert any("submodule" in str(c) and "update" in str(c) for c in mock_run.call_args_list)
+
+    def test_power初始化成功后安装其repos(self, tmp_path):
+        """power 初始化成功后，应继续检查并初始化 power 内的空 repo 目录"""
+        self._make_power_config(tmp_path, [
+            {"name": "my-power", "type": "remote",
+             "url": "https://github.com/org/power.git", "path": "ai-driving/my-power"},
+        ])
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        power_dir.mkdir(parents=True)  # power 目录为空，未初始化
+
+        import subprocess
+        call_count = {"n": 0}
+
+        def fake_run(cmd, **kwargs):
+            call_count["n"] += 1
+            path_arg = cmd[-1] if cmd else ""
+            if "my-power" in path_arg:
+                # power 初始化成功后写入 driving.config.json 和 repo 空目录
+                power_dir.mkdir(parents=True, exist_ok=True)
+                (power_dir / "driving.config.json").write_text(json.dumps({
+                    "version": "2",
+                    "repos": [{"name": "inner-repo", "type": "remote",
+                               "url": "https://github.com/org/inner.git",
+                               "path": "ai-driving/inner-repo", "tags": []}],
+                    "default_commit_message": "update",
+                    "update_version_url": "",
+                }), encoding="utf-8")
+                inner_dir = tmp_path / "ai-driving" / "inner-repo"
+                inner_dir.mkdir(parents=True, exist_ok=True)  # inner repo 也是空目录
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        from driving_cli.commands.load import _init_unloaded_submodules
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("subprocess.run", side_effect=fake_run):
+            _init_unloaded_submodules()
+
+        # 应至少调用两次：一次初始化 power，一次初始化 inner-repo
+        assert call_count["n"] >= 2
+
+    def test_初始化失败时输出stderr警告(self, tmp_path):
+        """初始化失败时应向 stderr 输出警告，不抛异常"""
+        _make_config(tmp_path, [
+            {"name": "driving", "type": "remote", "url": "https://github.com/org/driving",
+             "path": "ai-driving/driving", "tags": ["base"]},
+        ])
+        repo_dir = tmp_path / "ai-driving" / "driving"
+        repo_dir.mkdir(parents=True)
+
+        import subprocess
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="fatal: not a git repository"
+        )
+        from driving_cli.commands.load import _init_unloaded_submodules
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("subprocess.run", return_value=mock_result):
+            # 失败时不应抛出异常，应静默处理并输出警告到 stderr
+            import io
+            from unittest.mock import patch as _patch
+            err_output = []
+            with _patch("click.echo", side_effect=lambda msg, **kw: err_output.append(str(msg))):
+                _init_unloaded_submodules()
+
+        assert any("警告" in m or "初始化失败" in m for m in err_output)
+
+    def test_load命令集成时自动触发检测(self, runner, tmp_path):
+        """driving load 命令（无 keywords）应自动调用 _init_unloaded_submodules"""
+        _make_config(tmp_path, [])
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.skill.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.rule.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None), \
+             patch("driving_cli.commands.load._init_unloaded_submodules") as mock_init:
+            result = runner.invoke(cli, ["load"])
+        assert result.exit_code == 0
+        mock_init.assert_called_once()
+
+    def test_load命令带keywords时不触发检测(self, runner, tmp_path):
+        """driving load <keyword> 时不应调用 _init_unloaded_submodules"""
+        _make_config(tmp_path, [])
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.skill.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.rule.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None), \
+             patch("driving_cli.commands.load._init_unloaded_submodules") as mock_init:
+            result = runner.invoke(cli, ["load", "driving"])
+        assert result.exit_code == 0
+        mock_init.assert_not_called()

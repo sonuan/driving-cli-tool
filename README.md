@@ -106,7 +106,7 @@ driving power uninstall feature # 卸载一个 power 条目
 - local power，目录存在 → 跳过
 - local power，目录不存在 → warning 提示，跳过（本地目录需手动准备）
 
-**`driving load` 自动更新：** 每次执行 `driving load` 时，会先检查所有远程 power 是否有更新并自动拉取，再检查各 `driving.config.json` 里的 repos 更新。
+**`driving load` 自动更新：** 每次执行 `driving load` 时，会先自动检测并初始化未加载的 power 和 repo（git submodule 目录存在但为空的情况，切换分支后无需手动 `git submodule update --init`），再检查所有远程 power 是否有更新并自动拉取，最后检查各 `driving.config.json` 里的 repos 更新。
 
 
 ```bash

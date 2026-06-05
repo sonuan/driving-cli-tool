@@ -115,6 +115,128 @@ def _collect_repo_system_prompts() -> str:
         return ""
 
 
+def _init_unloaded_submodules() -> None:
+    """检测并自动初始化未加载的 power 和 repo（git submodule 目录存在但为空的情况）。
+
+    执行顺序：
+    1. 检查 power（driving.power.json）：发现空目录则执行 git submodule update --init
+    2. power 初始化完成后，检查该 power 下的 repos（driving.config.json）是否也未初始化，
+       若未初始化则继续执行 git submodule update --init
+    3. 检查传统模式下的 repos（driving.config.json）
+
+    仅在 --debug 模式下输出日志，非 debug 模式静默执行。
+    """
+    import subprocess as _sp
+
+    _dbg("开始检测未初始化的 submodule ...")
+    t = time.perf_counter()
+
+    try:
+        project_root = find_project_root()
+    except Exception as e:
+        _dbg(f"find_project_root 失败：{e}")
+        return
+
+    def _git_submodule_init(rel_path: str, label: str) -> bool:
+        """执行 git submodule update --init <rel_path>，返回是否成功"""
+        try:
+            result = _sp.run(
+                ["git", "submodule", "update", "--init", rel_path],
+                cwd=str(project_root),
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode == 0:
+                _dbg(f"  ✓ {label} 初始化成功")
+                return True
+            else:
+                stderr = (result.stderr or "").strip()
+                _dbg(f"  ✗ {label} 初始化失败（returncode={result.returncode}）：{stderr}")
+                click.echo(
+                    f"[driving load] 警告：{label} 初始化失败：{stderr}",
+                    file=sys.stderr,
+                )
+                return False
+        except _sp.TimeoutExpired:
+            _dbg(f"  ✗ {label} 初始化超时")
+            click.echo(f"[driving load] 警告：{label} 初始化超时", file=sys.stderr)
+            return False
+        except Exception as e:
+            _dbg(f"  ✗ {label} 初始化异常：{e}")
+            click.echo(f"[driving load] 警告：{label} 初始化异常：{e}", file=sys.stderr)
+            return False
+
+    def _is_empty_dir(path: Path) -> bool:
+        """目录存在但为空（submodule 未初始化的典型状态）"""
+        return path.exists() and path.is_dir() and not any(path.iterdir())
+
+    def _init_repos_from_config(config_path: Path, context_label: str) -> None:
+        """从指定的 driving.config.json 检测并初始化未加载的 repos"""
+        if not config_path.exists():
+            return
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+            repos = data.get("repos", [])
+        except Exception as e:
+            _dbg(f"  读取 {context_label} driving.config.json 失败：{e}")
+            return
+
+        for repo in repos:
+            repo_path_str = repo.get("path", "")
+            repo_name = repo.get("name", repo_path_str)
+            repo_type = repo.get("type", "remote")
+            if repo_type != "remote" or not repo_path_str:
+                continue
+            repo_dir = project_root / repo_path_str
+            if _is_empty_dir(repo_dir):
+                _dbg(f"  检测到未初始化的 repo '{repo_name}'（{repo_path_str}），正在初始化...")
+                _git_submodule_init(repo_path_str, f"repo '{repo_name}'")
+
+    # ---- 1. Power 模式检测 ----
+    from driving_cli.utils.config_manager import PowerManager, POWER_FILE_NAME, CONFIG_FILE_NAME
+    power_file = project_root / POWER_FILE_NAME
+
+    if power_file.exists():
+        _dbg("检测到 Power 模式，开始检测 power submodule ...")
+        try:
+            pm = PowerManager(project_root)
+            power_cfg = pm.load_power_config()
+        except Exception as e:
+            _dbg(f"  读取 driving.power.json 失败：{e}")
+            power_cfg = None
+
+        if power_cfg:
+            for entry in power_cfg.powers:
+                if entry.type != "remote":
+                    continue
+                power_dir = project_root / entry.path
+                if _is_empty_dir(power_dir):
+                    _dbg(f"检测到未初始化的 power '{entry.name}'（{entry.path}），正在初始化...")
+                    ok = _git_submodule_init(entry.path, f"power '{entry.name}'")
+                    if ok:
+                        # power 初始化成功后，检查其下的 repos
+                        _init_repos_from_config(
+                            power_dir / CONFIG_FILE_NAME,
+                            f"power '{entry.name}'",
+                        )
+                else:
+                    # power 目录已就绪，仍检查其下的 repos 是否未初始化
+                    _init_repos_from_config(
+                        power_dir / CONFIG_FILE_NAME,
+                        f"power '{entry.name}'",
+                    )
+
+    # ---- 2. 传统模式：检测根目录 driving.config.json 下的 repos ----
+    from driving_cli.utils.config_manager import CONFIG_FILE_NAME as _CFG
+    root_config = project_root / _CFG
+    if root_config.exists():
+        _dbg("检测传统模式 repos ...")
+        _init_repos_from_config(root_config, "传统模式")
+
+    _dbg(f"submodule 初始化检测完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
+
+
 def _check_and_pull_powers() -> None:
     """检查所有远程 power 是否有更新，有则自动拉取（静默执行）"""
     _dbg("检查 power 更新 ...")
@@ -263,6 +385,10 @@ def load(keywords: tuple, debug: bool, with_modules: str, platform: str):
         # 2. 再检查各 config.json 里的 repos 是否有更新
         repo_update_msg = ""
         if not keywords:
+            t = time.perf_counter()
+            _init_unloaded_submodules()
+            _dbg(f"未加载 submodule 检测完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
+
             t = time.perf_counter()
             _check_and_pull_powers()
             _dbg(f"power 更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
