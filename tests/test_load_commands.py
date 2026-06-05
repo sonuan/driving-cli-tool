@@ -127,6 +127,12 @@ class TestCheckCliUpdate:
 # ==================== load 命令集成测试 ====================
 
 class TestLoadCommand:
+    @pytest.fixture(autouse=True)
+    def _patch_init_submodules(self):
+        """所有集成测试默认 mock 掉 submodule 初始化，避免触发真实 git 命令"""
+        with patch("driving_cli.commands.load._init_unloaded_submodules"):
+            yield
+
     def test_输出合法JSON(self, runner, tmp_project):
         with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
@@ -263,6 +269,11 @@ class TestLoadCommand:
 # ==================== --debug / silent 模式 ====================
 
 class TestLoadDebugFlag:
+    @pytest.fixture(autouse=True)
+    def _patch_init_submodules(self):
+        with patch("driving_cli.commands.load._init_unloaded_submodules"):
+            yield
+
     def _invoke(self, runner, tmp_project, extra_args=None):
         args = ["load"] + (extra_args or [])
         with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
@@ -445,6 +456,11 @@ class TestCollectRepoSystemPrompts:
 class TestLoadPlatformOption:
     """driving load --platform 测试"""
 
+    @pytest.fixture(autouse=True)
+    def _patch_init_submodules(self):
+        with patch("driving_cli.commands.load._init_unloaded_submodules"):
+            yield
+
     def _invoke(self, runner, tmp_project, extra_args=None):
         args = ["load"] + (extra_args or [])
         with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
@@ -545,7 +561,7 @@ class TestInitUnloadedSubmodules:
             _load_mod._debug_enabled = orig
 
     def test_传统模式空repo目录触发初始化(self, tmp_path):
-        """driving.config.json 中的 remote repo 目录为空时，应执行 git submodule update --init"""
+        """driving.config.json 中的 remote repo 目录为空或不存在时，应执行 git submodule update --init"""
         _make_config(tmp_path, [
             {"name": "driving", "type": "remote", "url": "https://github.com/org/driving",
              "path": "ai-driving/driving", "tags": ["base"]},
@@ -561,6 +577,24 @@ class TestInitUnloadedSubmodules:
             _init_unloaded_submodules()
 
         # 应调用过 git submodule update --init
+        calls = [str(c) for c in mock_run.call_args_list]
+        assert any("submodule" in c and "update" in c for c in calls)
+
+    def test_传统模式不存在的repo目录触发初始化(self, tmp_path):
+        """driving.config.json 中的 remote repo 目录不存在时（切换分支后），也应执行 git submodule update --init"""
+        _make_config(tmp_path, [
+            {"name": "driving", "type": "remote", "url": "https://github.com/org/driving",
+             "path": "ai-driving/driving", "tags": ["base"]},
+        ])
+        # 不创建 repo_dir，模拟目录完全不存在的情况
+
+        import subprocess
+        from driving_cli.commands.load import _init_unloaded_submodules
+        mock_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("subprocess.run", return_value=mock_result) as mock_run:
+            _init_unloaded_submodules()
+
         calls = [str(c) for c in mock_run.call_args_list]
         assert any("submodule" in c and "update" in c for c in calls)
 
@@ -603,13 +637,30 @@ class TestInitUnloadedSubmodules:
         )
 
     def test_power模式空目录触发初始化(self, tmp_path):
-        """Power 模式下，空的 remote power 目录应触发初始化"""
+        """Power 模式下，空的或不存在的 remote power 目录应触发初始化"""
         self._make_power_config(tmp_path, [
             {"name": "my-power", "type": "remote",
              "url": "https://github.com/org/power.git", "path": "ai-driving/my-power"},
         ])
         power_dir = tmp_path / "ai-driving" / "my-power"
         power_dir.mkdir(parents=True)  # 空目录
+
+        import subprocess
+        from driving_cli.commands.load import _init_unloaded_submodules
+        mock_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("subprocess.run", return_value=mock_result) as mock_run:
+            _init_unloaded_submodules()
+
+        assert any("submodule" in str(c) and "update" in str(c) for c in mock_run.call_args_list)
+
+    def test_power模式目录不存在触发初始化(self, tmp_path):
+        """Power 模式下，目录完全不存在（切换分支后）也应触发初始化"""
+        self._make_power_config(tmp_path, [
+            {"name": "my-power", "type": "remote",
+             "url": "https://github.com/org/power.git", "path": "ai-driving/my-power"},
+        ])
+        # 不创建 power_dir，模拟切换分支后目录消失
 
         import subprocess
         from driving_cli.commands.load import _init_unloaded_submodules
@@ -708,3 +759,152 @@ class TestInitUnloadedSubmodules:
             result = runner.invoke(cli, ["load", "driving"])
         assert result.exit_code == 0
         mock_init.assert_not_called()
+
+# ==================== _ensure_power_config ====================
+
+class TestEnsurePowerConfig:
+    """_ensure_power_config：power 初始化后检查 driving.config.json，按 branch 配置自动切换"""
+
+    def _make_power_entry(self, tmp_path: Path, branch=None) -> object:
+        from driving_cli.models.power_config import PowerEntry
+        return PowerEntry(
+            name="my-power",
+            path="ai-driving/my-power",
+            url="https://github.com/org/power.git",
+            branch=branch,
+        )
+
+    def test_config_exists_no_action(self, tmp_path):
+        """driving.config.json 已存在时，不执行任何 git 操作"""
+        import subprocess
+        from driving_cli.commands.load import _init_unloaded_submodules
+        from driving_cli.utils.config_manager import POWER_FILE_NAME, CONFIG_FILE_NAME
+
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        power_dir.mkdir(parents=True)
+        (power_dir / CONFIG_FILE_NAME).write_text(
+            json.dumps({"version": "2", "repos": [], "default_commit_message": "u",
+                        "update_version_url": ""}),
+            encoding="utf-8",
+        )
+        (tmp_path / POWER_FILE_NAME).write_text(
+            json.dumps({"powers": [{"name": "my-power", "type": "remote",
+                                    "url": "https://github.com/org/power.git",
+                                    "path": "ai-driving/my-power", "branch": "master"}]}),
+            encoding="utf-8",
+        )
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("subprocess.run") as mock_run:
+            _init_unloaded_submodules()
+        # config 已存在，不应调用任何 git 命令
+        assert not any("checkout" in str(c) for c in mock_run.call_args_list)
+
+    def test_no_config_with_branch_triggers_checkout(self, tmp_path):
+        """driving.config.json 不存在且配置了 branch 时，应执行 git checkout"""
+        import subprocess
+        from driving_cli.commands.load import _init_unloaded_submodules
+        from driving_cli.utils.config_manager import POWER_FILE_NAME, CONFIG_FILE_NAME
+
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        power_dir.mkdir(parents=True)
+        (tmp_path / POWER_FILE_NAME).write_text(
+            json.dumps({"powers": [{"name": "my-power", "type": "remote",
+                                    "url": "https://github.com/org/power.git",
+                                    "path": "ai-driving/my-power", "branch": "master"}]}),
+            encoding="utf-8",
+        )
+
+        checkout_written = {"done": False}
+
+        def fake_run(cmd, **kwargs):
+            if "checkout" in cmd:
+                # 模拟 checkout 成功后写入 driving.config.json
+                (power_dir / CONFIG_FILE_NAME).write_text(
+                    json.dumps({"version": "2", "repos": [], "default_commit_message": "u",
+                                "update_version_url": ""}),
+                    encoding="utf-8",
+                )
+                checkout_written["done"] = True
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("subprocess.run", side_effect=fake_run):
+            _init_unloaded_submodules()
+
+        assert checkout_written["done"], "应执行 git checkout"
+
+    def test_no_config_without_branch_outputs_warning(self, tmp_path):
+        """driving.config.json 不存在且未配置 branch 时，应输出警告到 stderr"""
+        import subprocess
+        from driving_cli.commands.load import _init_unloaded_submodules
+        from driving_cli.utils.config_manager import POWER_FILE_NAME
+
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        power_dir.mkdir(parents=True)
+        # 无 branch 配置
+        (tmp_path / POWER_FILE_NAME).write_text(
+            json.dumps({"powers": [{"name": "my-power", "type": "remote",
+                                    "url": "https://github.com/org/power.git",
+                                    "path": "ai-driving/my-power"}]}),
+            encoding="utf-8",
+        )
+
+        mock_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        warnings = []
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("subprocess.run", return_value=mock_result), \
+             patch("click.echo", side_effect=lambda msg, **kw: warnings.append(str(msg))):
+            _init_unloaded_submodules()
+
+        assert any("branch" in w or "分支" in w or "driving.config.json" in w for w in warnings)
+
+    def test_no_config_without_branch_no_checkout_call(self, tmp_path):
+        """无 branch 配置时不应尝试执行 git checkout"""
+        import subprocess
+        from driving_cli.commands.load import _init_unloaded_submodules
+        from driving_cli.utils.config_manager import POWER_FILE_NAME
+
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        power_dir.mkdir(parents=True)
+        (tmp_path / POWER_FILE_NAME).write_text(
+            json.dumps({"powers": [{"name": "my-power", "type": "remote",
+                                    "url": "https://github.com/org/power.git",
+                                    "path": "ai-driving/my-power"}]}),
+            encoding="utf-8",
+        )
+
+        mock_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("subprocess.run", return_value=mock_result) as mock_run, \
+             patch("click.echo"):
+            _init_unloaded_submodules()
+
+        assert not any("checkout" in str(c) for c in mock_run.call_args_list)
+
+    def test_checkout_fails_outputs_warning(self, tmp_path):
+        """git checkout 失败时应输出警告"""
+        import subprocess
+        from driving_cli.commands.load import _init_unloaded_submodules
+        from driving_cli.utils.config_manager import POWER_FILE_NAME
+
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        power_dir.mkdir(parents=True)
+        (tmp_path / POWER_FILE_NAME).write_text(
+            json.dumps({"powers": [{"name": "my-power", "type": "remote",
+                                    "url": "https://github.com/org/power.git",
+                                    "path": "ai-driving/my-power", "branch": "master"}]}),
+            encoding="utf-8",
+        )
+
+        def fake_run(cmd, **kwargs):
+            rc = 1 if "checkout" in cmd else 0
+            return subprocess.CompletedProcess(args=cmd, returncode=rc, stdout="",
+                                               stderr="error: pathspec 'master' did not match")
+
+        warnings = []
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("subprocess.run", side_effect=fake_run), \
+             patch("click.echo", side_effect=lambda msg, **kw: warnings.append(str(msg))):
+            _init_unloaded_submodules()
+
+        assert any("警告" in w or "失败" in w for w in warnings)

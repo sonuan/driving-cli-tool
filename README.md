@@ -71,6 +71,7 @@ Power 模式允许将多个目录下的 `driving.config.json` 合并使用，解
 # 幂等安装：根据本地状态自动判断执行路径
 driving power install --url https://git.xxx.com/config.git
 driving power install --url https://git.xxx.com/config.git --name feature
+driving power install --url https://git.xxx.com/config.git --branch master  # 指定分支（推荐）
 driving power install --url https://git.xxx.com/config.git --force  # 强制重新安装
 
 # 本地模式：注册已存在的本地目录（须包含 driving.config.json）
@@ -108,10 +109,16 @@ driving power uninstall feature # 卸载一个 power 条目
 
 **`driving load` 自动更新：** 每次执行 `driving load` 时，会先自动检测并初始化未加载的 power 和 repo（git submodule 目录存在但为空的情况，切换分支后无需手动 `git submodule update --init`），再检查所有远程 power 是否有更新并自动拉取，最后检查各 `driving.config.json` 里的 repos 更新。
 
+**`branch` 字段（自动切换分支）：** power 初始化完成后，若目录下缺少 `driving.config.json`：
+- 配置了 `branch` → 自动执行 `git checkout <branch>`，切换到指定分支
+- 未配置 `branch` → 输出警告，提示用户手动检查或在 `driving.power.json` 中配置 `branch` 字段
+
+适用场景：power 仓库的默认分支（如 feature 分支）不含 `driving.config.json`，而 master 分支才有。
+
 
 ```bash
-# 1. 从远程安装 power（作为 submodule，跟随主项目 git）
-driving power install --url https://git.xxx.com/branch-config.git --name feature
+# 1. 从远程安装 power（作为 submodule，跟随主项目 git），指定 master 分支
+driving power install --url https://git.xxx.com/branch-config.git --name feature --branch master
 
 # 2. 安装新仓库时指定写入哪个 power 的配置
 driving repo install --url https://... --power feature

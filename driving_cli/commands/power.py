@@ -44,18 +44,21 @@ def power_group():
 @click.option("--name", "power_name", default=None, help="Power 名称（唯一标识，不指定则从 URL 推断）")
 @click.option("--path", "power_path", default=None, help="本地目录路径（--url 时可选，默认 ai-driving/<name>；本地模式时必填）")
 @click.option("--description", default=None, help="Power 描述")
+@click.option("--branch", default=None, help="指定分支（初始化后自动 checkout；未配置时缺少 driving.config.json 会给出警告）")
 @click.option("--force", is_flag=True, default=False, help="强制覆盖已存在的同名 power（仅有参数时有效）")
-def power_install(url: Optional[str], power_name: Optional[str], power_path: Optional[str], description: Optional[str], force: bool):
+def power_install(url: Optional[str], power_name: Optional[str], power_path: Optional[str], description: Optional[str], branch: Optional[str], force: bool):
     """安装 power 条目
 
     无参数：读取 driving.power.json，初始化所有未就绪的 power。\n
     --url：将远程仓库作为 git submodule 安装，仓库根目录须包含 driving.config.json。\n
     --path：注册已存在的本地目录，目录下须包含 driving.config.json。\n
+    --branch：指定 power 仓库的分支，初始化后自动切换；未配置时若缺少 driving.config.json 会给出警告。\n
 
     示例：
         driving power install
         driving power install --url https://git.xxx.com/config.git
         driving power install --url https://git.xxx.com/config.git --name feature
+        driving power install --url https://git.xxx.com/config.git --branch master
         driving power install --url https://git.xxx.com/config.git --force
         driving power install --name main --path ai-driving/my-local
     """
@@ -121,7 +124,7 @@ def power_install(url: Optional[str], power_name: Optional[str], power_path: Opt
             log_error("当前目录不在 Git 仓库中，请先执行 git init")
             raise click.Abort()
 
-        entry = PowerEntry(name=power_name, path=install_path, url=url, description=description)
+        entry = PowerEntry(name=power_name, path=install_path, url=url, description=description, branch=branch)
 
         # 情况 1：目录不存在 → clone
         if not dir_exists:
@@ -182,7 +185,7 @@ def power_install(url: Optional[str], power_name: Optional[str], power_path: Opt
         log_error("Power 名称只允许字母、数字、连字符和下划线，且必须以字母或数字开头")
         raise click.Abort()
 
-    entry = PowerEntry(name=power_name, path=power_path, url=None, description=description)
+    entry = PowerEntry(name=power_name, path=power_path, url=None, description=description, branch=branch)
 
     try:
         pm.add_power_local(entry)

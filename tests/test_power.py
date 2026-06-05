@@ -29,6 +29,14 @@ from driving_cli.utils.config_manager import (
 
 # ==================== 测试辅助工具 ====================
 
+@pytest.fixture(autouse=True)
+def _reset_logger_silent():
+    """每个测试前后重置 logger silent 状态，防止 load 测试的 set_silent(True) 污染"""
+    from driving_cli.utils.logger import set_silent
+    set_silent(False)
+    yield
+    set_silent(False)
+
 def make_driving_config(
     repos=None,
     gate_webhook="",
@@ -130,6 +138,43 @@ class TestPowerEntry:
         entry = PowerEntry.from_dict({"name": "feat", "path": "ai-driving/feat", "url": ""})
         assert entry.url is None
         assert entry.type == "local"
+
+    def test_branch_field_included_in_to_dict_when_set(self):
+        entry = PowerEntry(name="feat", path="ai-driving/feat",
+                           url="https://git.example.com/r.git", branch="master")
+        d = entry.to_dict()
+        assert d["branch"] == "master"
+
+    def test_branch_field_omitted_from_to_dict_when_none(self):
+        entry = PowerEntry(name="feat", path="ai-driving/feat",
+                           url="https://git.example.com/r.git", branch=None)
+        d = entry.to_dict()
+        assert "branch" not in d
+
+    def test_from_dict_reads_branch(self):
+        data = {"name": "feat", "path": "ai-driving/feat",
+                "url": "https://git.example.com/r.git", "branch": "master"}
+        entry = PowerEntry.from_dict(data)
+        assert entry.branch == "master"
+
+    def test_from_dict_branch_defaults_to_none(self):
+        data = {"name": "feat", "path": "ai-driving/feat"}
+        entry = PowerEntry.from_dict(data)
+        assert entry.branch is None
+
+    def test_branch_roundtrip(self):
+        """branch 字段序列化后反序列化结果一致"""
+        entry = PowerEntry(name="feat", path="ai-driving/feat",
+                           url="https://git.example.com/r.git", branch="develop")
+        restored = PowerEntry.from_dict(entry.to_dict())
+        assert restored.branch == "develop"
+
+    def test_no_branch_roundtrip(self):
+        """无 branch 配置时序列化反序列化后仍为 None"""
+        entry = PowerEntry(name="feat", path="ai-driving/feat",
+                           url="https://git.example.com/r.git")
+        restored = PowerEntry.from_dict(entry.to_dict())
+        assert restored.branch is None
 
 
 # ==================== PowerConfig 模型测试 ====================
@@ -523,6 +568,49 @@ class TestPowerInstallCommand:
                 ])
         assert result.exit_code == 0, result.output
         assert "driving repo install" in result.output
+
+    def test_install_remote_with_branch_saves_branch_in_power_json(self, runner, tmp_path):
+        """--url --branch 时，branch 字段应写入 driving.power.json"""
+        power_dir = tmp_path / "ai-driving" / "mypower"
+        power_dir.mkdir(parents=True)
+        (power_dir / CONFIG_FILE_NAME).write_text(
+            json.dumps({"version": "2", "repos": [], "default_commit_message": "u",
+                        "update_version_url": ""}),
+            encoding="utf-8",
+        )
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path):
+            result = runner.invoke(cli, [
+                "power", "install",
+                "--url", "https://github.com/example/mypower.git",
+                "--name", "mypower",
+                "--branch", "master",
+            ])
+        assert result.exit_code == 0, result.output
+        data = json.loads((tmp_path / POWER_FILE_NAME).read_text(encoding="utf-8"))
+        entry = next(p for p in data["powers"] if p["name"] == "mypower")
+        assert entry.get("branch") == "master"
+
+    def test_install_remote_without_branch_no_branch_in_power_json(self, runner, tmp_path):
+        """不传 --branch 时，driving.power.json 中不应有 branch 字段"""
+        power_dir = tmp_path / "ai-driving" / "mypower"
+        power_dir.mkdir(parents=True)
+        (power_dir / CONFIG_FILE_NAME).write_text(
+            json.dumps({"version": "2", "repos": [], "default_commit_message": "u",
+                        "update_version_url": ""}),
+            encoding="utf-8",
+        )
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path):
+            result = runner.invoke(cli, [
+                "power", "install",
+                "--url", "https://github.com/example/mypower.git",
+                "--name", "mypower",
+            ])
+        assert result.exit_code == 0, result.output
+        data = json.loads((tmp_path / POWER_FILE_NAME).read_text(encoding="utf-8"))
+        entry = next(p for p in data["powers"] if p["name"] == "mypower")
+        assert "branch" not in entry
 
 
 class TestPowerUninstallCommand:

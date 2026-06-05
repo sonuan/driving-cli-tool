@@ -167,9 +167,76 @@ def _init_unloaded_submodules() -> None:
             click.echo(f"[driving load] 警告：{label} 初始化异常：{e}", file=sys.stderr)
             return False
 
+    def _git_checkout_branch(repo_dir: Path, branch: str, label: str) -> bool:
+        """在指定 submodule 目录执行 git checkout <branch>，返回是否成功"""
+        try:
+            result = _sp.run(
+                ["git", "checkout", branch],
+                cwd=str(repo_dir),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                _dbg(f"  ✓ {label} 切换到分支 '{branch}' 成功")
+                return True
+            else:
+                stderr = (result.stderr or "").strip()
+                _dbg(f"  ✗ {label} 切换分支 '{branch}' 失败：{stderr}")
+                click.echo(
+                    f"[driving load] 警告：{label} 切换分支 '{branch}' 失败：{stderr}",
+                    file=sys.stderr,
+                )
+                return False
+        except Exception as e:
+            _dbg(f"  ✗ {label} 切换分支异常：{e}")
+            click.echo(f"[driving load] 警告：{label} 切换分支异常：{e}", file=sys.stderr)
+            return False
+
+    def _ensure_power_config(power_dir: Path, entry, after_init: bool = False) -> None:
+        """检查 power 目录下是否有 driving.config.json。
+
+        处理策略：
+        - 有 branch 配置 → 执行 git checkout <branch>，切换后再检查
+        - 无 branch 配置 → 打印警告，提示用户配置 branch 字段
+        """
+        from driving_cli.utils.config_manager import CONFIG_FILE_NAME
+        config_path = power_dir / CONFIG_FILE_NAME
+        label = f"power '{entry.name}'"
+
+        if config_path.exists():
+            return  # 已就绪，无需处理
+
+        if entry.branch:
+            _dbg(f"  {label} 缺少 driving.config.json，尝试切换到配置的分支 '{entry.branch}' ...")
+            ok = _git_checkout_branch(power_dir, entry.branch, label)
+            if ok and config_path.exists():
+                _dbg(f"  ✓ {label} 切换到 '{entry.branch}' 后 driving.config.json 就绪")
+                return
+            if not config_path.exists():
+                click.echo(
+                    f"[driving load] 警告：{label} 切换到分支 '{entry.branch}' 后仍缺少 driving.config.json",
+                    file=sys.stderr,
+                )
+        else:
+            # 无 branch 配置，给出明确提示
+            hint = "建议在 driving.power.json 中为该 power 配置 branch 字段以自动切换。"
+            _dbg(f"  {label} 缺少 driving.config.json，{hint}")
+            click.echo(
+                f"[driving load] 警告：{label} 缺少 driving.config.json，"
+                f"可能位于错误的分支。{hint}",
+                file=sys.stderr,
+            )
+
     def _is_empty_dir(path: Path) -> bool:
         """目录存在但为空（submodule 未初始化的典型状态）"""
         return path.exists() and path.is_dir() and not any(path.iterdir())
+
+    def _needs_init(path: Path) -> bool:
+        """目录不存在，或存在但为空——两种情况都需要初始化"""
+        if not path.exists():
+            return True
+        return path.is_dir() and not any(path.iterdir())
 
     def _init_repos_from_config(config_path: Path, context_label: str) -> None:
         """从指定的 driving.config.json 检测并初始化未加载的 repos"""
@@ -189,7 +256,7 @@ def _init_unloaded_submodules() -> None:
             if repo_type != "remote" or not repo_path_str:
                 continue
             repo_dir = project_root / repo_path_str
-            if _is_empty_dir(repo_dir):
+            if _needs_init(repo_dir):
                 _dbg(f"  检测到未初始化的 repo '{repo_name}'（{repo_path_str}），正在初始化...")
                 _git_submodule_init(repo_path_str, f"repo '{repo_name}'")
 
@@ -211,17 +278,21 @@ def _init_unloaded_submodules() -> None:
                 if entry.type != "remote":
                     continue
                 power_dir = project_root / entry.path
-                if _is_empty_dir(power_dir):
+                if _needs_init(power_dir):
                     _dbg(f"检测到未初始化的 power '{entry.name}'（{entry.path}），正在初始化...")
                     ok = _git_submodule_init(entry.path, f"power '{entry.name}'")
                     if ok:
-                        # power 初始化成功后，检查其下的 repos
+                        # 初始化成功后：确保 driving.config.json 存在（可能需要切换分支）
+                        _ensure_power_config(power_dir, entry, after_init=True)
+                        # 再检查 power 下的 repos
                         _init_repos_from_config(
                             power_dir / CONFIG_FILE_NAME,
                             f"power '{entry.name}'",
                         )
                 else:
-                    # power 目录已就绪，仍检查其下的 repos 是否未初始化
+                    # power 目录已就绪：同样检查 driving.config.json（可能分支不对）
+                    _ensure_power_config(power_dir, entry)
+                    # 检查 power 下的 repos 是否未初始化
                     _init_repos_from_config(
                         power_dir / CONFIG_FILE_NAME,
                         f"power '{entry.name}'",

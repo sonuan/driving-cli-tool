@@ -20,6 +20,7 @@ class PowerEntry:
     path: str                       # 安装路径（相对于项目根目录，如 ai-driving/my-config）
     url: Optional[str] = None       # Git URL（remote 类型必填）
     description: Optional[str] = None  # 描述，默认为空
+    branch: Optional[str] = None    # 指定分支（初始化后自动 checkout；未配置则不切换，缺少 driving.config.json 时给出警告）
 
     @property
     def type(self) -> str:
@@ -27,13 +28,16 @@ class PowerEntry:
         return "remote" if self.url else "local"
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "name": self.name,
             "type": self.type,
             "path": self.path,
             "url": self.url,
             "description": self.description or "",
         }
+        if self.branch:
+            d["branch"] = self.branch
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "PowerEntry":
@@ -45,6 +49,7 @@ class PowerEntry:
             path=str(data["path"]),
             url=data.get("url") or None,
             description=data.get("description") or None,
+            branch=data.get("branch") or None,
             # type 字段由 url 推断，从文件读取时忽略（向后兼容）
         )
 
