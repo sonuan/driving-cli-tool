@@ -382,7 +382,8 @@ class PowerManager:
         Returns:
             有更新的 PowerEntry 列表
         """
-        import subprocess as _sp
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from driving_cli.commands.check import _compare_local_remote
 
         if not self.exists():
             return []
@@ -392,39 +393,36 @@ class PowerManager:
         except ValueError:
             return []
 
-        updatable = []
+        candidates = []
         for entry in power_cfg.powers:
             if entry.type != "remote":
                 continue
             repo_dir = self._project_root / entry.path
             if not (repo_dir / ".git").exists():
                 continue
-            # fetch 远端
-            try:
-                _sp.run(
-                    ["git", "fetch", "--quiet"],
-                    cwd=str(repo_dir),
-                    stdout=_sp.DEVNULL,
-                    stderr=_sp.DEVNULL,
-                    timeout=10,
-                )
-            except Exception:
-                continue
-            # 对比 behind
-            for ref in ("@{u}", "origin/HEAD", "origin/main", "origin/master"):
+            candidates.append((entry, repo_dir))
+
+        if not candidates:
+            return []
+
+        updatable = []
+        with ThreadPoolExecutor(max_workers=min(len(candidates), 8)) as executor:
+            future_to_entry = {
+                executor.submit(_compare_local_remote, repo_dir): entry
+                for entry, repo_dir in candidates
+            }
+            for future in as_completed(future_to_entry):
+                entry = future_to_entry[future]
                 try:
-                    out = _sp.check_output(
-                        ["git", "rev-list", "--left-right", "--count", f"HEAD...{ref}"],
-                        cwd=str(repo_dir),
-                        stderr=_sp.DEVNULL,
-                        text=True,
-                    ).strip()
-                    _ahead, behind = map(int, out.split())
-                    if behind > 0:
-                        updatable.append(entry)
-                    break
+                    result = future.result()
                 except Exception:
-                    continue
+                    result = None
+                if result is True:
+                    updatable.append(entry)
+
+        # 保持原始顺序
+        order = {entry.name: i for i, (entry, _) in enumerate(candidates)}
+        updatable.sort(key=lambda e: order.get(e.name, 0))
 
         return updatable
 

@@ -506,3 +506,167 @@ class TestMergeConfigsCheckSampleRate:
         """两个 power 设置不同的 check_sample_rate 应抛出 ValueError"""
         with pytest.raises(ValueError, match="配置冲突"):
             _merge_configs([self._cfg(0), self._cfg(50)], ["a", "b"])
+
+
+# ==================== PowerManager.check_power_updates 测试 ====================
+
+
+from unittest.mock import patch, MagicMock
+from driving_cli.utils.config_manager import PowerManager, POWER_FILE_NAME
+from driving_cli.models.power_config import PowerConfig, PowerEntry
+
+
+def _make_power_json(powers: list) -> dict:
+    """构造 driving.power.json 的字典结构"""
+    return {"powers": powers}
+
+
+def _remote_entry(name: str, path: str) -> dict:
+    return {"name": name, "type": "remote", "path": path, "url": f"https://example.com/{name}.git"}
+
+
+def _local_entry(name: str, path: str) -> dict:
+    return {"name": name, "type": "local", "path": path}
+
+
+class TestCheckPowerUpdates:
+    """PowerManager.check_power_updates 单元测试
+
+    验证新实现：纯本地对比（_compare_local_remote），不执行 git fetch，并发检测。
+    """
+
+    def _setup(self, tmp_path: Path, powers: list) -> PowerManager:
+        """写入 driving.power.json 并返回 PowerManager"""
+        (tmp_path / POWER_FILE_NAME).write_text(
+            json.dumps(_make_power_json(powers), ensure_ascii=False), encoding="utf-8"
+        )
+        return PowerManager(tmp_path)
+
+    # ------------------------------------------------------------------
+    # 基础场景
+    # ------------------------------------------------------------------
+
+    def test_returns_empty_when_no_power_file(self, tmp_path):
+        """不存在 driving.power.json 时返回空列表"""
+        pm = PowerManager(tmp_path)
+        assert pm.check_power_updates() == []
+
+    def test_returns_empty_when_no_remote_powers(self, tmp_path):
+        """只有 local 类型的 power 时不检测，返回空列表"""
+        pm = self._setup(tmp_path, [_local_entry("local-power", "ai-driving/local-power")])
+        assert pm.check_power_updates() == []
+
+    def test_skips_uninitialized_repo(self, tmp_path):
+        """power 目录不存在或无 .git 时跳过"""
+        pm = self._setup(tmp_path, [_remote_entry("p1", "ai-driving/p1")])
+        # ai-driving/p1/.git 不存在
+        assert pm.check_power_updates() == []
+
+    # ------------------------------------------------------------------
+    # 不执行 git fetch（核心行为验证）
+    # ------------------------------------------------------------------
+
+    def test_does_not_call_git_fetch(self, tmp_path):
+        """改动后不应再调用 git fetch，全程纯本地"""
+        power_dir = tmp_path / "ai-driving" / "p1"
+        (power_dir / ".git").mkdir(parents=True)
+
+        pm = self._setup(tmp_path, [_remote_entry("p1", "ai-driving/p1")])
+
+        with patch("driving_cli.commands.check._compare_local_remote", return_value=False) as mock_cmp, \
+             patch("subprocess.run") as mock_run:
+            pm.check_power_updates()
+            # _compare_local_remote 应被调用
+            mock_cmp.assert_called_once()
+            # subprocess.run 不应被调用（即没有 git fetch）
+            mock_run.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # 有更新 / 无更新 场景
+    # ------------------------------------------------------------------
+
+    def test_returns_updatable_power(self, tmp_path):
+        """_compare_local_remote 返回 True 时，该 power 出现在结果中"""
+        power_dir = tmp_path / "ai-driving" / "p1"
+        (power_dir / ".git").mkdir(parents=True)
+
+        pm = self._setup(tmp_path, [_remote_entry("p1", "ai-driving/p1")])
+
+        with patch("driving_cli.commands.check._compare_local_remote", return_value=True):
+            result = pm.check_power_updates()
+
+        assert len(result) == 1
+        assert result[0].name == "p1"
+
+    def test_returns_empty_when_up_to_date(self, tmp_path):
+        """_compare_local_remote 返回 False 时返回空列表"""
+        power_dir = tmp_path / "ai-driving" / "p1"
+        (power_dir / ".git").mkdir(parents=True)
+
+        pm = self._setup(tmp_path, [_remote_entry("p1", "ai-driving/p1")])
+
+        with patch("driving_cli.commands.check._compare_local_remote", return_value=False):
+            result = pm.check_power_updates()
+
+        assert result == []
+
+    def test_ignores_power_when_compare_raises(self, tmp_path):
+        """_compare_local_remote 抛出异常时该 power 被忽略，不影响其他 power"""
+        for name in ("p1", "p2"):
+            (tmp_path / "ai-driving" / name / ".git").mkdir(parents=True)
+
+        pm = self._setup(tmp_path, [
+            _remote_entry("p1", "ai-driving/p1"),
+            _remote_entry("p2", "ai-driving/p2"),
+        ])
+
+        def _side_effect(path):
+            if "p1" in str(path):
+                raise RuntimeError("git error")
+            return True  # p2 有更新
+
+        with patch("driving_cli.commands.check._compare_local_remote", side_effect=_side_effect):
+            result = pm.check_power_updates()
+
+        assert len(result) == 1
+        assert result[0].name == "p2"
+
+    # ------------------------------------------------------------------
+    # 多 power 场景：顺序 & 并发
+    # ------------------------------------------------------------------
+
+    def test_result_order_matches_config(self, tmp_path):
+        """返回结果顺序与 driving.power.json 中的定义顺序一致"""
+        for name in ("alpha", "beta", "gamma"):
+            (tmp_path / "ai-driving" / name / ".git").mkdir(parents=True)
+
+        pm = self._setup(tmp_path, [
+            _remote_entry("alpha", "ai-driving/alpha"),
+            _remote_entry("beta", "ai-driving/beta"),
+            _remote_entry("gamma", "ai-driving/gamma"),
+        ])
+
+        # 全部有更新，但并发返回顺序不确定
+        with patch("driving_cli.commands.check._compare_local_remote", return_value=True):
+            result = pm.check_power_updates()
+
+        assert [e.name for e in result] == ["alpha", "beta", "gamma"]
+
+    def test_partial_update_mixed_local_remote(self, tmp_path):
+        """local power 跳过，只有部分 remote power 有更新"""
+        for name in ("r1", "r2"):
+            (tmp_path / "ai-driving" / name / ".git").mkdir(parents=True)
+
+        pm = self._setup(tmp_path, [
+            _local_entry("local1", "ai-driving/local1"),
+            _remote_entry("r1", "ai-driving/r1"),
+            _remote_entry("r2", "ai-driving/r2"),
+        ])
+
+        def _side_effect(path):
+            return "r2" in str(path)
+
+        with patch("driving_cli.commands.check._compare_local_remote", side_effect=_side_effect):
+            result = pm.check_power_updates()
+
+        assert [e.name for e in result] == ["r2"]
