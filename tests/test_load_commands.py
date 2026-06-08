@@ -1167,3 +1167,334 @@ class TestRepoConfigPriority:
             _init_unloaded_submodules()
 
         assert any("错误" in m for m in messages)
+
+
+# ==================== repo_config 对已初始化 repo 的分支切换测试 ====================
+
+class TestRepoConfigRepoBranchSwitch:
+    """验证 PowerEntry.repo_config 对 power 下已初始化 repo 的分支切换行为（方案 B）"""
+
+    def _write_power_json(self, tmp_path, powers):
+        (tmp_path / "driving.power.json").write_text(
+            json.dumps({"powers": powers}, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def _write_driving_config(self, power_dir, repos):
+        power_dir.mkdir(parents=True, exist_ok=True)
+        (power_dir / "driving.config.json").write_text(
+            json.dumps({
+                "version": "2",
+                "repos": repos,
+                "default_commit_message": "u",
+                "update_version_url": "",
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    def test_repo_config_switches_repo_branch(self, tmp_path):
+        """power 下已初始化的 repo，repo_config 指定分支时应执行 checkout"""
+        from driving_cli.commands.load import _init_unloaded_submodules
+
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        repo_dir = tmp_path / "ai-driving" / "driving-base"
+        repo_dir.mkdir(parents=True)
+        (repo_dir / "some_file.txt").write_text("content")  # 非空，已初始化
+
+        self._write_driving_config(power_dir, repos=[{
+            "name": "driving-base",
+            "type": "remote",
+            "url": "https://github.com/org/driving-base.git",
+            "path": "ai-driving/driving-base",
+        }])
+        self._write_power_json(tmp_path, powers=[{
+            "name": "my-power",
+            "type": "remote",
+            "url": "https://github.com/org/power.git",
+            "path": "ai-driving/my-power",
+            "repo_config": {"driving-base": {"branch": "develop"}},
+        }])
+
+        # power 自身的 Repo mock（用于 _ensure_power_config）
+        mock_power_repo = MagicMock()
+        mock_power_repo.head.is_detached = False
+        mock_power_repo.active_branch.name = "main"
+        mock_power_repo.remotes.__bool__ = lambda self: False
+
+        # repo 的 Repo mock
+        mock_repo_git = MagicMock()
+        mock_repo_git.head.is_detached = False
+        mock_repo_git.active_branch.name = "main"
+        mock_repo_git.remotes.__bool__ = lambda self: False
+        checked_out = []
+        mock_repo_git.git.checkout.side_effect = lambda b: checked_out.append(b)
+
+        import git as _git
+
+        def fake_git_repo(path):
+            if str(path) == str(power_dir):
+                return mock_power_repo
+            return mock_repo_git
+
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.git.Repo", side_effect=fake_git_repo):
+            _init_unloaded_submodules()
+
+        assert "develop" in checked_out
+
+    def test_repo_without_repo_config_not_switched(self, tmp_path):
+        """repo_config 不含该 repo 时，不执行 checkout"""
+        from driving_cli.commands.load import _init_unloaded_submodules
+
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        repo_dir = tmp_path / "ai-driving" / "driving-base"
+        repo_dir.mkdir(parents=True)
+        (repo_dir / "some_file.txt").write_text("content")
+
+        self._write_driving_config(power_dir, repos=[{
+            "name": "driving-base",
+            "type": "remote",
+            "url": "https://github.com/org/driving-base.git",
+            "path": "ai-driving/driving-base",
+        }])
+        self._write_power_json(tmp_path, powers=[{
+            "name": "my-power",
+            "type": "remote",
+            "url": "https://github.com/org/power.git",
+            "path": "ai-driving/my-power",
+            # 无 repo_config
+        }])
+
+        mock_git_repo = MagicMock()
+        mock_git_repo.head.is_detached = False
+        mock_git_repo.active_branch.name = "main"
+        mock_git_repo.remotes.__bool__ = lambda self: False
+
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.git.Repo", return_value=mock_git_repo):
+            _init_unloaded_submodules()
+
+        # 无 repo_config，不应 checkout
+        mock_git_repo.git.checkout.assert_not_called()
+
+    def test_repo_already_on_target_branch_skipped(self, tmp_path):
+        """repo 已在目标分支时，跳过切换"""
+        from driving_cli.commands.load import _init_unloaded_submodules
+
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        repo_dir = tmp_path / "ai-driving" / "driving-base"
+        repo_dir.mkdir(parents=True)
+        (repo_dir / "some_file.txt").write_text("content")
+
+        self._write_driving_config(power_dir, repos=[{
+            "name": "driving-base",
+            "type": "remote",
+            "url": "https://github.com/org/driving-base.git",
+            "path": "ai-driving/driving-base",
+        }])
+        self._write_power_json(tmp_path, powers=[{
+            "name": "my-power",
+            "type": "remote",
+            "url": "https://github.com/org/power.git",
+            "path": "ai-driving/my-power",
+            "repo_config": {"driving-base": {"branch": "develop"}},
+        }])
+
+        mock_power_repo = MagicMock()
+        mock_power_repo.head.is_detached = False
+        mock_power_repo.active_branch.name = "main"
+        mock_power_repo.remotes.__bool__ = lambda self: False
+
+        mock_repo_git = MagicMock()
+        mock_repo_git.head.is_detached = False
+        mock_repo_git.active_branch.name = "develop"  # 已在目标分支
+        mock_repo_git.remotes.__bool__ = lambda self: False
+
+        def fake_git_repo(path):
+            if str(path) == str(power_dir):
+                return mock_power_repo
+            return mock_repo_git
+
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.git.Repo", side_effect=fake_git_repo):
+            _init_unloaded_submodules()
+
+        # 已在目标分支，不应调用 checkout
+        mock_repo_git.git.checkout.assert_not_called()
+
+    def test_repo_branch_switch_failure_outputs_error(self, tmp_path):
+        """repo 分支切换失败时输出错误"""
+        import git as _git
+        from driving_cli.commands.load import _init_unloaded_submodules
+
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        repo_dir = tmp_path / "ai-driving" / "driving-base"
+        repo_dir.mkdir(parents=True)
+        (repo_dir / "some_file.txt").write_text("content")
+
+        self._write_driving_config(power_dir, repos=[{
+            "name": "driving-base",
+            "type": "remote",
+            "url": "https://github.com/org/driving-base.git",
+            "path": "ai-driving/driving-base",
+        }])
+        self._write_power_json(tmp_path, powers=[{
+            "name": "my-power",
+            "type": "remote",
+            "url": "https://github.com/org/power.git",
+            "path": "ai-driving/my-power",
+            "repo_config": {"driving-base": {"branch": "nonexistent"}},
+        }])
+
+        mock_power_repo = MagicMock()
+        mock_power_repo.head.is_detached = False
+        mock_power_repo.active_branch.name = "main"
+        mock_power_repo.remotes.__bool__ = lambda self: False
+
+        mock_repo_git = MagicMock()
+        mock_repo_git.head.is_detached = False
+        mock_repo_git.active_branch.name = "main"
+        mock_repo_git.remotes.__bool__ = lambda self: False
+        mock_repo_git.git.checkout.side_effect = _git.exc.GitCommandError(
+            "checkout", 1, stderr="pathspec 'nonexistent' did not match"
+        )
+
+        def fake_git_repo(path):
+            if str(path) == str(power_dir):
+                return mock_power_repo
+            return mock_repo_git
+
+        messages = []
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.git.Repo", side_effect=fake_git_repo), \
+             patch("click.echo", side_effect=lambda msg, **kw: messages.append(str(msg))):
+            _init_unloaded_submodules()
+
+        assert any("错误" in m and "driving-base" in m for m in messages)
+
+    def test_traditional_mode_repos_not_switched(self, tmp_path):
+        """传统模式（无 driving.power.json）下 repo 不执行分支切换"""
+        from driving_cli.commands.load import _init_unloaded_submodules
+
+        repo_dir = tmp_path / "ai-driving" / "driving-base"
+        repo_dir.mkdir(parents=True)
+        (repo_dir / "some_file.txt").write_text("content")  # 已初始化
+
+        _make_config(tmp_path, [{
+            "name": "driving-base",
+            "type": "remote",
+            "url": "https://github.com/org/driving-base.git",
+            "path": "ai-driving/driving-base",
+        }])
+
+        mock_git_repo = MagicMock()
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.git.Repo", return_value=mock_git_repo):
+            _init_unloaded_submodules()
+
+        # 传统模式无 power_entry，不执行 checkout
+        mock_git_repo.git.checkout.assert_not_called()
+
+
+    def test_fallback_to_repo_branch_when_no_repo_config(self, tmp_path):
+        """repo_config 不含该 repo 时，回退使用 driving.config.json 里的 repo.branch"""
+        from driving_cli.commands.load import _init_unloaded_submodules
+
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        repo_dir = tmp_path / "ai-driving" / "driving-base"
+        repo_dir.mkdir(parents=True)
+        (repo_dir / "some_file.txt").write_text("content")
+
+        self._write_driving_config(power_dir, repos=[{
+            "name": "driving-base",
+            "type": "remote",
+            "url": "https://github.com/org/driving-base.git",
+            "path": "ai-driving/driving-base",
+            "branch": "master",   # repo 自身配置了 branch
+        }])
+        self._write_power_json(tmp_path, powers=[{
+            "name": "my-power",
+            "type": "remote",
+            "url": "https://github.com/org/power.git",
+            "path": "ai-driving/my-power",
+            # 无 repo_config，应回退到 repo.branch
+        }])
+
+        mock_power_repo = MagicMock()
+        mock_power_repo.head.is_detached = False
+        mock_power_repo.active_branch.name = "main"
+        mock_power_repo.remotes.__bool__ = lambda self: False
+
+        mock_repo_git = MagicMock()
+        mock_repo_git.head.is_detached = False
+        mock_repo_git.active_branch.name = "develop"  # 当前不在 master
+        mock_repo_git.remotes.__bool__ = lambda self: False
+        checked_out = []
+        mock_repo_git.git.checkout.side_effect = lambda b: checked_out.append(b)
+
+        def fake_git_repo(path):
+            if str(path) == str(power_dir):
+                return mock_power_repo
+            return mock_repo_git
+
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.git.Repo", side_effect=fake_git_repo):
+            _init_unloaded_submodules()
+
+        # 应回退到 repo.branch = master
+        assert "master" in checked_out
+
+    def test_repo_config_overrides_repo_branch(self, tmp_path):
+        """repo_config 指定分支时优先于 driving.config.json 里的 repo.branch"""
+        from driving_cli.commands.load import _init_unloaded_submodules
+
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        repo_dir = tmp_path / "ai-driving" / "driving-base"
+        repo_dir.mkdir(parents=True)
+        (repo_dir / "some_file.txt").write_text("content")
+
+        self._write_driving_config(power_dir, repos=[{
+            "name": "driving-base",
+            "type": "remote",
+            "url": "https://github.com/org/driving-base.git",
+            "path": "ai-driving/driving-base",
+            "branch": "master",   # repo 自身配置了 branch
+        }])
+        self._write_power_json(tmp_path, powers=[{
+            "name": "my-power",
+            "type": "remote",
+            "url": "https://github.com/org/power.git",
+            "path": "ai-driving/my-power",
+            "repo_config": {"driving-base": {"branch": "feature/xxx"}},  # 覆盖
+        }])
+
+        mock_power_repo = MagicMock()
+        mock_power_repo.head.is_detached = False
+        mock_power_repo.active_branch.name = "main"
+        mock_power_repo.remotes.__bool__ = lambda self: False
+
+        mock_repo_git = MagicMock()
+        mock_repo_git.head.is_detached = False
+        mock_repo_git.active_branch.name = "master"
+        mock_repo_git.remotes.__bool__ = lambda self: False
+        checked_out = []
+        mock_repo_git.git.checkout.side_effect = lambda b: checked_out.append(b)
+
+        def fake_git_repo(path):
+            if str(path) == str(power_dir):
+                return mock_power_repo
+            return mock_repo_git
+
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.git.Repo", side_effect=fake_git_repo):
+            _init_unloaded_submodules()
+
+        # 应切换到 repo_config 指定的 feature/xxx，而不是 repo.branch 的 master
+        assert "feature/xxx" in checked_out
+        assert "master" not in checked_out

@@ -117,14 +117,16 @@ driving power uninstall feature # 卸载一个 power 条目
 
 适用场景：power 仓库的默认分支（如 feature 分支）不含 `driving.config.json`，而 master 分支才有。
 
-**`repo_config` 字段（`driving load` 运行时分支切换）：** 用于控制每次 `driving load` 时各 power 应切换到哪个分支，与 `branch`（仅在安装时生效）相互独立。
+**`repo_config` 字段（`driving load` 运行时分支切换）：** 与 `branch` 同级，放在每个 power entry 内部，控制 `driving load` 时该 power 自身及其下各 repo 应切换到哪个分支，与 `branch`（仅在安装时生效）相互独立。
 
-- `repo_config` 中配置的 `branch` 优先级高于 `PowerEntry.branch`
-- 不在 `repo_config` 中的 power 回退使用 `PowerEntry.branch`，两者都没有则不做任何切换
-- key 可以是 power name 或 repo name（同名视为同一实体）
-- 切换失败时输出**错误**，不中断其他 power 的处理
+- key 为 power name（控制该 power 目录自身的分支）或 power 下的 repo name（控制该 repo 的分支）
+- 分支优先级：
+  - power 自身：`repo_config[power_name].branch` > `PowerEntry.branch` > 不切换
+  - 各 repo：`repo_config[repo_name].branch` > `driving.config.json` 里 `repo.branch` > 不切换
+- 切换失败时输出**错误**，不中断其他 power/repo 的处理
+- 只影响 `driving load`，`power install` / `repo install` 不受影响
 
-适用场景：开发阶段在 power 仓库打了功能分支，不希望每次 `driving load` 把分支强制切回主分支，通过 `repo_config` 精确指定各环境应使用的分支。
+适用场景：开发阶段在 power 或 repo 打了功能分支，不希望每次 `driving load` 把分支强制切回主分支，通过 `repo_config` 精确指定各 repo 在 load 时应使用的分支。
 
 
 ```bash
