@@ -119,14 +119,18 @@ def _init_unloaded_submodules() -> None:
     """检测并自动初始化未加载的 power 和 repo（git submodule 目录存在但为空的情况）。
 
     执行顺序：
-    1. 检查 power（driving.power.json）：发现空目录则执行 git submodule update --init
+    1. 检查 power（driving.power.json）：发现空目录则调用 ensure_submodule_initialized
     2. power 初始化完成后，检查该 power 下的 repos（driving.config.json）是否也未初始化，
-       若未初始化则继续执行 git submodule update --init
+       若未初始化则继续调用 ensure_submodule_initialized
     3. 检查传统模式下的 repos（driving.config.json）
 
     仅在 --debug 模式下输出日志，非 debug 模式静默执行。
     """
-    import subprocess as _sp
+    from driving_cli.utils.git_helper import (
+        checkout_branch_after_install as _checkout_branch,
+        ensure_submodule_initialized,
+        find_git_root,
+    )
 
     _dbg("开始检测未初始化的 submodule ...")
     t = time.perf_counter()
@@ -137,140 +141,20 @@ def _init_unloaded_submodules() -> None:
         _dbg(f"find_project_root 失败：{e}")
         return
 
-    def _git_submodule_add(rel_path: str, url: str, label: str) -> bool:
-        """降级方案：submodule 未注册时用 git submodule add 重新添加，返回是否成功"""
-        import shutil
+    # load 场景下 project_root 即 git 根目录（常见部署方式）
+    try:
+        git_root = find_git_root(project_root)
+    except Exception as e:
+        _dbg(f"find_git_root 失败：{e}")
+        return
 
-        # 清理 .git/modules 里可能残留的数据，避免 git submodule add 报冲突
-        git_root = project_root  # load.py 场景下 project_root 即 git 根目录
-        modules_dir = git_root / ".git" / "modules"
-        parts = Path(rel_path).parts
-        for depth in range(len(parts), 0, -1):
-            partial = Path(*parts[:depth])
-            modules_path = modules_dir / partial
-            work_path = git_root / partial
-            work_empty = not work_path.exists() or (work_path.is_dir() and not any(work_path.iterdir()))
-            if modules_path.exists() and work_empty:
-                _dbg(f"  清理残留 git modules 数据：{modules_path}")
-                try:
-                    shutil.rmtree(modules_path)
-                except Exception as rm_err:
-                    _dbg(f"  清理失败：{rm_err}")
-                break
+    def _needs_init(path: Path) -> bool:
+        """目录不存在，或存在但为空——两种情况都需要初始化"""
+        if not path.exists():
+            return True
+        return path.is_dir() and not any(path.iterdir())
 
-        try:
-            (project_root / rel_path).parent.mkdir(parents=True, exist_ok=True)
-            result = _sp.run(
-                ["git", "submodule", "add", url, rel_path],
-                cwd=str(project_root),
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            if result.returncode == 0:
-                _dbg(f"  ✓ {label} 重新添加并初始化成功")
-                return True
-            else:
-                stderr = (result.stderr or "").strip()
-                _dbg(f"  ✗ {label} 重新添加失败（returncode={result.returncode}）：{stderr}")
-                click.echo(
-                    f"[driving load] 警告：{label} 重新添加失败：{stderr}",
-                    file=sys.stderr,
-                )
-                return False
-        except _sp.TimeoutExpired:
-            _dbg(f"  ✗ {label} 重新添加超时")
-            click.echo(f"[driving load] 警告：{label} 重新添加超时", file=sys.stderr)
-            return False
-        except Exception as e:
-            _dbg(f"  ✗ {label} 重新添加异常：{e}")
-            click.echo(f"[driving load] 警告：{label} 重新添加异常：{e}", file=sys.stderr)
-            return False
-
-    def _git_submodule_init(rel_path: str, label: str, url: str = "") -> bool:
-        """执行 git submodule update --init <rel_path>，返回是否成功。
-
-        若失败且提供了 url，自动降级为 git submodule add 重新注册（对齐 driving repo install 行为）。
-        """
-        try:
-            result = _sp.run(
-                ["git", "submodule", "update", "--init", rel_path],
-                cwd=str(project_root),
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            if result.returncode == 0:
-                _dbg(f"  ✓ {label} 初始化成功")
-                return True
-            else:
-                stderr = (result.stderr or "").strip()
-                _dbg(f"  ✗ {label} update --init 失败（returncode={result.returncode}）：{stderr}")
-                if url:
-                    _dbg(f"  {label} 降级为 submodule add，url={url}")
-                    return _git_submodule_add(rel_path, url, label)
-                click.echo(
-                    f"[driving load] 警告：{label} 初始化失败：{stderr}",
-                    file=sys.stderr,
-                )
-                return False
-        except _sp.TimeoutExpired:
-            _dbg(f"  ✗ {label} 初始化超时")
-            if url:
-                _dbg(f"  {label} 超时后降级为 submodule add，url={url}")
-                return _git_submodule_add(rel_path, url, label)
-            click.echo(f"[driving load] 警告：{label} 初始化超时", file=sys.stderr)
-            return False
-        except Exception as e:
-            _dbg(f"  ✗ {label} 初始化异常：{e}")
-            click.echo(f"[driving load] 警告：{label} 初始化异常：{e}", file=sys.stderr)
-            return False
-
-    def _git_checkout_branch(repo_dir: Path, branch: str, label: str) -> bool:
-        """在指定 submodule 目录执行 git checkout <branch>，返回是否成功。
-
-        若当前分支已经是目标分支，直接返回 True（跳过切换）。
-        """
-        try:
-            # 检查当前分支，已在目标分支则跳过
-            current = _sp.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                cwd=str(repo_dir),
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if current.returncode == 0 and current.stdout.strip() == branch:
-                _dbg(f"  {label} 已在分支 '{branch}'，跳过切换")
-                return True
-        except Exception:
-            pass  # 获取当前分支失败，继续尝试 checkout
-
-        try:
-            result = _sp.run(
-                ["git", "checkout", branch],
-                cwd=str(repo_dir),
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode == 0:
-                _dbg(f"  ✓ {label} 切换到分支 '{branch}' 成功")
-                return True
-            else:
-                stderr = (result.stderr or "").strip()
-                _dbg(f"  ✗ {label} 切换分支 '{branch}' 失败：{stderr}")
-                click.echo(
-                    f"[driving load] 警告：{label} 切换分支 '{branch}' 失败：{stderr}",
-                    file=sys.stderr,
-                )
-                return False
-        except Exception as e:
-            _dbg(f"  ✗ {label} 切换分支异常：{e}")
-            click.echo(f"[driving load] 警告：{label} 切换分支异常：{e}", file=sys.stderr)
-            return False
-
-    def _ensure_power_config(power_dir: Path, entry, after_init: bool = False) -> None:
+    def _ensure_power_config(power_dir: Path, entry) -> None:
         """确保 power 处于正确的分支并检查 driving.config.json。
 
         处理策略：
@@ -283,14 +167,16 @@ def _init_unloaded_submodules() -> None:
 
         if entry.branch:
             _dbg(f"  {label} 配置了分支 '{entry.branch}'，检查并切换...")
-            ok = _git_checkout_branch(power_dir, entry.branch, label)
-            if ok and not config_path.exists():
+            try:
+                _checkout_branch(power_dir, entry.name, entry.branch)
+            except Exception as e:
+                _dbg(f"  {label} 切换分支异常：{e}")
+            if not config_path.exists():
                 click.echo(
                     f"[driving load] 警告：{label} 切换到分支 '{entry.branch}' 后仍缺少 driving.config.json",
                     file=sys.stderr,
                 )
         else:
-            # 无 branch 配置，仅在 config 缺失时警告
             if not config_path.exists():
                 hint = "建议在 driving.power.json 中为该 power 配置 branch 字段以自动切换。"
                 _dbg(f"  {label} 缺少 driving.config.json，{hint}")
@@ -299,16 +185,6 @@ def _init_unloaded_submodules() -> None:
                     f"可能位于错误的分支。{hint}",
                     file=sys.stderr,
                 )
-
-    def _is_empty_dir(path: Path) -> bool:
-        """目录存在但为空（submodule 未初始化的典型状态）"""
-        return path.exists() and path.is_dir() and not any(path.iterdir())
-
-    def _needs_init(path: Path) -> bool:
-        """目录不存在，或存在但为空——两种情况都需要初始化"""
-        if not path.exists():
-            return True
-        return path.is_dir() and not any(path.iterdir())
 
     def _init_repos_from_config(config_path: Path, context_label: str) -> None:
         """从指定的 driving.config.json 检测并初始化未加载的 repos"""
@@ -326,12 +202,27 @@ def _init_unloaded_submodules() -> None:
             repo_name = repo.get("name", repo_path_str)
             repo_type = repo.get("type", "remote")
             repo_url = repo.get("url", "")
+            repo_branch = repo.get("branch", "")
             if repo_type != "remote" or not repo_path_str:
                 continue
+
+            # 计算相对于 git_root 的路径
+            try:
+                rel_path = str((project_root / repo_path_str).relative_to(git_root))
+            except ValueError:
+                rel_path = repo_path_str
+
             repo_dir = project_root / repo_path_str
             if _needs_init(repo_dir):
                 _dbg(f"  检测到未初始化的 repo '{repo_name}'（{repo_path_str}），正在初始化...")
-                _git_submodule_init(repo_path_str, f"repo '{repo_name}'", url=repo_url)
+                ensure_submodule_initialized(
+                    project_root=project_root,
+                    git_root=git_root,
+                    rel_path=rel_path,
+                    url=repo_url,
+                    branch=repo_branch,
+                    label=f"repo '{repo_name}'",
+                )
 
     # ---- 1. Power 模式检测 ----
     from driving_cli.utils.config_manager import PowerManager, POWER_FILE_NAME, CONFIG_FILE_NAME
@@ -351,21 +242,31 @@ def _init_unloaded_submodules() -> None:
                 if entry.type != "remote":
                     continue
                 power_dir = project_root / entry.path
+
+                # 计算相对于 git_root 的路径
+                try:
+                    rel_path = str((project_root / entry.path).relative_to(git_root))
+                except ValueError:
+                    rel_path = entry.path
+
                 if _needs_init(power_dir):
                     _dbg(f"检测到未初始化的 power '{entry.name}'（{entry.path}），正在初始化...")
-                    ok = _git_submodule_init(entry.path, f"power '{entry.name}'")
+                    ok = ensure_submodule_initialized(
+                        project_root=project_root,
+                        git_root=git_root,
+                        rel_path=rel_path,
+                        url=entry.url or "",
+                        branch=entry.branch or "",
+                        label=f"power '{entry.name}'",
+                    )
                     if ok:
-                        # 初始化成功后：确保 driving.config.json 存在（可能需要切换分支）
-                        _ensure_power_config(power_dir, entry, after_init=True)
-                        # 再检查 power 下的 repos
+                        _ensure_power_config(power_dir, entry)
                         _init_repos_from_config(
                             power_dir / CONFIG_FILE_NAME,
                             f"power '{entry.name}'",
                         )
                 else:
-                    # power 目录已就绪：同样检查 driving.config.json（可能分支不对）
                     _ensure_power_config(power_dir, entry)
-                    # 检查 power 下的 repos 是否未初始化
                     _init_repos_from_config(
                         power_dir / CONFIG_FILE_NAME,
                         f"power '{entry.name}'",

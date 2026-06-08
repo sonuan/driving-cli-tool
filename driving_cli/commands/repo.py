@@ -12,7 +12,12 @@ import git
 
 from driving_cli.models.config import RepoConfig
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
-from driving_cli.utils.git_helper import find_git_root, push_with_upstream
+from driving_cli.utils.git_helper import (
+    checkout_branch_after_install as _checkout_branch_after_install_impl,
+    ensure_submodule_initialized,
+    find_git_root,
+    push_with_upstream,
+)
 from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
 from driving_cli.utils.validators import (
     infer_repo_name_from_url,
@@ -208,37 +213,8 @@ def _cleanup_stale_git_modules(git_root: Path, submodule_path: str):
 
 
 def _checkout_branch_after_install(repo_dir: Path, repo_name: str, branch: str):
-    """submodule 安装/初始化后切换到指定分支
-
-    若当前分支已是目标分支则跳过，否则先 fetch 再 checkout。
-    切换失败只给出警告，不中断整体流程。
-    """
-    if not repo_dir.exists():
-        log_warning(f"仓库 '{repo_name}' 目录不存在，跳过分支切换")
-        return
-    try:
-        repo = git.Repo(repo_dir)
-        # 已在目标分支则跳过
-        try:
-            if not repo.head.is_detached and repo.active_branch.name == branch:
-                log_info(f"仓库 '{repo_name}' 已在分支 '{branch}'，跳过切换")
-                return
-        except Exception:
-            pass  # detached HEAD 等异常情况，继续尝试 checkout
-        if repo.remotes:
-            try:
-                repo.remotes.origin.fetch()
-            except git.exc.GitCommandError as e:
-                log_warning(f"仓库 '{repo_name}' fetch 失败，将使用本地分支信息（{e.stderr.strip() if e.stderr else str(e)}）")
-        repo.git.checkout(branch)
-        log_success(f"仓库 '{repo_name}' 已切换到分支 '{branch}'")
-    except git.exc.GitCommandError as e:
-        if "did not match any" in str(e) or "pathspec" in str(e):
-            log_warning(f"仓库 '{repo_name}' 分支 '{branch}' 不存在，请检查分支名称")
-        else:
-            log_warning(f"仓库 '{repo_name}' 切换分支 '{branch}' 失败：{e}")
-    except Exception as e:
-        log_warning(f"仓库 '{repo_name}' 切换分支 '{branch}' 失败：{e}")
+    """submodule 安装/初始化后切换到指定分支（委托给 git_helper.checkout_branch_after_install）"""
+    _checkout_branch_after_install_impl(repo_dir, repo_name, branch)
 
 
 def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
@@ -263,7 +239,6 @@ def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
         log_error("当前目录不在 Git 仓库中，请先执行 git init")
         raise click.Abort()
 
-    git_repo = git.Repo(git_root)
     initialized_count = 0
     skipped_count = 0
 
@@ -283,35 +258,19 @@ def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
         except ValueError:
             submodule_path = repo_cfg.path
 
-        # 优先尝试 update --init（submodule 已在 .gitmodules 中注册的情况）
-        # 若失败则降级为 submodule add（首次添加）
-        try:
-            git_repo.git.submodule("update", "--init", submodule_path)
-            log_success(f"仓库 '{repo_cfg.name}' 初始化成功")
+        ok = ensure_submodule_initialized(
+            project_root=project_root,
+            git_root=git_root,
+            rel_path=submodule_path,
+            url=repo_cfg.url or "",
+            branch=repo_cfg.branch or "",
+            label=f"仓库 '{repo_cfg.name}'",
+        )
+        # ensure_submodule_initialized 内部对 submodule add 后会调用 git_helper 的 checkout；
+        # 但 ignore 设置需要在此补充（repo 语义特有）
+        if ok:
+            _set_submodule_ignore(git_root, submodule_path)
             initialized_count += 1
-            # 初始化成功后，若配置了分支则自动切换
-            if repo_cfg.branch:
-                _checkout_branch_after_install(project_root / repo_cfg.path, repo_cfg.name, repo_cfg.branch)
-        except git.exc.GitCommandError as update_err:
-            # update --init 失败，说明 submodule 尚未注册，改用 add
-            log_info(f"submodule update --init 失败，尝试重新添加（原因：{update_err.stderr.strip() if update_err.stderr else str(update_err)}）")
-            if not repo_cfg.url:
-                log_error(f"仓库 '{repo_cfg.name}' 缺少 URL，无法添加 submodule")
-                continue
-            # 清理残留的 .git/modules 数据（目录不存在但 git modules 数据残留）
-            _cleanup_stale_git_modules(git_root, submodule_path)
-            try:
-                # 确保父目录存在
-                (git_root / submodule_path).parent.mkdir(parents=True, exist_ok=True)
-                git_repo.git.submodule("add", repo_cfg.url, submodule_path)
-                _set_submodule_ignore(git_root, submodule_path)
-                log_success(f"仓库 '{repo_cfg.name}' 添加并初始化成功")
-                initialized_count += 1
-                # 添加成功后，若配置了分支则自动切换
-                if repo_cfg.branch:
-                    _checkout_branch_after_install(project_root / repo_cfg.path, repo_cfg.name, repo_cfg.branch)
-            except git.exc.GitCommandError as e:
-                log_error(f"添加仓库 '{repo_cfg.name}' 失败: {e}")
 
     log_info(f"完成：初始化 {initialized_count} 个，跳过 {skipped_count} 个")
 

@@ -988,12 +988,13 @@ class TestPowerInstallNoArgsBranchCheckout:
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path), \
              patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
              patch("git.Repo", return_value=mock_git_repo), \
-             patch("driving_cli.commands.power._checkout_branch_after_install") as mock_checkout:
+             patch("driving_cli.utils.git_helper.checkout_branch_after_install") as mock_checkout:
             result = runner.invoke(cli, ["power", "install"])
 
         assert result.exit_code == 0, result.output
         mock_checkout.assert_called_once()
-        assert mock_checkout.call_args[0][1] == "p1"
+        # 第二个参数是 label（"Power 'p1'"），第三个是 branch
+        assert "p1" in mock_checkout.call_args[0][1]
         assert mock_checkout.call_args[0][2] == "develop"
 
     def test_no_checkout_when_branch_not_configured(self, runner, tmp_path):
@@ -1009,7 +1010,7 @@ class TestPowerInstallNoArgsBranchCheckout:
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path), \
              patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
              patch("git.Repo", return_value=mock_git_repo), \
-             patch("driving_cli.commands.power._checkout_branch_after_install") as mock_checkout:
+             patch("driving_cli.utils.git_helper.checkout_branch_after_install") as mock_checkout:
             runner.invoke(cli, ["power", "install"])
 
         mock_checkout.assert_not_called()
@@ -1037,12 +1038,12 @@ class TestPowerInstallNoArgsBranchCheckout:
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path), \
              patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
              patch("git.Repo", return_value=mock_git_repo), \
-             patch("driving_cli.commands.power._checkout_branch_after_install") as mock_checkout:
+             patch("driving_cli.utils.git_helper.checkout_branch_after_install") as mock_checkout:
             result = runner.invoke(cli, ["power", "install"])
 
         assert result.exit_code == 0, result.output
         mock_checkout.assert_called_once()
-        assert mock_checkout.call_args[0][1] == "p1"
+        assert "p1" in mock_checkout.call_args[0][1]
         assert mock_checkout.call_args[0][2] == "main"
 
     def test_no_checkout_after_submodule_add_when_no_branch(self, runner, tmp_path):
@@ -1065,7 +1066,7 @@ class TestPowerInstallNoArgsBranchCheckout:
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path), \
              patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
              patch("git.Repo", return_value=mock_git_repo), \
-             patch("driving_cli.commands.power._checkout_branch_after_install") as mock_checkout:
+             patch("driving_cli.utils.git_helper.checkout_branch_after_install") as mock_checkout:
             runner.invoke(cli, ["power", "install"])
 
         mock_checkout.assert_not_called()
@@ -1170,7 +1171,7 @@ class TestGitCheckoutBranchSkipWhenAlreadyOnBranch:
         mock_repo.remotes.__bool__ = lambda self: True
         mock_repo.remotes.__len__ = lambda self: 1
 
-        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo):
+        with patch("driving_cli.utils.git_helper.git.Repo", return_value=mock_repo):
             _checkout_branch_after_install(power_dir, "p1", "develop")
 
         # 已在目标分支，checkout 不应被调用
@@ -1190,7 +1191,7 @@ class TestGitCheckoutBranchSkipWhenAlreadyOnBranch:
         mock_repo.remotes.__len__ = lambda self: 1
         mock_repo.git.checkout.return_value = None
 
-        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo):
+        with patch("driving_cli.utils.git_helper.git.Repo", return_value=mock_repo):
             _checkout_branch_after_install(power_dir, "p1", "develop")
 
         mock_repo.git.checkout.assert_called_once_with("develop")

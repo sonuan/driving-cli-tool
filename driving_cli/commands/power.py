@@ -13,7 +13,8 @@ from driving_cli.models.power_config import PowerEntry
 from driving_cli.utils.config_manager import PowerManager, find_project_root
 from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
 from driving_cli.utils.validators import infer_repo_name_from_url, validate_git_url, validate_repo_name
-from driving_cli.commands.repo import _checkout_branch_after_install
+from driving_cli.commands.repo import _checkout_branch_after_install, _set_submodule_ignore
+from driving_cli.utils.git_helper import ensure_submodule_initialized
 
 
 @click.group(name="power")
@@ -235,10 +236,9 @@ def _install_all_uninitialized(pm: PowerManager, project_root):
         if entry.type == "local":
             if power_dir.exists():
                 log_info(f"Power '{entry.name}'（本地）已就绪，跳过")
-                skipped_count += 1
             else:
                 log_warning(f"Power '{entry.name}'（本地）目录不存在：{entry.path}，跳过")
-                skipped_count += 1
+            skipped_count += 1
             continue
 
         # ---- remote power ----
@@ -257,42 +257,17 @@ def _install_all_uninitialized(pm: PowerManager, project_root):
         except (ValueError, TypeError):
             submodule_path = entry.path
 
-        git_repo = git.Repo(git_root)
-
-        # 优先 update --init（.gitmodules 中已注册的情况）
-        try:
-            git_repo.git.submodule("update", "--init", submodule_path)
-            log_success(f"Power '{entry.name}' 初始化成功")
-            initialized_count += 1
-            # 初始化成功后，若配置了分支则自动切换
-            if entry.branch:
-                _checkout_branch_after_install(project_root / entry.path, entry.name, entry.branch)
-            continue
-        except git.exc.GitCommandError as e:
-            stderr_msg = e.stderr.strip() if e.stderr else str(e)
-            log_info(f"submodule update --init 失败，尝试重新添加（原因：{stderr_msg}）")
-
-        # 降级：submodule add（首次添加）
-        if not entry.url:
-            log_error(f"Power '{entry.name}' 缺少 URL，无法添加 submodule")
-            continue
-
-        from driving_cli.utils.config_manager import PowerManager as _PM
-        # 复用 config_manager 里的清理逻辑
-        pm._cleanup_stale_git_modules(git_root, submodule_path)
-        try:
-            (git_root / submodule_path).parent.mkdir(parents=True, exist_ok=True)
-            from driving_cli.commands.repo import _set_submodule_ignore
-            git_repo.git.submodule("add", "--force", entry.url, submodule_path)
+        ok = ensure_submodule_initialized(
+            project_root=project_root,
+            git_root=git_root,
+            rel_path=submodule_path,
+            url=entry.url or "",
+            branch=entry.branch or "",
+            label=f"Power '{entry.name}'",
+        )
+        if ok:
             _set_submodule_ignore(git_root, submodule_path)
-            log_success(f"Power '{entry.name}' 添加并初始化成功")
             initialized_count += 1
-            # 添加成功后，若配置了分支则自动切换
-            if entry.branch:
-                _checkout_branch_after_install(project_root / entry.path, entry.name, entry.branch)
-        except git.exc.GitCommandError as e:
-            stderr_msg = e.stderr.strip() if e.stderr else str(e)
-            log_error(f"Power '{entry.name}' 初始化失败：{stderr_msg}")
 
     log_info(f"完成：初始化 {initialized_count} 个，跳过 {skipped_count} 个")
 

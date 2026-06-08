@@ -1235,12 +1235,13 @@ class TestInstallAllUninitializedWithBranch:
         with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
              patch("driving_cli.commands.repo.git.Repo", return_value=mock_git_repo), \
-             patch("driving_cli.commands.repo._checkout_branch_after_install") as mock_checkout:
+             patch("driving_cli.utils.git_helper.checkout_branch_after_install") as mock_checkout:
             result = runner.invoke(cli, ["repo", "install"])
 
         assert result.exit_code == 0, result.output
         mock_checkout.assert_called_once()
-        assert mock_checkout.call_args[0][1] == "main"
+        # 第二个参数是 label（"仓库 'main'"），第三个是 branch
+        assert "main" in mock_checkout.call_args[0][1]
         assert mock_checkout.call_args[0][2] == "develop"
 
     def test_no_checkout_when_branch_not_configured(self, runner, tmp_project, config_mgr):
@@ -1258,7 +1259,7 @@ class TestInstallAllUninitializedWithBranch:
         with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
              patch("driving_cli.commands.repo.git.Repo", return_value=mock_git_repo), \
-             patch("driving_cli.commands.repo._checkout_branch_after_install") as mock_checkout:
+             patch("driving_cli.utils.git_helper.checkout_branch_after_install") as mock_checkout:
             runner.invoke(cli, ["repo", "install"])
 
         mock_checkout.assert_not_called()
@@ -1279,7 +1280,7 @@ class TestCheckoutBranchSkipWhenAlreadyOnBranch:
         mock_repo.remotes.__bool__ = lambda self: True
         mock_repo.remotes.__len__ = lambda self: 1
 
-        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo):
+        with patch("driving_cli.utils.git_helper.git.Repo", return_value=mock_repo):
             _checkout_branch_after_install(repo_dir, "main", "develop")
 
         # 已在目标分支，不应调用 checkout
@@ -1301,7 +1302,7 @@ class TestCheckoutBranchSkipWhenAlreadyOnBranch:
         mock_repo.remotes.__len__ = lambda self: 1
         mock_repo.git.checkout.return_value = None
 
-        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo):
+        with patch("driving_cli.utils.git_helper.git.Repo", return_value=mock_repo):
             _checkout_branch_after_install(repo_dir, "main", "develop")  # 要切到 develop
 
         mock_repo.git.checkout.assert_called_once_with("develop")
@@ -1317,7 +1318,7 @@ class TestCheckoutBranchSkipWhenAlreadyOnBranch:
         mock_repo.remotes.__len__ = lambda self: 1
         mock_repo.git.checkout.return_value = None
 
-        with patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo):
+        with patch("driving_cli.utils.git_helper.git.Repo", return_value=mock_repo):
             _checkout_branch_after_install(repo_dir, "main", "develop")
 
         mock_repo.git.checkout.assert_called_once_with("develop")
