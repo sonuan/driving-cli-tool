@@ -111,11 +111,20 @@ driving power uninstall feature # 卸载一个 power 条目
 
 **`driving load` 自动更新：** 每次执行 `driving load` 时，会先自动检测并初始化未加载的 power 和 repo（git submodule 目录存在但为空的情况，切换分支后无需手动 `git submodule update --init`），再检查所有远程 power 是否有更新并自动拉取，最后检查各 `driving.config.json` 里的 repos 更新。
 
-**`branch` 字段（自动切换分支）：** power 初始化完成后，若目录下缺少 `driving.config.json`：
+**`branch` 字段（安装时切换分支）：** power 初始化完成后，若目录下缺少 `driving.config.json`：
 - 配置了 `branch` → 自动执行 `git checkout <branch>`，切换到指定分支
 - 未配置 `branch` → 输出警告，提示用户手动检查或在 `driving.power.json` 中配置 `branch` 字段
 
 适用场景：power 仓库的默认分支（如 feature 分支）不含 `driving.config.json`，而 master 分支才有。
+
+**`repo_config` 字段（`driving load` 运行时分支切换）：** 用于控制每次 `driving load` 时各 power 应切换到哪个分支，与 `branch`（仅在安装时生效）相互独立。
+
+- `repo_config` 中配置的 `branch` 优先级高于 `PowerEntry.branch`
+- 不在 `repo_config` 中的 power 回退使用 `PowerEntry.branch`，两者都没有则不做任何切换
+- key 可以是 power name 或 repo name（同名视为同一实体）
+- 切换失败时输出**错误**，不中断其他 power 的处理
+
+适用场景：开发阶段在 power 仓库打了功能分支，不希望每次 `driving load` 把分支强制切回主分支，通过 `repo_config` 精确指定各环境应使用的分支。
 
 
 ```bash
@@ -143,7 +152,12 @@ driving repo install --url https://... --power feature
       "type": "remote",
       "path": "ai-driving/feature-config",
       "url": "https://git.xxx.com/feature-config.git",
-      "description": "feature 分支配置"
+      "description": "feature 分支配置",
+      "branch": "master",
+      "repo_config": {
+        "feature": { "branch": "feature/my-work" },
+        "driving-base": { "branch": "develop" }
+      }
     }
   ]
 }
@@ -151,6 +165,10 @@ driving repo install --url https://... --power feature
 
 - `url` 有值 → remote 类型（git submodule，支持 `power pull` 更新）
 - `url` 无值 → local 类型（本地目录）
+- `branch`：安装（`power install`）时自动切换的分支
+- `repo_config`：与 `branch` 同级，`driving load` 时各 repo/power 的分支覆盖配置
+  - key 为 repo name 或 power name（同名视为同一实体）
+  - `repo_config[name].branch` 优先级高于 `branch`；不配置则使用 `branch`，都不配置则不切换
 
 ## framework — 框架文档管理
 

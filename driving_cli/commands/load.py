@@ -157,23 +157,60 @@ def _init_unloaded_submodules() -> None:
     def _ensure_power_config(power_dir: Path, entry) -> None:
         """确保 power 处于正确的分支并检查 driving.config.json。
 
-        处理策略：
-        - 有 branch 配置 → 检查当前分支，不是目标分支则 checkout；checkout 后检查 config
-        - 无 branch 配置 → 仅在 config 缺失时打印警告
+        分支解析优先级（通过 entry.get_load_branch() 处理）：
+        1. entry.repo_config[entry.name].branch
+        2. entry.branch
+        3. 无配置 → 仅在 config 缺失时打印警告
+
+        切换分支失败时报错（error），不中断其他 power 的处理。
         """
         from driving_cli.utils.config_manager import CONFIG_FILE_NAME
+        import git as _git
+
         config_path = power_dir / CONFIG_FILE_NAME
         label = f"power '{entry.name}'"
 
-        if entry.branch:
-            _dbg(f"  {label} 配置了分支 '{entry.branch}'，检查并切换...")
+        effective_branch = entry.get_load_branch()
+
+        if effective_branch:
+            _dbg(f"  {label} 目标分支 '{effective_branch}'，检查并切换...")
             try:
-                _checkout_branch(power_dir, entry.name, entry.branch)
+                repo = _git.Repo(power_dir)
+                # 已在目标分支则跳过
+                try:
+                    if not repo.head.is_detached and repo.active_branch.name == effective_branch:
+                        _dbg(f"  {label} 已在分支 '{effective_branch}'，跳过切换")
+                        if not config_path.exists():
+                            click.echo(
+                                f"[driving load] 警告：{label} 缺少 driving.config.json",
+                                file=sys.stderr,
+                            )
+                        return
+                except Exception:
+                    pass
+                if repo.remotes:
+                    try:
+                        repo.remotes.origin.fetch()
+                    except _git.exc.GitCommandError:
+                        pass
+                repo.git.checkout(effective_branch)
+                _dbg(f"  {label} 已切换到分支 '{effective_branch}'")
+            except _git.exc.GitCommandError as e:
+                err_msg = e.stderr.strip() if e.stderr else str(e)
+                click.echo(
+                    f"[driving load] 错误：{label} 切换到分支 '{effective_branch}' 失败：{err_msg}",
+                    file=sys.stderr,
+                )
+                return
             except Exception as e:
-                _dbg(f"  {label} 切换分支异常：{e}")
+                click.echo(
+                    f"[driving load] 错误：{label} 切换到分支 '{effective_branch}' 失败：{e}",
+                    file=sys.stderr,
+                )
+                return
             if not config_path.exists():
                 click.echo(
-                    f"[driving load] 警告：{label} 切换到分支 '{entry.branch}' 后仍缺少 driving.config.json",
+                    f"[driving load] 警告：{label} 切换到分支 '{effective_branch}' 后仍缺少 driving.config.json",
                     file=sys.stderr,
                 )
         else:

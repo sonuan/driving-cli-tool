@@ -204,6 +204,77 @@ class TestPowerConfig:
         assert restored.powers[0].name == "a"
         assert restored.powers[1].type == "local"
 
+    def test_power_entry_repo_config_from_dict(self):
+        """PowerEntry.repo_config 字段正确解析"""
+        data = {
+            "powers": [{
+                "name": "p1",
+                "path": "ai-driving/p1",
+                "repo_config": {
+                    "driving-base": {"branch": "develop"},
+                    "f-message": {"branch": "feature/xxx"},
+                },
+            }],
+        }
+        cfg = PowerConfig.from_dict(data)
+        entry = cfg.powers[0]
+        assert entry.repo_config["driving-base"].branch == "develop"
+        assert entry.repo_config["f-message"].branch == "feature/xxx"
+
+    def test_power_entry_repo_config_absent_defaults_to_empty(self):
+        """不含 repo_config 时 PowerEntry.repo_config 默认为空 dict"""
+        cfg = PowerConfig.from_dict({"powers": [{"name": "p1", "path": "ai-driving/p1"}]})
+        assert cfg.powers[0].repo_config == {}
+
+    def test_power_entry_repo_config_to_dict_roundtrip(self):
+        """PowerEntry.repo_config 序列化/反序列化一致"""
+        from driving_cli.models.power_config import RepoOverrideConfig
+        entry = PowerEntry(
+            name="p1", path="ai-driving/p1",
+            repo_config={"driving-base": RepoOverrideConfig(branch="feature/x")},
+        )
+        restored_entry = PowerEntry.from_dict(entry.to_dict())
+        assert restored_entry.repo_config["driving-base"].branch == "feature/x"
+
+    def test_power_entry_repo_config_empty_not_serialized(self):
+        """repo_config 为空时 to_dict 不输出该字段"""
+        entry = PowerEntry(name="p1", path="ai-driving/p1", repo_config={})
+        d = entry.to_dict()
+        assert "repo_config" not in d
+
+    def test_get_load_branch_repo_config_takes_priority(self):
+        """entry.repo_config[entry.name].branch 优先于 entry.branch"""
+        from driving_cli.models.power_config import RepoOverrideConfig
+        entry = PowerEntry(
+            name="p1", path="ai-driving/p1", branch="main",
+            repo_config={"p1": RepoOverrideConfig(branch="develop")},
+        )
+        assert entry.get_load_branch() == "develop"
+
+    def test_get_load_branch_falls_back_to_entry_branch(self):
+        """repo_config 中无自身 name 时回退到 entry.branch"""
+        entry = PowerEntry(name="p1", path="ai-driving/p1", branch="main", repo_config={})
+        assert entry.get_load_branch() == "main"
+
+    def test_get_load_branch_no_config_returns_none(self):
+        """既无 repo_config 也无 branch 时返回 None"""
+        entry = PowerEntry(name="p1", path="ai-driving/p1")
+        assert entry.get_load_branch() is None
+
+    def test_get_repo_load_branch_returns_override(self):
+        """get_repo_load_branch 返回 repo_config 中对应 repo 的分支"""
+        from driving_cli.models.power_config import RepoOverrideConfig
+        entry = PowerEntry(
+            name="p1", path="ai-driving/p1",
+            repo_config={"driving-base": RepoOverrideConfig(branch="develop")},
+        )
+        assert entry.get_repo_load_branch("driving-base") == "develop"
+
+    def test_get_repo_load_branch_unknown_returns_none(self):
+        """未在 repo_config 中配置的 repo 返回 None"""
+        entry = PowerEntry(name="p1", path="ai-driving/p1", repo_config={})
+        assert entry.get_repo_load_branch("unknown") is None
+
 
 # ==================== _merge_configs 测试 ====================
 
