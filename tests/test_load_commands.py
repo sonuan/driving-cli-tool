@@ -1375,8 +1375,8 @@ class TestRepoConfigRepoBranchSwitch:
 
         assert any("错误" in m and "driving-base" in m for m in messages)
 
-    def test_traditional_mode_repos_not_switched(self, tmp_path):
-        """传统模式（无 driving.power.json）下 repo 不执行分支切换"""
+    def test_traditional_mode_switches_branch_when_configured(self, tmp_path):
+        """传统模式（无 driving.power.json）下，repo 配置了 branch 时应执行分支切换"""
         from driving_cli.commands.load import _init_unloaded_submodules
 
         repo_dir = tmp_path / "ai-driving" / "driving-base"
@@ -1388,15 +1388,46 @@ class TestRepoConfigRepoBranchSwitch:
             "type": "remote",
             "url": "https://github.com/org/driving-base.git",
             "path": "ai-driving/driving-base",
+            "branch": "main",
         }])
 
         mock_git_repo = MagicMock()
+        mock_git_repo.head.is_detached = False
+        mock_git_repo.active_branch.name = "develop"  # 当前不在 main
+        mock_git_repo.remotes.__bool__ = lambda self: False
+        checked_out = []
+        mock_git_repo.git.checkout.side_effect = lambda b: checked_out.append(b)
+
         with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
              patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
              patch("driving_cli.utils.git_helper.git.Repo", return_value=mock_git_repo):
             _init_unloaded_submodules()
 
-        # 传统模式无 power_entry，不执行 checkout
+        assert "main" in checked_out
+
+    def test_traditional_mode_no_branch_field_skips_checkout(self, tmp_path):
+        """传统模式下，repo 未配置 branch 字段时不执行分支切换"""
+        from driving_cli.commands.load import _init_unloaded_submodules
+
+        repo_dir = tmp_path / "ai-driving" / "driving-base"
+        repo_dir.mkdir(parents=True)
+        (repo_dir / "some_file.txt").write_text("content")  # 已初始化
+
+        _make_config(tmp_path, [{
+            "name": "driving-base",
+            "type": "remote",
+            "url": "https://github.com/org/driving-base.git",
+            "path": "ai-driving/driving-base",
+            # 无 branch 字段
+        }])
+
+        mock_git_repo = MagicMock()
+
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.git.Repo", return_value=mock_git_repo):
+            _init_unloaded_submodules()
+
         mock_git_repo.git.checkout.assert_not_called()
 
 

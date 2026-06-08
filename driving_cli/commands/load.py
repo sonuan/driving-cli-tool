@@ -269,10 +269,13 @@ def _init_unloaded_submodules() -> None:
                     branch=repo_branch,
                     label=label,
                 )
-            elif power_entry is not None:
+            else:
                 # 目录已就绪：检查分支是否需要切换
-                # 优先级：repo_config[repo_name].branch > driving.config.json 里的 repo.branch
-                target_branch = power_entry.get_repo_load_branch(repo_name) or repo_branch
+                # Power 模式：优先取 repo_config[repo_name].branch，fallback 到 driving.config.json 里的 repo.branch
+                # 传统模式：直接取 driving.config.json 里的 repo.branch
+                target_branch = (
+                    power_entry.get_repo_load_branch(repo_name) if power_entry is not None else None
+                ) or repo_branch
                 if not target_branch:
                     continue
                 _dbg(f"  {label} 目标分支 '{target_branch}'，检查并切换...")
