@@ -73,7 +73,7 @@ def _resolve_feature_md(feature_dir: Path) -> Optional[Path]:
     if feature_md.exists():
         return feature_md
 
-    ios_md = feature_dir / "iOS" / "ios-feature.md"
+    ios_md = feature_dir / "docs" / "iOS" / "ios-feature.md"
     if ios_md.exists():
         return ios_md
 
@@ -114,7 +114,7 @@ def scan_features_from_dir(repo_name: str, features_dir: Path, quiet: bool = Fal
             continue
 
         feature_info["path"] = f"ai-driving/{repo_name}/features/{subdir.name}/"
-        feature_info["feature_file"] = "FEATURE.md" if feature_md.name == "FEATURE.md" else f"iOS/{feature_md.name}"
+        feature_info["feature_file"] = "FEATURE.md" if feature_md.name == "FEATURE.md" else f"docs/iOS/{feature_md.name}"
         features.append(feature_info)
 
         if not quiet:
@@ -149,9 +149,9 @@ def scan_features_deep(module_name: str, module_dir: Path, repo_path: str, quiet
     for feature_md in sorted(module_dir.glob("**/FEATURE.md")):
         candidates[feature_md.parent] = feature_md
 
-    for ios_md in sorted(module_dir.glob("**/iOS/ios-feature.md")):
-        # iOS/ios-feature.md 的 feature 目录是其祖父目录（.../feature-dir/iOS/ios-feature.md）
-        feature_dir = ios_md.parent.parent
+    for ios_md in sorted(module_dir.glob("**/docs/iOS/ios-feature.md")):
+        # docs/iOS/ios-feature.md 的 feature 目录是其曾祖父目录（.../feature-dir/docs/iOS/ios-feature.md）
+        feature_dir = ios_md.parent.parent.parent
         if feature_dir not in candidates:
             candidates[feature_dir] = ios_md
 

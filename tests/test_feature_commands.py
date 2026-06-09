@@ -255,7 +255,7 @@ class TestScanFeaturesFromDir:
         """目录中无 FEATURE.md 时，降级读取 iOS/ios-feature.md"""
         features_dir = tmp_path / "features"
         feat_dir = features_dir / "ios-only-feat"
-        ios_dir = feat_dir / "iOS"
+        ios_dir = feat_dir / "docs" / "iOS"
         ios_dir.mkdir(parents=True, exist_ok=True)
         (ios_dir / "ios-feature.md").write_text(
             "---\nname: ios-only-feat\ntitle: iOS 专属功能\n---\n",
@@ -277,7 +277,7 @@ class TestScanFeaturesFromDir:
             encoding="utf-8",
         )
         # iOS/ios-feature.md
-        ios_dir = feat_dir / "iOS"
+        ios_dir = feat_dir / "docs" / "iOS"
         ios_dir.mkdir(parents=True, exist_ok=True)
         (ios_dir / "ios-feature.md").write_text(
             "---\nname: from-ios-feature-md\ntitle: 来自ios-feature.md\n---\n",
@@ -292,7 +292,7 @@ class TestScanFeaturesFromDir:
         """iOS/ios-feature.md 缺少 name 字段时跳过该目录"""
         features_dir = tmp_path / "features"
         feat_dir = features_dir / "bad-ios-feat"
-        ios_dir = feat_dir / "iOS"
+        ios_dir = feat_dir / "docs" / "iOS"
         ios_dir.mkdir(parents=True, exist_ok=True)
         (ios_dir / "ios-feature.md").write_text(
             "---\ntitle: 没有name\n---\n",
@@ -857,7 +857,7 @@ class TestScanFeaturesDeep:
         """deep 模式中目录无 FEATURE.md 时，降级读取 iOS/ios-feature.md"""
         module_dir = tmp_path / "chatroom"
         feat_dir = module_dir / "2026-Q2" / "ios-only-feat"
-        ios_dir = feat_dir / "iOS"
+        ios_dir = feat_dir / "docs" / "iOS"
         ios_dir.mkdir(parents=True, exist_ok=True)
         (ios_dir / "ios-feature.md").write_text(
             "---\nname: ios-only-feat\ntitle: iOS 专属功能\n---\n",
@@ -867,7 +867,7 @@ class TestScanFeaturesDeep:
         result = scan_features_deep("chatroom", module_dir, "ai-driving/aidoc", quiet=True)
         assert len(result) == 1
         assert result[0]["name"] == "ios-only-feat"
-        assert result[0]["feature_file"] == str(Path("iOS") / "ios-feature.md")
+        assert result[0]["feature_file"] == str(Path("docs") / "iOS" / "ios-feature.md")
         assert result[0]["path"] == "ai-driving/aidoc/chatroom/2026-Q2/ios-only-feat/"
 
     def test_deep模式FEATURE_MD优先于ios_feature_md(self, tmp_path):
@@ -879,7 +879,7 @@ class TestScanFeaturesDeep:
             "---\nname: from-feature-md\ntitle: 来自FEATURE.MD\n---\n",
             encoding="utf-8",
         )
-        ios_dir = feat_dir / "iOS"
+        ios_dir = feat_dir / "docs" / "iOS"
         ios_dir.mkdir(parents=True, exist_ok=True)
         (ios_dir / "ios-feature.md").write_text(
             "---\nname: from-ios-feature-md\ntitle: 来自ios-feature.md\n---\n",
@@ -900,7 +900,7 @@ class TestScanFeaturesDeep:
             "---\nname: feat-a\ntitle: 功能A\n---\n", encoding="utf-8"
         )
         # feat-b 只有 iOS/ios-feature.md
-        feat_b_ios = module_dir / "2026-Q2" / "feat-b" / "iOS"
+        feat_b_ios = module_dir / "2026-Q2" / "feat-b" / "docs" / "iOS"
         feat_b_ios.mkdir(parents=True, exist_ok=True)
         (feat_b_ios / "ios-feature.md").write_text(
             "---\nname: feat-b\ntitle: 功能B\n---\n", encoding="utf-8"
