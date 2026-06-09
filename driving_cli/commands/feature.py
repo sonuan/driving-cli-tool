@@ -437,3 +437,513 @@ def feature_list(repo_name: Optional[str], keywords: Tuple[str, ...], detail: bo
     except Exception as e:
         log_error(f"列出 features 失败: {e}")
         raise click.Abort()
+
+
+# ---------------------------------------------------------------------------
+# feature migrate
+# ---------------------------------------------------------------------------
+
+# 当前最新格式版本
+CURRENT_FORMAT_VERSION = "v2"
+
+# v1 格式识别：满足任一条件即为旧格式
+_V1_INDICATORS = [
+    "docs/technical-design.md",
+    "docs/gate-state.json",
+    "docs/impact-map.md",
+    "docs/coding-plan.md",
+    "docs/implementation-notes.md",
+    "review",           # feature 根下的 review/ 目录
+    "docs/ui-design",  # docs 下的 ui-design/ 目录
+]
+
+# v1 → v2 文件/目录迁移规则
+# 每条：(源相对路径, 目标相对路径模板, 是_目录)
+# 目标路径中 {platform} 和 {owner} 为占位符
+_V1_TO_V2_RULES = [
+    # 移入 docs/{platform}/{owner}/
+    ("docs/technical-design.md",    "docs/{platform}/{owner}/technical-design.md",    False),
+    ("docs/impact-map.md",          "docs/{platform}/{owner}/impact-map.md",           False),
+    ("docs/coding-plan.md",         "docs/{platform}/{owner}/coding-plan.md",          False),
+    ("docs/implementation-notes.md","docs/{platform}/{owner}/implementation-notes.md", False),
+    ("docs/gate-state.json",        "docs/{platform}/{owner}/gate-state.json",         False),
+    # review/ 目录（feature 根）→ docs/{platform}/{owner}/review/
+    ("review",                      "docs/{platform}/{owner}/review",                  True),
+    # docs/ui-design/ → ui-design/（提升到 feature 根）
+    ("docs/ui-design",              "ui-design",                                       True),
+]
+
+# 不移动的文件（保留原位）
+_V1_KEEP = [
+    "docs/requirements.md",
+    "docs/requirements-breakdown.md",
+    "docs/tech-review.md",
+    "api",
+    "assets",
+    "FEATURE.md",
+]
+
+
+def _detect_format_version(feature_dir: Path) -> str:
+    """检测 feature 目录的格式版本。
+
+    检测规则（优先级从高到低）：
+    1. FEATURE.md frontmatter 中有 format_version 字段 → 直接返回该值
+    2. 存在任意 v1 特征文件/目录 → "v1"
+    3. 否则 → CURRENT_FORMAT_VERSION（当前最新）
+
+    Args:
+        feature_dir: feature 目录路径
+
+    Returns:
+        str: 版本字符串，如 "v1"、"v2"
+    """
+    feature_md = feature_dir / "FEATURE.md"
+    if feature_md.exists():
+        from driving_cli.utils.yaml_parser import parse_frontmatter
+        data = parse_frontmatter(feature_md)
+        if data and data.get("format_version"):
+            return str(data["format_version"])
+
+    # 无 format_version 字段：靠目录结构特征推断
+    for indicator in _V1_INDICATORS:
+        candidate = feature_dir / indicator
+        if candidate.exists():
+            return "v1"
+
+    return CURRENT_FORMAT_VERSION
+
+
+def _build_migration_plan(
+    feature_dir: Path, platform: str, owner: str
+) -> List[Dict]:
+    """生成 v1 → v2 迁移计划（操作列表）。
+
+    每条操作包含：
+    - action: "MOVE" | "KEEP" | "SKIP"（目标已存在时跳过）
+    - src: 源相对路径（相对于 feature_dir）
+    - dst: 目标相对路径（相对于 feature_dir）
+    - is_dir: 是否为目录
+    - reason: 备注
+
+    Args:
+        feature_dir: feature 目录绝对路径
+        platform: 目标平台名称
+        owner: 负责人目录名
+
+    Returns:
+        List[Dict]: 操作列表
+    """
+    ops = []
+
+    for src_rel, dst_tpl, is_dir in _V1_TO_V2_RULES:
+        src = feature_dir / src_rel
+        if not src.exists():
+            continue  # 源不存在，跳过该规则
+
+        dst_rel = dst_tpl.format(platform=platform, owner=owner)
+        dst = feature_dir / dst_rel
+
+        if dst.exists():
+            ops.append({
+                "action": "SKIP",
+                "src": src_rel,
+                "dst": dst_rel,
+                "is_dir": is_dir,
+                "reason": "目标已存在，跳过",
+            })
+        else:
+            ops.append({
+                "action": "MOVE",
+                "src": src_rel,
+                "dst": dst_rel,
+                "is_dir": is_dir,
+                "reason": "",
+            })
+
+    return ops
+
+
+def _execute_migration(feature_dir: Path, ops: List[Dict]) -> Tuple[int, int, int]:
+    """执行迁移操作列表。
+
+    Args:
+        feature_dir: feature 目录绝对路径
+        ops: 操作列表（来自 _build_migration_plan）
+
+    Returns:
+        Tuple[int, int, int]: (moved, skipped, failed)
+    """
+    import shutil
+
+    moved = skipped = failed = 0
+
+    for op in ops:
+        if op["action"] != "MOVE":
+            skipped += 1
+            continue
+
+        src = feature_dir / op["src"]
+        dst = feature_dir / op["dst"]
+
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+            moved += 1
+        except Exception as e:
+            log_error(f"移动失败 {op['src']} → {op['dst']}: {e}")
+            failed += 1
+
+    return moved, skipped, failed
+
+
+def _write_format_version(feature_dir: Path, version: str) -> bool:
+    """将 format_version 写入 FEATURE.md 的 frontmatter。
+
+    如果 FEATURE.md 已有 format_version 字段则覆盖，否则追加到 frontmatter 末尾（--- 之前）。
+
+    Args:
+        feature_dir: feature 目录绝对路径
+        version: 版本字符串，如 "v2"
+
+    Returns:
+        bool: 写入成功返回 True，失败返回 False
+    """
+    feature_md = feature_dir / "FEATURE.md"
+    if not feature_md.exists():
+        return False
+
+    try:
+        content = feature_md.read_text(encoding="utf-8")
+        lines = content.splitlines(keepends=True)
+
+        # 确认第一行是 ---
+        if not lines or lines[0].rstrip("\n") != "---":
+            return False
+
+        # 找到 frontmatter 结束位置（第二个 ---）
+        end_idx = None
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                end_idx = i
+                break
+        if end_idx is None:
+            return False
+
+        # 检查是否已有 format_version 行
+        new_lines = []
+        replaced = False
+        for i, line in enumerate(lines):
+            if i > 0 and i < end_idx and line.startswith("format_version"):
+                new_lines.append(f"format_version: {version}\n")
+                replaced = True
+            else:
+                new_lines.append(line)
+
+        if not replaced:
+            # 在 frontmatter 末尾（end_idx 行之前）插入
+            new_lines.insert(end_idx, f"format_version: {version}\n")
+
+        feature_md.write_text("".join(new_lines), encoding="utf-8")
+        return True
+    except Exception as e:
+        log_warning(f"写入 format_version 失败 ({feature_md}): {e}")
+        return False
+
+
+def _cleanup_empty_dirs(feature_dir: Path) -> None:
+    """清理迁移后留下的空目录（深度优先，从子目录开始）。
+
+    只清理已知的迁移来源目录，不递归扫描整棵树。
+    """
+    candidates = [
+        feature_dir / "docs" / "ui-design",
+        feature_dir / "review",
+    ]
+    for d in candidates:
+        if d.exists() and d.is_dir():
+            try:
+                if not any(d.iterdir()):
+                    d.rmdir()
+            except Exception:
+                pass
+
+
+def _print_migration_plan(feature_name: str, feature_dir: Path, ops: List[Dict], version: str) -> None:
+    """打印单个 feature 的迁移计划。"""
+    click.echo(f"\nFeature: {click.style(feature_name, bold=True)}  [{feature_dir}]")
+    if version != "v1":
+        click.echo(f"  {click.style('已是新格式，跳过', fg='green')}")
+        return
+    if not ops:
+        click.echo("  （无需迁移的文件）")
+        return
+    for op in ops:
+        if op["action"] == "MOVE":
+            click.echo(
+                f"  {click.style('MOVE', fg='yellow')}  "
+                f"{op['src']:<45} → {op['dst']}"
+            )
+        elif op["action"] == "SKIP":
+            click.echo(
+                f"  {click.style('SKIP', fg='cyan')}  "
+                f"{op['src']:<45}   ({op['reason']})"
+            )
+
+
+def _apply_path_filters(
+    feature_dirs: List[Tuple[str, Path]],
+    includes: Tuple[str, ...],
+    excludes: Tuple[str, ...],
+) -> Tuple[List[Tuple[str, Path]], List[Tuple[str, Path]]]:
+    """按 include/exclude 关键词过滤 feature 目录列表。
+
+    过滤逻辑（大小写不敏感，匹配目录绝对路径字符串）：
+    1. includes 非空时，路径必须命中至少一个关键词才保留
+    2. excludes 非空时，路径命中任意一个关键词则排除
+    两者同时存在时，必须满足"命中 include 且不命中 exclude"。
+
+    Args:
+        feature_dirs: 原始目录列表
+        includes: --include 关键词列表
+        excludes: --exclude 关键词列表
+
+    Returns:
+        Tuple[保留列表, 过滤掉的列表]
+    """
+    kept = []
+    filtered = []
+
+    for name, path in feature_dirs:
+        path_str = str(path).lower()
+
+        # include 过滤：有 includes 时，必须命中至少一个
+        if includes:
+            if not any(kw.lower() in path_str for kw in includes):
+                filtered.append((name, path))
+                continue
+
+        # exclude 过滤：命中任意一个则排除
+        if excludes:
+            if any(kw.lower() in path_str for kw in excludes):
+                filtered.append((name, path))
+                continue
+
+        kept.append((name, path))
+
+    return kept, filtered
+
+
+def _collect_feature_dirs_for_migrate(
+    project_root: Path,
+    config_manager: ConfigManager,
+    paths: Tuple[str, ...],
+) -> List[Tuple[str, Path]]:
+    """收集待迁移的 feature 目录列表。
+
+    Args:
+        project_root: 项目根目录
+        config_manager: 配置管理器
+        paths: 用户通过 --path 指定的路径列表（空则扫描全部）
+
+    Returns:
+        List[Tuple[str, Path]]: [(feature_name, feature_dir_abs_path), ...]
+    """
+    if paths:
+        result = []
+        for p in paths:
+            abs_p = Path(p).expanduser().resolve()
+            if not abs_p.exists():
+                log_warning(f"路径不存在，跳过: {p}")
+                continue
+            if not abs_p.is_dir():
+                log_warning(f"不是目录，跳过: {p}")
+                continue
+            result.append((abs_p.name, abs_p))
+        return result
+
+    # 无 --path：扫描所有仓库的 features 目录，收集所有 feature 子目录
+    modules_list = _collect_feature_modules(config_manager, project_root)
+    result = []
+
+    for mod_entry in modules_list:
+        mod_path = project_root / mod_entry["path"]
+        if not mod_path.exists():
+            continue
+
+        if mod_entry.get("deep"):
+            # 深度模式：递归找所有含 FEATURE.md 的目录
+            for feature_md in sorted(mod_path.glob("**/FEATURE.md")):
+                feature_dir = feature_md.parent
+                result.append((feature_dir.name, feature_dir))
+            # 也找 docs/iOS/ios-feature.md（但迁移以目录名为准）
+            seen = {d for _, d in result}
+            for ios_md in sorted(mod_path.glob("**/docs/iOS/ios-feature.md")):
+                feature_dir = ios_md.parent.parent.parent
+                if feature_dir not in seen:
+                    result.append((feature_dir.name, feature_dir))
+                    seen.add(feature_dir)
+        else:
+            # 普通模式：mod_path 的子目录就是各 feature 目录
+            for subdir in sorted(mod_path.iterdir()):
+                if subdir.is_dir():
+                    result.append((subdir.name, subdir))
+
+    return result
+
+
+@feature_group.command(name="migrate")
+@click.option("--platform", "platform", required=True,
+              help="目标平台（必填），如 android、iOS、harmony、kuikly")
+@click.option("--owner", "owner", default="owner-main", show_default=True,
+              help="负责人目录名，默认 owner-main")
+@click.option("--path", "paths", multiple=True,
+              help="指定 feature 目录（可多次指定），不传则扫描全部")
+@click.option("--include", "includes", multiple=True,
+              help="只处理路径包含指定关键词的目录（可多次指定，大小写不敏感）")
+@click.option("--exclude", "excludes", multiple=True,
+              help="跳过路径包含指定关键词的目录（可多次指定，大小写不敏感）")
+@click.option("--dry-run", "dry_run", is_flag=True, default=False,
+              help="只打印迁移计划，不执行实际操作")
+@click.option("--yes", "-y", "yes", is_flag=True, default=False,
+              help="跳过确认提示，直接执行")
+def feature_migrate(
+    platform: str,
+    owner: str,
+    paths: Tuple[str, ...],
+    includes: Tuple[str, ...],
+    excludes: Tuple[str, ...],
+    dry_run: bool,
+    yes: bool,
+):
+    """将 feature 目录从 v1 格式迁移到 v2 格式
+
+    v1 → v2 主要变更：\n
+    - docs/technical-design.md      → docs/{platform}/{owner}/technical-design.md\n
+    - docs/impact-map.md            → docs/{platform}/{owner}/impact-map.md\n
+    - docs/coding-plan.md           → docs/{platform}/{owner}/coding-plan.md\n
+    - docs/implementation-notes.md  → docs/{platform}/{owner}/implementation-notes.md\n
+    - docs/gate-state.json          → docs/{platform}/{owner}/gate-state.json\n
+    - review/                       → docs/{platform}/{owner}/review/\n
+    - docs/ui-design/               → ui-design/\n
+    迁移完成后自动在 FEATURE.md frontmatter 写入 format_version: v2。
+
+    \b
+    示例：
+        driving feature migrate --platform android
+        driving feature migrate --platform iOS --path ./features/payment
+        driving feature migrate --platform android --path ./features/payment --path ./features/login
+        driving feature migrate --platform android --include my-repo
+        driving feature migrate --platform android --exclude aidoc
+        driving feature migrate --platform android --include my-repo --exclude legacy
+        driving feature migrate --platform android --dry-run
+        driving feature migrate --platform android --yes
+    """
+    try:
+        project_root = find_project_root()
+        config_manager = ConfigManager(project_root)
+
+        # 收集待迁移的 feature 目录
+        feature_dirs = _collect_feature_dirs_for_migrate(project_root, config_manager, paths)
+
+        if not feature_dirs:
+            click.echo("没有找到任何 feature 目录。")
+            return
+
+        # include/exclude 过滤
+        filtered_out: List[Tuple[str, Path]] = []
+        if includes or excludes:
+            feature_dirs, filtered_out = _apply_path_filters(feature_dirs, includes, excludes)
+
+        # 分析每个 feature
+        plans = []  # List of (name, abs_dir, version, ops)
+        for feature_name, feature_dir in feature_dirs:
+            version = _detect_format_version(feature_dir)
+            if version == "v1":
+                ops = _build_migration_plan(feature_dir, platform, owner)
+            else:
+                ops = []
+            plans.append((feature_name, feature_dir, version, ops))
+
+        # 统计
+        need_migrate = [(n, d, v, o) for n, d, v, o in plans if v == "v1"]
+        already_new = [(n, d, v, o) for n, d, v, o in plans if v != "v1"]
+
+        # 打印计划
+        if dry_run:
+            click.echo(click.style("=== 迁移预览（dry-run，不执行实际操作）===", bold=True))
+        else:
+            click.echo(click.style("=== 迁移计划 ===", bold=True))
+
+        # 打印被过滤掉的目录
+        for fname, fpath in filtered_out:
+            click.echo(f"\nFeature: {click.style(fname, bold=True)}  [{fpath}]")
+            click.echo(f"  {click.style('已过滤，跳过', fg='bright_black')}")
+
+        for feature_name, feature_dir, version, ops in plans:
+            _print_migration_plan(feature_name, feature_dir, ops, version)
+
+        click.echo()
+        summary = (
+            f"共扫描 {click.style(str(len(feature_dirs) + len(filtered_out)), bold=True)} 个 feature，"
+            f"{click.style(str(len(need_migrate)), fg='yellow', bold=True)} 个待迁移，"
+            f"{click.style(str(len(already_new)), fg='green')} 个已跳过（已是新格式）"
+        )
+        if filtered_out:
+            summary += f"，{click.style(str(len(filtered_out)), fg='bright_black')} 个已过滤"
+        click.echo(summary + "。")
+
+        if dry_run or not need_migrate:
+            return
+
+        # 确认
+        if not yes:
+            click.echo()
+            confirmed = click.confirm(
+                f"确认执行迁移？（平台: {platform}, owner 目录: {owner}）",
+                default=False,
+            )
+            if not confirmed:
+                click.echo("已取消。")
+                return
+
+        # 执行迁移
+        click.echo()
+        total_moved = total_skipped = total_failed = 0
+
+        for feature_name, feature_dir, version, ops in need_migrate:
+            click.echo(f"迁移: {feature_name} ...")
+            moved, skipped, failed = _execute_migration(feature_dir, ops)
+            _cleanup_empty_dirs(feature_dir)
+
+            if failed == 0:
+                _write_format_version(feature_dir, CURRENT_FORMAT_VERSION)
+                click.echo(
+                    f"  {click.style('✓', fg='green')} 完成"
+                    f"（移动 {moved} 个，跳过 {skipped} 个）"
+                )
+            else:
+                click.echo(
+                    f"  {click.style('✗', fg='red')} 部分失败"
+                    f"（移动 {moved} 个，跳过 {skipped} 个，失败 {failed} 个）"
+                )
+
+            total_moved += moved
+            total_skipped += skipped
+            total_failed += failed
+
+        click.echo()
+        click.echo(
+            click.style("=== 迁移完成 ===", bold=True) + "\n"
+            f"  总计移动: {total_moved} 个文件/目录\n"
+            f"  总计跳过: {total_skipped} 个（目标已存在）\n"
+            f"  总计失败: {total_failed} 个"
+        )
+        if total_failed > 0:
+            click.echo(click.style("  存在失败项，请检查上方日志。", fg="red"))
+
+    except click.Abort:
+        raise
+    except Exception as e:
+        log_error(f"迁移失败: {e}")
+        raise click.Abort()

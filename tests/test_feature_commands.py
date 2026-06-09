@@ -1127,3 +1127,591 @@ def test_property4_精简详情字段集合(name, title, description, status, pr
     detail_out = format_feature_output(feature, detail=True)
     for field in ALL_FIELDS:
         assert field in detail_out
+
+
+# ==================== feature migrate 测试 ====================
+
+from driving_cli.commands.feature import (
+    CURRENT_FORMAT_VERSION,
+    _build_migration_plan,
+    _detect_format_version,
+    _write_format_version,
+    _cleanup_empty_dirs,
+)
+
+
+def _make_v1_feature(base_dir: Path, name: str) -> Path:
+    """创建一个标准 v1 格式的 feature 目录（旧格式）"""
+    feature_dir = base_dir / name
+    feature_dir.mkdir(parents=True, exist_ok=True)
+
+    # FEATURE.md（无 format_version）
+    (feature_dir / "FEATURE.md").write_text(
+        f"---\nname: {name}\nstatus: in-progress\n---\n\n# {name}\n",
+        encoding="utf-8",
+    )
+
+    # v1 特征文件
+    docs_dir = feature_dir / "docs"
+    docs_dir.mkdir(exist_ok=True)
+    (docs_dir / "requirements.md").write_text("# 需求", encoding="utf-8")
+    (docs_dir / "technical-design.md").write_text("# 技术方案", encoding="utf-8")
+    (docs_dir / "impact-map.md").write_text("# 影响域", encoding="utf-8")
+    (docs_dir / "coding-plan.md").write_text("# 排期", encoding="utf-8")
+    (docs_dir / "implementation-notes.md").write_text("# 实现笔记", encoding="utf-8")
+    (docs_dir / "gate-state.json").write_text("{}", encoding="utf-8")
+
+    # docs/ui-design/
+    ui_design_dir = docs_dir / "ui-design"
+    ui_design_dir.mkdir(exist_ok=True)
+    (ui_design_dir / "screen1.png").write_text("fake-image", encoding="utf-8")
+
+    # review/（feature 根下）
+    review_dir = feature_dir / "review"
+    review_dir.mkdir(exist_ok=True)
+    (review_dir / "review-report.md").write_text("# 审查", encoding="utf-8")
+    (review_dir / "review-result.json").write_text("{}", encoding="utf-8")
+
+    return feature_dir
+
+
+def _make_v2_feature(base_dir: Path, name: str, platform: str = "android") -> Path:
+    """创建一个标准 v2 格式的 feature 目录（新格式）"""
+    feature_dir = base_dir / name
+    feature_dir.mkdir(parents=True, exist_ok=True)
+
+    (feature_dir / "FEATURE.md").write_text(
+        f"---\nname: {name}\nformat_version: v2\nstatus: in-progress\n---\n\n# {name}\n",
+        encoding="utf-8",
+    )
+
+    docs_dir = feature_dir / "docs" / platform / "owner-main"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "technical-design.md").write_text("# 技术方案", encoding="utf-8")
+
+    return feature_dir
+
+
+class TestDetectFormatVersion:
+    def test_无format_version且有v1特征文件返回v1(self, tmp_path):
+        feature_dir = _make_v1_feature(tmp_path, "feat-a")
+        assert _detect_format_version(feature_dir) == "v1"
+
+    def test_FEATURE_MD有format_version_v2直接返回v2(self, tmp_path):
+        feature_dir = _make_v2_feature(tmp_path, "feat-b", platform="android")
+        assert _detect_format_version(feature_dir) == "v2"
+
+    def test_FEATURE_MD有format_version_v1返回v1(self, tmp_path):
+        feature_dir = tmp_path / "feat-c"
+        feature_dir.mkdir()
+        (feature_dir / "FEATURE.md").write_text(
+            "---\nname: feat-c\nformat_version: v1\n---\n",
+            encoding="utf-8",
+        )
+        assert _detect_format_version(feature_dir) == "v1"
+
+    def test_无FEATURE_MD且无v1特征返回当前版本(self, tmp_path):
+        feature_dir = tmp_path / "empty-feat"
+        feature_dir.mkdir()
+        assert _detect_format_version(feature_dir) == CURRENT_FORMAT_VERSION
+
+    def test_无FEATURE_MD但有technical_design返回v1(self, tmp_path):
+        feature_dir = tmp_path / "no-fm-feat"
+        feature_dir.mkdir()
+        docs = feature_dir / "docs"
+        docs.mkdir()
+        (docs / "technical-design.md").write_text("# tech", encoding="utf-8")
+        assert _detect_format_version(feature_dir) == "v1"
+
+    def test_有review目录返回v1(self, tmp_path):
+        feature_dir = tmp_path / "review-feat"
+        feature_dir.mkdir()
+        (feature_dir / "FEATURE.md").write_text("---\nname: review-feat\n---\n", encoding="utf-8")
+        (feature_dir / "review").mkdir()
+        assert _detect_format_version(feature_dir) == "v1"
+
+
+class TestBuildMigrationPlan:
+    def test_v1全量文件生成完整迁移计划(self, tmp_path):
+        feature_dir = _make_v1_feature(tmp_path, "full-feat")
+        ops = _build_migration_plan(feature_dir, platform="android", owner="owner-main")
+
+        move_ops = [op for op in ops if op["action"] == "MOVE"]
+        src_list = {op["src"] for op in move_ops}
+
+        assert "docs/technical-design.md" in src_list
+        assert "docs/impact-map.md" in src_list
+        assert "docs/coding-plan.md" in src_list
+        assert "docs/implementation-notes.md" in src_list
+        assert "docs/gate-state.json" in src_list
+        assert "review" in src_list
+        assert "docs/ui-design" in src_list
+
+    def test_目标路径包含platform和owner(self, tmp_path):
+        feature_dir = _make_v1_feature(tmp_path, "feat-x")
+        ops = _build_migration_plan(feature_dir, platform="iOS", owner="owner-main")
+
+        td_op = next(op for op in ops if op["src"] == "docs/technical-design.md")
+        assert td_op["dst"] == "docs/iOS/owner-main/technical-design.md"
+
+    def test_ui_design迁移到feature根(self, tmp_path):
+        feature_dir = _make_v1_feature(tmp_path, "feat-ui")
+        ops = _build_migration_plan(feature_dir, platform="android", owner="owner-main")
+
+        ui_op = next(op for op in ops if op["src"] == "docs/ui-design")
+        assert ui_op["dst"] == "ui-design"
+        assert ui_op["is_dir"] is True
+
+    def test_review迁移到platform_owner目录(self, tmp_path):
+        feature_dir = _make_v1_feature(tmp_path, "feat-review")
+        ops = _build_migration_plan(feature_dir, platform="android", owner="owner-main")
+
+        rv_op = next(op for op in ops if op["src"] == "review")
+        assert rv_op["dst"] == "docs/android/owner-main/review"
+        assert rv_op["is_dir"] is True
+
+    def test_源文件不存在时不生成操作(self, tmp_path):
+        feature_dir = tmp_path / "minimal-feat"
+        feature_dir.mkdir()
+        (feature_dir / "FEATURE.md").write_text("---\nname: minimal-feat\n---\n", encoding="utf-8")
+        # 没有 docs/ 也没有 review/
+
+        ops = _build_migration_plan(feature_dir, platform="android", owner="owner-main")
+        assert ops == []
+
+    def test_目标已存在时生成SKIP操作(self, tmp_path):
+        feature_dir = _make_v1_feature(tmp_path, "feat-skip")
+        # 预先创建目标文件
+        target = feature_dir / "docs" / "android" / "owner-main" / "technical-design.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("已存在", encoding="utf-8")
+
+        ops = _build_migration_plan(feature_dir, platform="android", owner="owner-main")
+        td_op = next(op for op in ops if op["src"] == "docs/technical-design.md")
+        assert td_op["action"] == "SKIP"
+
+    def test_自定义owner目录名(self, tmp_path):
+        feature_dir = _make_v1_feature(tmp_path, "feat-custom-owner")
+        ops = _build_migration_plan(feature_dir, platform="android", owner="zhangsan")
+
+        td_op = next(op for op in ops if op["src"] == "docs/technical-design.md")
+        assert "zhangsan" in td_op["dst"]
+
+
+class TestWriteFormatVersion:
+    def test_写入format_version到FEATURE_MD(self, tmp_path):
+        feature_dir = tmp_path / "feat-write"
+        feature_dir.mkdir()
+        (feature_dir / "FEATURE.md").write_text(
+            "---\nname: feat-write\nstatus: in-progress\n---\n\n# 正文\n",
+            encoding="utf-8",
+        )
+        result = _write_format_version(feature_dir, "v2")
+        assert result is True
+        content = (feature_dir / "FEATURE.md").read_text(encoding="utf-8")
+        assert "format_version: v2" in content
+
+    def test_覆盖已有format_version(self, tmp_path):
+        feature_dir = tmp_path / "feat-overwrite"
+        feature_dir.mkdir()
+        (feature_dir / "FEATURE.md").write_text(
+            "---\nname: feat-overwrite\nformat_version: v1\n---\n\n# 正文\n",
+            encoding="utf-8",
+        )
+        _write_format_version(feature_dir, "v2")
+        content = (feature_dir / "FEATURE.md").read_text(encoding="utf-8")
+        assert "format_version: v2" in content
+        assert "format_version: v1" not in content
+
+    def test_不破坏frontmatter其他字段(self, tmp_path):
+        feature_dir = tmp_path / "feat-preserve"
+        feature_dir.mkdir()
+        (feature_dir / "FEATURE.md").write_text(
+            "---\nname: feat-preserve\nstatus: in-progress\npriority: high\n---\n\n# 正文\n",
+            encoding="utf-8",
+        )
+        _write_format_version(feature_dir, "v2")
+        from driving_cli.utils.yaml_parser import parse_frontmatter
+        data = parse_frontmatter(feature_dir / "FEATURE.md")
+        assert data["name"] == "feat-preserve"
+        assert data["status"] == "in-progress"
+        assert str(data["format_version"]) == "v2"
+
+    def test_无FEATURE_MD时返回False(self, tmp_path):
+        feature_dir = tmp_path / "no-fm"
+        feature_dir.mkdir()
+        assert _write_format_version(feature_dir, "v2") is False
+
+    def test_无frontmatter时返回False(self, tmp_path):
+        feature_dir = tmp_path / "no-fm-content"
+        feature_dir.mkdir()
+        (feature_dir / "FEATURE.md").write_text("# 没有 frontmatter\n", encoding="utf-8")
+        assert _write_format_version(feature_dir, "v2") is False
+
+
+class TestCleanupEmptyDirs:
+    def test_清理空的review目录(self, tmp_path):
+        feature_dir = tmp_path / "feat-cleanup"
+        feature_dir.mkdir()
+        review_dir = feature_dir / "review"
+        review_dir.mkdir()
+        # review 已空（文件已被 shutil.move 走）
+
+        _cleanup_empty_dirs(feature_dir)
+        assert not review_dir.exists()
+
+    def test_清理空的docs_ui_design目录(self, tmp_path):
+        feature_dir = tmp_path / "feat-cleanup-ui"
+        feature_dir.mkdir()
+        ui_dir = feature_dir / "docs" / "ui-design"
+        ui_dir.mkdir(parents=True)
+
+        _cleanup_empty_dirs(feature_dir)
+        assert not ui_dir.exists()
+
+    def test_非空目录不清理(self, tmp_path):
+        feature_dir = tmp_path / "feat-nonempty"
+        feature_dir.mkdir()
+        review_dir = feature_dir / "review"
+        review_dir.mkdir()
+        (review_dir / "leftover.md").write_text("残留文件", encoding="utf-8")
+
+        _cleanup_empty_dirs(feature_dir)
+        assert review_dir.exists()
+
+    def test_目录不存在时不报错(self, tmp_path):
+        feature_dir = tmp_path / "feat-no-dirs"
+        feature_dir.mkdir()
+        # 不创建 review 或 docs/ui-design，直接调用不应抛出异常
+        _cleanup_empty_dirs(feature_dir)
+
+
+class TestFeatureMigrateCommand:
+    def test_缺少platform时报错(self, runner, tmp_path):
+        result = runner.invoke(cli, ["feature", "migrate"])
+        assert result.exit_code != 0
+        assert "--platform" in result.output
+
+    def test_dry_run不执行实际操作(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {"name": "my-repo", "type": "local", "path": "ai-driving/my-repo", "local_path": None},
+        ])
+        features_base = tmp_path / "ai-driving" / "my-repo" / "features"
+        feature_dir = _make_v1_feature(features_base, "pay-feature")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, [
+                "feature", "migrate", "--platform", "android", "--dry-run"
+            ])
+
+        assert result.exit_code == 0
+        # dry-run 不执行，原文件仍存在
+        assert (feature_dir / "docs" / "technical-design.md").exists()
+        assert (feature_dir / "review").exists()
+
+    def test_dry_run输出包含MOVE操作(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {"name": "my-repo", "type": "local", "path": "ai-driving/my-repo", "local_path": None},
+        ])
+        features_base = tmp_path / "ai-driving" / "my-repo" / "features"
+        _make_v1_feature(features_base, "pay-feature")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, [
+                "feature", "migrate", "--platform", "android", "--dry-run"
+            ])
+
+        assert "MOVE" in result.output
+
+    def test_yes跳过确认直接执行(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {"name": "my-repo", "type": "local", "path": "ai-driving/my-repo", "local_path": None},
+        ])
+        features_base = tmp_path / "ai-driving" / "my-repo" / "features"
+        feature_dir = _make_v1_feature(features_base, "login-feature")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, [
+                "feature", "migrate", "--platform", "android", "--yes"
+            ])
+
+        assert result.exit_code == 0
+        # 文件已迁移
+        assert (feature_dir / "docs" / "android" / "owner-main" / "technical-design.md").exists()
+        assert not (feature_dir / "docs" / "technical-design.md").exists()
+
+    def test_迁移后写入format_version_v2(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {"name": "my-repo", "type": "local", "path": "ai-driving/my-repo", "local_path": None},
+        ])
+        features_base = tmp_path / "ai-driving" / "my-repo" / "features"
+        feature_dir = _make_v1_feature(features_base, "order-feature")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            runner.invoke(cli, [
+                "feature", "migrate", "--platform", "android", "--yes"
+            ])
+
+        from driving_cli.utils.yaml_parser import parse_frontmatter
+        data = parse_frontmatter(feature_dir / "FEATURE.md")
+        assert str(data["format_version"]) == "v2"
+
+    def test_迁移后review目录位置正确(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {"name": "my-repo", "type": "local", "path": "ai-driving/my-repo", "local_path": None},
+        ])
+        features_base = tmp_path / "ai-driving" / "my-repo" / "features"
+        feature_dir = _make_v1_feature(features_base, "game-feature")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            runner.invoke(cli, [
+                "feature", "migrate", "--platform", "iOS", "--yes"
+            ])
+
+        assert (feature_dir / "docs" / "iOS" / "owner-main" / "review" / "review-report.md").exists()
+        assert not (feature_dir / "review").exists()
+
+    def test_迁移后ui_design提升到feature根(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {"name": "my-repo", "type": "local", "path": "ai-driving/my-repo", "local_path": None},
+        ])
+        features_base = tmp_path / "ai-driving" / "my-repo" / "features"
+        feature_dir = _make_v1_feature(features_base, "search-feature")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            runner.invoke(cli, [
+                "feature", "migrate", "--platform", "android", "--yes"
+            ])
+
+        assert (feature_dir / "ui-design" / "screen1.png").exists()
+        assert not (feature_dir / "docs" / "ui-design").exists()
+
+    def test_不移动的文件保留原位(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {"name": "my-repo", "type": "local", "path": "ai-driving/my-repo", "local_path": None},
+        ])
+        features_base = tmp_path / "ai-driving" / "my-repo" / "features"
+        feature_dir = _make_v1_feature(features_base, "keep-feature")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            runner.invoke(cli, [
+                "feature", "migrate", "--platform", "android", "--yes"
+            ])
+
+        assert (feature_dir / "docs" / "requirements.md").exists()
+        assert (feature_dir / "FEATURE.md").exists()
+
+    def test_path指定单个feature目录(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {"name": "my-repo", "type": "local", "path": "ai-driving/my-repo", "local_path": None},
+        ])
+        features_base = tmp_path / "ai-driving" / "my-repo" / "features"
+        feat_a = _make_v1_feature(features_base, "feat-a")
+        feat_b = _make_v1_feature(features_base, "feat-b")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            runner.invoke(cli, [
+                "feature", "migrate", "--platform", "android",
+                "--path", str(feat_a), "--yes"
+            ])
+
+        # feat-a 已迁移，feat-b 未动
+        assert (feat_a / "docs" / "android" / "owner-main" / "technical-design.md").exists()
+        assert (feat_b / "docs" / "technical-design.md").exists()
+
+    def test_已是v2格式的feature跳过(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {"name": "my-repo", "type": "local", "path": "ai-driving/my-repo", "local_path": None},
+        ])
+        features_base = tmp_path / "ai-driving" / "my-repo" / "features"
+        _make_v2_feature(features_base, "new-feature", platform="android")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, [
+                "feature", "migrate", "--platform", "android", "--dry-run"
+            ])
+
+        assert result.exit_code == 0
+        assert "已是新格式" in result.output
+
+    def test_custom_owner选项(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {"name": "my-repo", "type": "local", "path": "ai-driving/my-repo", "local_path": None},
+        ])
+        features_base = tmp_path / "ai-driving" / "my-repo" / "features"
+        feature_dir = _make_v1_feature(features_base, "owner-feat")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            runner.invoke(cli, [
+                "feature", "migrate", "--platform", "android",
+                "--owner", "lisi", "--yes"
+            ])
+
+        assert (feature_dir / "docs" / "android" / "lisi" / "technical-design.md").exists()
+
+    def test_migrate命令已挂载到feature_group(self, runner):
+        result = runner.invoke(cli, ["feature", "--help"])
+        assert result.exit_code == 0
+        assert "migrate" in result.output
+
+
+# ==================== _apply_path_filters 测试 ====================
+
+from driving_cli.commands.feature import _apply_path_filters
+
+
+class TestApplyPathFilters:
+    def _dirs(self, paths):
+        """将字符串路径列表转换为 (name, Path) 元组列表"""
+        return [(Path(p).name, Path(p)) for p in paths]
+
+    def test_无include无exclude返回全部(self):
+        dirs = self._dirs(["/work/aidoc/feat-a", "/work/my-repo/feat-b"])
+        kept, filtered = _apply_path_filters(dirs, (), ())
+        assert len(kept) == 2
+        assert len(filtered) == 0
+
+    def test_exclude过滤命中路径(self):
+        dirs = self._dirs(["/work/aidoc/feat-a", "/work/my-repo/feat-b"])
+        kept, filtered = _apply_path_filters(dirs, (), ("aidoc",))
+        assert len(kept) == 1
+        assert kept[0][0] == "feat-b"
+        assert len(filtered) == 1
+        assert filtered[0][0] == "feat-a"
+
+    def test_include只保留命中路径(self):
+        dirs = self._dirs(["/work/aidoc/feat-a", "/work/my-repo/feat-b"])
+        kept, filtered = _apply_path_filters(dirs, ("my-repo",), ())
+        assert len(kept) == 1
+        assert kept[0][0] == "feat-b"
+        assert len(filtered) == 1
+        assert filtered[0][0] == "feat-a"
+
+    def test_include和exclude同时生效(self):
+        dirs = self._dirs([
+            "/work/my-repo/feat-a",
+            "/work/my-repo/legacy/feat-b",
+            "/work/aidoc/feat-c",
+        ])
+        kept, filtered = _apply_path_filters(dirs, ("my-repo",), ("legacy",))
+        assert len(kept) == 1
+        assert kept[0][0] == "feat-a"
+        assert len(filtered) == 2
+
+    def test_大小写不敏感(self):
+        dirs = self._dirs(["/work/AiDoc/feat-a", "/work/my-repo/feat-b"])
+        kept, filtered = _apply_path_filters(dirs, (), ("aidoc",))
+        assert len(kept) == 1
+        assert filtered[0][0] == "feat-a"
+
+    def test_多个exclude关键词OR关系(self):
+        dirs = self._dirs([
+            "/work/aidoc/feat-a",
+            "/work/aidoc2/feat-b",
+            "/work/my-repo/feat-c",
+        ])
+        kept, filtered = _apply_path_filters(dirs, (), ("aidoc", "aidoc2"))
+        assert len(kept) == 1
+        assert kept[0][0] == "feat-c"
+
+    def test_多个include关键词OR关系(self):
+        dirs = self._dirs([
+            "/work/repo-a/feat-a",
+            "/work/repo-b/feat-b",
+            "/work/other/feat-c",
+        ])
+        kept, filtered = _apply_path_filters(dirs, ("repo-a", "repo-b"), ())
+        assert len(kept) == 2
+        assert len(filtered) == 1
+        assert filtered[0][0] == "feat-c"
+
+    def test_空目录列表返回空(self):
+        kept, filtered = _apply_path_filters([], ("aidoc",), ())
+        assert kept == []
+        assert filtered == []
+
+    def test_全部被exclude过滤(self):
+        dirs = self._dirs(["/work/aidoc/feat-a", "/work/aidoc/feat-b"])
+        kept, filtered = _apply_path_filters(dirs, (), ("aidoc",))
+        assert len(kept) == 0
+        assert len(filtered) == 2
+
+    def test_全部被include过滤(self):
+        dirs = self._dirs(["/work/aidoc/feat-a", "/work/aidoc/feat-b"])
+        kept, filtered = _apply_path_filters(dirs, ("my-repo",), ())
+        assert len(kept) == 0
+        assert len(filtered) == 2
+
+
+class TestFeatureMigrateWithFilters:
+    def test_exclude跳过命中路径(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {"name": "aidoc", "type": "local", "path": "ai-driving/aidoc", "local_path": None},
+            {"name": "my-repo", "type": "local", "path": "ai-driving/my-repo", "local_path": None},
+        ])
+        aidoc_feat = _make_v1_feature(tmp_path / "ai-driving" / "aidoc" / "features", "pay-feat")
+        my_feat = _make_v1_feature(tmp_path / "ai-driving" / "my-repo" / "features", "login-feat")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, [
+                "feature", "migrate", "--platform", "android",
+                "--exclude", "aidoc", "--yes"
+            ])
+
+        assert result.exit_code == 0
+        # aidoc 下的未迁移
+        assert (aidoc_feat / "docs" / "technical-design.md").exists()
+        # my-repo 下的已迁移
+        assert (my_feat / "docs" / "android" / "owner-main" / "technical-design.md").exists()
+
+    def test_include只迁移命中路径(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {"name": "aidoc", "type": "local", "path": "ai-driving/aidoc", "local_path": None},
+            {"name": "my-repo", "type": "local", "path": "ai-driving/my-repo", "local_path": None},
+        ])
+        aidoc_feat = _make_v1_feature(tmp_path / "ai-driving" / "aidoc" / "features", "pay-feat")
+        my_feat = _make_v1_feature(tmp_path / "ai-driving" / "my-repo" / "features", "login-feat")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, [
+                "feature", "migrate", "--platform", "android",
+                "--include", "my-repo", "--yes"
+            ])
+
+        assert result.exit_code == 0
+        # aidoc 下的未迁移
+        assert (aidoc_feat / "docs" / "technical-design.md").exists()
+        # my-repo 下的已迁移
+        assert (my_feat / "docs" / "android" / "owner-main" / "technical-design.md").exists()
+
+    def test_dry_run显示已过滤的目录(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {"name": "aidoc", "type": "local", "path": "ai-driving/aidoc", "local_path": None},
+        ])
+        _make_v1_feature(tmp_path / "ai-driving" / "aidoc" / "features", "pay-feat")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, [
+                "feature", "migrate", "--platform", "android",
+                "--exclude", "aidoc", "--dry-run"
+            ])
+
+        assert result.exit_code == 0
+        assert "已过滤" in result.output
+
+    def test_统计信息包含过滤数量(self, runner, tmp_path):
+        _make_config(tmp_path, [
+            {"name": "aidoc", "type": "local", "path": "ai-driving/aidoc", "local_path": None},
+            {"name": "my-repo", "type": "local", "path": "ai-driving/my-repo", "local_path": None},
+        ])
+        _make_v1_feature(tmp_path / "ai-driving" / "aidoc" / "features", "pay-feat")
+        _make_v1_feature(tmp_path / "ai-driving" / "my-repo" / "features", "login-feat")
+
+        with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, [
+                "feature", "migrate", "--platform", "android",
+                "--exclude", "aidoc", "--dry-run"
+            ])
+
+        assert result.exit_code == 0
+        assert "已过滤" in result.output

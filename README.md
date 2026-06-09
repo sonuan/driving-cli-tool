@@ -307,6 +307,12 @@ driving feature list                          # 列出所有 features（从 modu
 driving feature list --repo <name>            # 只扫描指定仓库
 driving feature list --keywords game,list     # 关键词过滤（OR 关系）
 driving feature list --detail                 # 输出完整字段
+driving feature migrate --platform android    # 迁移全部 feature 目录（v1 → v2）
+driving feature migrate --platform iOS --path ./features/pay  # 指定目录迁移
+driving feature migrate --platform android --exclude aidoc    # 跳过路径含 aidoc 的目录
+driving feature migrate --platform android --include my-repo  # 只迁移路径含 my-repo 的目录
+driving feature migrate --platform android --dry-run          # 预览迁移计划，不执行
+driving feature migrate --platform android --yes              # 跳过确认直接执行
 ```
 
 `feature modules` 输出规则：
@@ -319,6 +325,15 @@ driving feature list --detail                 # 输出完整字段
 - `tags` 含 `"features"` 的仓库：使用**深度递归扫描**，兼容多层目录结构（如 `{module}/{年度-季度}/{日期}-{feature}/FEATURE.md`），并自动提取 `quarter` 字段（如 `2026-Q2`）
 
 `feature list` 输出字段（精简模式）：`name`、`title`、`description`、`status`、`path`、`repo`、`quarter`、`urls`
+
+`feature migrate` 将 feature 目录从 v1 格式迁移到 v2 格式，主要变更：
+- `docs/technical-design.md` / `impact-map.md` / `coding-plan.md` / `implementation-notes.md` / `gate-state.json` → `docs/{platform}/{owner}/`
+- `review/`（feature 根）→ `docs/{platform}/{owner}/review/`
+- `docs/ui-design/` → `ui-design/`（提升到 feature 根）
+- 迁移完成后自动在 `FEATURE.md` frontmatter 写入 `format_version: v2`，下次运行自动跳过已迁移的目录
+- `--path` 可多次指定以限定迁移范围；不传则扫描全部；`--owner` 默认 `owner-main`
+- `--include`：只处理路径包含指定关键词的目录（可多次指定，OR 关系，大小写不敏感）
+- `--exclude`：跳过路径包含指定关键词的目录（可多次指定，OR 关系，大小写不敏感）
 
 `driving.config.json` 配置示例（多层目录仓库）：
 ```json
