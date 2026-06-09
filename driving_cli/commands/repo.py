@@ -700,9 +700,37 @@ def pull(repo_name: Optional[str]):
 def _git_pull(repo_cfg: RepoConfig, project_root: Path):
     """对指定远程仓库执行 git pull"""
     repo_dir = project_root / repo_cfg.path
-    if not repo_dir.exists():
-        log_error(f"仓库 '{repo_cfg.name}' 目录不存在：{repo_cfg.path}")
-        log_info("请先执行 'driving repo install' 初始化仓库")
+
+    # 目录不存在或为空（submodule 尚未初始化）时，自动执行初始化
+    dir_empty = not repo_dir.exists() or (repo_dir.is_dir() and not any(repo_dir.iterdir()))
+    if dir_empty:
+        if not repo_cfg.url:
+            log_error(f"仓库 '{repo_cfg.name}' 目录不存在且未配置 URL，无法自动初始化")
+            log_info("请先执行 'driving repo install' 初始化仓库")
+            return
+        log_info(f"仓库 '{repo_cfg.name}' 目录为空，尝试自动初始化 submodule...")
+        try:
+            git_root = find_git_root(project_root)
+        except git.exc.InvalidGitRepositoryError:
+            log_error("当前目录不在 Git 仓库中")
+            return
+        try:
+            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root))
+        except ValueError:
+            submodule_path = repo_cfg.path
+        ok = ensure_submodule_initialized(
+            project_root=project_root,
+            git_root=git_root,
+            rel_path=submodule_path,
+            url=repo_cfg.url,
+            branch=repo_cfg.branch or "",
+            label=f"仓库 '{repo_cfg.name}'",
+        )
+        if not ok:
+            log_error(f"仓库 '{repo_cfg.name}' 自动初始化失败，请手动执行 'driving repo install'")
+            return
+        # 初始化即完成了 clone，无需继续执行 pull
+        log_success(f"仓库 '{repo_cfg.name}' 初始化并拉取成功")
         return
 
     log_info(f"正在拉取仓库 '{repo_cfg.name}'...")
@@ -887,10 +915,36 @@ def checkout(repo_name: str, branch: str):
 def _git_checkout(repo_cfg: RepoConfig, project_root: Path, branch: str):
     """对指定远程仓库执行 git checkout"""
     repo_dir = project_root / repo_cfg.path
-    if not repo_dir.exists():
-        log_error(f"仓库 '{repo_cfg.name}' 目录不存在：{repo_cfg.path}")
-        log_info("请先执行 'driving repo install' 初始化仓库")
-        return
+
+    # 目录不存在或为空（submodule 尚未初始化）时，自动执行初始化后再切换分支
+    dir_empty = not repo_dir.exists() or (repo_dir.is_dir() and not any(repo_dir.iterdir()))
+    if dir_empty:
+        if not repo_cfg.url:
+            log_error(f"仓库 '{repo_cfg.name}' 目录不存在且未配置 URL，无法自动初始化")
+            log_info("请先执行 'driving repo install' 初始化仓库")
+            return
+        log_info(f"仓库 '{repo_cfg.name}' 目录为空，尝试自动初始化 submodule...")
+        try:
+            git_root = find_git_root(project_root)
+        except git.exc.InvalidGitRepositoryError:
+            log_error("当前目录不在 Git 仓库中")
+            return
+        try:
+            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root))
+        except ValueError:
+            submodule_path = repo_cfg.path
+        ok = ensure_submodule_initialized(
+            project_root=project_root,
+            git_root=git_root,
+            rel_path=submodule_path,
+            url=repo_cfg.url,
+            branch="",  # 初始化后由下面的 checkout 逻辑负责切换目标分支
+            label=f"仓库 '{repo_cfg.name}'",
+        )
+        if not ok:
+            log_error(f"仓库 '{repo_cfg.name}' 自动初始化失败，请手动执行 'driving repo install'")
+            return
+        # 初始化成功后继续执行 checkout，不直接 return
 
     log_info(f"正在切换仓库 '{repo_cfg.name}' 到分支 '{branch}'...")
     try:

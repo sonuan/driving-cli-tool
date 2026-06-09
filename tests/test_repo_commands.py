@@ -720,6 +720,122 @@ class TestRepoGitOps:
         # local 仓库跳过，不报错
         assert result.exit_code == 0
 
+    def test_pull_empty_dir_auto_initializes(self, runner, tmp_project, config_mgr):
+        """pull 时目录为空（submodule 未初始化），应自动调用 ensure_submodule_initialized"""
+        config_mgr.add_repo(RepoConfig(
+            name="aidoc", type="remote",
+            url="https://github.com/org/aidoc.git",
+            path="ai-driving/aidoc",
+        ))
+        # 创建空目录，模拟 submodule 注册了但未初始化
+        empty_dir = tmp_project / "ai-driving" / "aidoc"
+        empty_dir.mkdir(parents=True)
+
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.ensure_submodule_initialized", return_value=True) as mock_init:
+            result = runner.invoke(repo_group, ["pull", "aidoc"])
+
+        assert result.exit_code == 0
+        mock_init.assert_called_once()
+        call_kwargs = mock_init.call_args
+        assert call_kwargs.kwargs.get("url") == "https://github.com/org/aidoc.git"
+        assert "初始化" in result.output or "成功" in result.output
+
+    def test_pull_missing_dir_auto_initializes(self, runner, tmp_project, config_mgr):
+        """pull 时目录不存在（submodule 完全未创建），应自动调用 ensure_submodule_initialized"""
+        config_mgr.add_repo(RepoConfig(
+            name="aidoc", type="remote",
+            url="https://github.com/org/aidoc.git",
+            path="ai-driving/aidoc",
+        ))
+        # 不创建目录，模拟目录完全缺失
+
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.ensure_submodule_initialized", return_value=True) as mock_init:
+            result = runner.invoke(repo_group, ["pull", "aidoc"])
+
+        assert result.exit_code == 0
+        mock_init.assert_called_once()
+
+    def test_pull_empty_dir_init_failure(self, runner, tmp_project, config_mgr):
+        """pull 时目录为空但初始化失败，应报错"""
+        config_mgr.add_repo(RepoConfig(
+            name="aidoc", type="remote",
+            url="https://github.com/org/aidoc.git",
+            path="ai-driving/aidoc",
+        ))
+        empty_dir = tmp_project / "ai-driving" / "aidoc"
+        empty_dir.mkdir(parents=True)
+
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.ensure_submodule_initialized", return_value=False):
+            result = runner.invoke(repo_group, ["pull", "aidoc"])
+
+        assert result.exit_code == 0  # exit_code=0，通过 ERROR 日志提示
+        assert "失败" in result.output or "手动" in result.output
+
+    def test_pull_empty_dir_no_url(self, runner, tmp_project, config_mgr):
+        """pull 时目录为空且配置无 URL，应给出提示而非 crash"""
+        config_mgr.add_repo(RepoConfig(
+            name="aidoc", type="remote",
+            url=None,  # 无 URL
+            path="ai-driving/aidoc",
+        ))
+        empty_dir = tmp_project / "ai-driving" / "aidoc"
+        empty_dir.mkdir(parents=True)
+
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = runner.invoke(repo_group, ["pull", "aidoc"])
+
+        assert result.exit_code == 0
+        assert "URL" in result.output or "install" in result.output
+
+    def test_checkout_empty_dir_auto_initializes(self, runner, tmp_project, config_mgr):
+        """checkout 时目录为空，应自动初始化后再切换分支"""
+        config_mgr.add_repo(RepoConfig(
+            name="aidoc", type="remote",
+            url="https://github.com/org/aidoc.git",
+            path="ai-driving/aidoc",
+        ))
+        empty_dir = tmp_project / "ai-driving" / "aidoc"
+        empty_dir.mkdir(parents=True)
+
+        mock_repo = MagicMock()
+        mock_repo.is_dirty.return_value = False
+        mock_repo.remotes = []
+
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.ensure_submodule_initialized", return_value=True) as mock_init, \
+             patch("driving_cli.commands.repo.git.Repo", return_value=mock_repo):
+            result = runner.invoke(repo_group, ["checkout", "aidoc", "feature/new-branch"])
+
+        assert result.exit_code == 0
+        mock_init.assert_called_once()
+        # 确认 branch 参数为空（不在初始化时切换，由后续 checkout 逻辑处理）
+        assert mock_init.call_args.kwargs.get("branch") == ""
+
+    def test_checkout_empty_dir_init_failure(self, runner, tmp_project, config_mgr):
+        """checkout 时目录为空但初始化失败，应报错退出"""
+        config_mgr.add_repo(RepoConfig(
+            name="aidoc", type="remote",
+            url="https://github.com/org/aidoc.git",
+            path="ai-driving/aidoc",
+        ))
+        empty_dir = tmp_project / "ai-driving" / "aidoc"
+        empty_dir.mkdir(parents=True)
+
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.ensure_submodule_initialized", return_value=False):
+            result = runner.invoke(repo_group, ["checkout", "aidoc", "main"])
+
+        assert result.exit_code == 0
+        assert "失败" in result.output or "手动" in result.output
+
 
 # ==================== _resolve_repos 辅助函数测试 ====================
 
