@@ -509,17 +509,19 @@ def _parse_yaml_frontmatter(file_path: Path) -> Dict[str, str]:
     return {k: str(v) if not isinstance(v, str) else v for k, v in data.items()}
 
 
-def collect_frameworks(keywords: tuple = ()) -> List[Dict]:
+def collect_frameworks(keywords: tuple = (), category: Optional[str] = None) -> List[Dict]:
     """收集框架文档元信息，供 framework load 和 driving load 复用。
 
     不传关键词时，加载所有仓库的框架文档。
     传入关键词时，按 repo.name 精确匹配或 framework.name/description 模糊匹配（不区分大小写，取并集）。
+    传入 category 时，按 category 字段过滤（不区分大小写）。
 
     Args:
         keywords: 过滤关键词，支持仓库名或框架名
+        category: 按 category 字段过滤，不区分大小写
 
     Returns:
-        List[Dict]: 框架列表，每项包含 name、description、path
+        List[Dict]: 框架列表，每项包含 name、description、category、path
     """
     config_manager = _get_config_manager()
     repos = config_manager.get_all_repos()
@@ -545,6 +547,7 @@ def collect_frameworks(keywords: tuple = ()) -> List[Dict]:
             repo_results.append({
                 "name": meta.get("name", fw_dir.name),
                 "description": meta.get("description", ""),
+                "category": meta.get("category", ""),
                 "path": f"ai-driving/{repo.name}/frameworks/{fw_dir.name}",
             })
         all_by_repo[repo.name] = repo_results
@@ -573,12 +576,59 @@ def collect_frameworks(keywords: tuple = ()) -> List[Dict]:
                        if fuzzy_match_any((fw["name"], fw.get("description", "")), keywords)]
             _add(matched)
 
+    if category:
+        cat_lower = category.strip().lower()
+        results = [fw for fw in results if (fw.get("category") or "").strip().lower() == cat_lower]
+
     return results
 
 
+def collect_framework_categories() -> List[Dict]:
+    """汇总所有框架的 category 及其描述与数量。
+
+    - category 名称与数量：扫描所有仓库 frameworks/*/FRAMEWORK.md 的 category 字段统计。
+    - category 描述：从各仓库 manifest.json 的 categories 注册表读取（[{name, description}]）。
+
+    Returns:
+        List[Dict]: [{name, description, count}]，按 name 排序。
+    """
+    config_manager = _get_config_manager()
+    repos = config_manager.get_all_repos()
+
+    # 1. 从框架 frontmatter 统计各 category 数量
+    counts: Dict[str, int] = {}
+    for fw in collect_frameworks(()):
+        cat = (fw.get("category") or "").strip()
+        if cat:
+            counts[cat] = counts.get(cat, 0) + 1
+
+    # 2. 从各仓库 manifest.json 的 categories 注册表读取描述
+    descriptions: Dict[str, str] = {}
+    for repo in repos:
+        manifest_path = config_manager.get_repo_dir(repo.name) / "manifest.json"
+        if not manifest_path.exists():
+            continue
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for c in (data.get("categories") or []):
+            name = (c.get("name") or "").strip()
+            if name and name not in descriptions:
+                descriptions[name] = c.get("description", "")
+
+    # 3. 合并：注册表声明的 + 框架中实际出现的
+    all_names = set(counts) | set(descriptions)
+    return [
+        {"name": n, "description": descriptions.get(n, ""), "count": counts.get(n, 0)}
+        for n in sorted(all_names)
+    ]
+
+
 @framework_group.command(name="load")
+@click.option("--category", "category", default=None, help="按 category 过滤（如 ui-component），不区分大小写")
 @click.argument("keywords", nargs=-1, required=False)
-def framework_load(keywords: tuple = ()):
+def framework_load(category: Optional[str] = None, keywords: tuple = ()):
     """加载框架文档元信息
 
     扫描所有已安装仓库的 frameworks/ 目录，读取每个框架的
@@ -598,10 +648,30 @@ def framework_load(keywords: tuple = ()):
     keywords = normalize_keywords(keywords)
 
     try:
-        results = collect_frameworks(keywords)
+        results = collect_frameworks(keywords, category=category)
         print(json.dumps({"frameworks": results}, ensure_ascii=False, indent=2))
     except click.Abort:
         raise
     except Exception as e:
         log_error(f"加载框架文档失败: {e}")
+        raise click.Abort()
+
+
+@framework_group.command(name="categories")
+def framework_categories():
+    """列出所有框架分类及其描述与数量。
+
+    分类名称/数量来自扫描各仓库 frameworks/*/FRAMEWORK.md 的 category 字段；
+    分类描述来自各仓库 manifest.json 的 categories 注册表（[{name, description}]）。
+
+    示例：
+        driving framework categories
+    """
+    try:
+        results = collect_framework_categories()
+        print(json.dumps({"categories": results}, ensure_ascii=False, indent=2))
+    except click.Abort:
+        raise
+    except Exception as e:
+        log_error(f"加载框架分类失败: {e}")
         raise click.Abort()

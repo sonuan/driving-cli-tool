@@ -470,7 +470,7 @@ class TestFrameworkLoad:
         ximage_dir = frameworks_dir / "ximage"
         ximage_dir.mkdir(parents=True)
         (ximage_dir / "FRAMEWORK.md").write_text(
-            "---\nname: ximage\ndescription: 图片加载框架\n---\n# ximage\n",
+            "---\nname: ximage\ndescription: 图片加载框架\ncategory: ui-component\n---\n# ximage\n",
             encoding="utf-8",
         )
 
@@ -586,6 +586,71 @@ class TestFrameworkLoad:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["frameworks"][0]["description"] == "Activity/Fragment 基础封装框架"
+
+    def test_category字段从frontmatter读取(self, runner, project_with_framework_docs):
+        with runner.isolated_filesystem():
+            import os; os.chdir(project_with_framework_docs)
+            result = runner.invoke(cli, ["framework", "load"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        cat = {fw["name"]: fw["category"] for fw in data["frameworks"]}
+        assert cat["ximage"] == "ui-component"
+        assert cat["xstatic"] == ""
+
+    def test_category过滤只返回匹配项(self, runner, project_with_framework_docs):
+        with runner.isolated_filesystem():
+            import os; os.chdir(project_with_framework_docs)
+            result = runner.invoke(cli, ["framework", "load", "--category", "ui-component"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert [fw["name"] for fw in data["frameworks"]] == ["ximage"]
+
+    def test_category过滤大小写不敏感(self, runner, project_with_framework_docs):
+        with runner.isolated_filesystem():
+            import os; os.chdir(project_with_framework_docs)
+            result = runner.invoke(cli, ["framework", "load", "--category", "UI-COMPONENT"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert [fw["name"] for fw in data["frameworks"]] == ["ximage"]
+
+    def test_category无匹配返回空(self, runner, project_with_framework_docs):
+        with runner.isolated_filesystem():
+            import os; os.chdir(project_with_framework_docs)
+            result = runner.invoke(cli, ["framework", "load", "--category", "nope"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["frameworks"] == []
+
+    def test_categories命令列出分类描述与数量(self, runner, project_with_framework_docs):
+        """framework categories 列出分类：名称+描述（来自 manifest.json 注册表）+ 数量（扫描 frontmatter）"""
+        import os
+        # 在 main 仓库写入 categories 注册表
+        manifest = project_with_framework_docs / "ai-driving" / "main" / "manifest.json"
+        manifest.write_text(
+            json.dumps({"categories": [{"name": "ui-component", "description": "UI 组件库"}]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        with runner.isolated_filesystem():
+            os.chdir(project_with_framework_docs)
+            result = runner.invoke(cli, ["framework", "categories"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        cats = {c["name"]: c for c in data["categories"]}
+        assert "ui-component" in cats
+        assert cats["ui-component"]["description"] == "UI 组件库"
+        assert cats["ui-component"]["count"] == 1  # 仅 ximage 标了 category
+
+    def test_categories命令注册表为空时仍从frontmatter发现(self, runner, project_with_framework_docs):
+        """没有注册表时，category 仍能从框架 frontmatter 扫描出来（描述为空）"""
+        import os
+        with runner.isolated_filesystem():
+            os.chdir(project_with_framework_docs)
+            result = runner.invoke(cli, ["framework", "categories"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        cats = {c["name"]: c for c in data["categories"]}
+        assert "ui-component" in cats
+        assert cats["ui-component"]["count"] == 1
+        assert cats["ui-component"]["description"] == ""
 
 
 class TestCliIntegration:
