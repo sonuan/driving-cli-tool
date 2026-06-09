@@ -620,6 +620,19 @@ class TestFrameworkLoad:
         assert result.exit_code == 0
         assert json.loads(result.output)["frameworks"] == []
 
+    def test_category与关键词组合过滤(self, runner, project_with_framework_docs):
+        """关键词 + --category 取交集：先按关键词过滤，再按 category 过滤"""
+        with runner.isolated_filesystem():
+            import os; os.chdir(project_with_framework_docs)
+            # ximage 命中关键词且 category=ui-component → 保留
+            r1 = runner.invoke(cli, ["framework", "load", "ximage", "--category", "ui-component"])
+            # xstatic 命中关键词但无 ui-component 分类 → 被 category 过滤掉
+            r2 = runner.invoke(cli, ["framework", "load", "xstatic", "--category", "ui-component"])
+        assert r1.exit_code == 0
+        assert [fw["name"] for fw in json.loads(r1.output)["frameworks"]] == ["ximage"]
+        assert r2.exit_code == 0
+        assert json.loads(r2.output)["frameworks"] == []
+
     def test_categories命令列出分类描述与数量(self, runner, project_with_framework_docs):
         """framework categories 列出分类：名称+描述（来自 manifest.json 注册表）+ 数量（扫描 frontmatter）"""
         import os

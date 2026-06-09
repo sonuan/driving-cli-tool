@@ -190,6 +190,8 @@ driving framework pull <name>                 # 更新框架仓库
 driving framework sources <name>              # 获取框架源码路径列表
 driving framework load                        # 加载所有框架文档元信息（name/description/path）
 driving framework load <keywords...>          # 按框架名或仓库名过滤（取并集）
+driving framework load --category <name>      # 按分类过滤（如 ui-component，不区分大小写，可与关键词组合）
+driving framework categories                  # 列出所有框架分类（名称/描述/数量）；分类描述配置于各仓库 manifest.json 的 categories
 ```
 
 ## skill — 技能管理
