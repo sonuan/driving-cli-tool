@@ -231,10 +231,6 @@ driving gate status --path <dir> --platform <platform> --owner <owner>          
 driving gate status <gate-id> --path <dir> --platform <platform>                  # 查看指定平台的指定 gate 状态
 driving gate history <gate-id> --path <dir> --platform <platform>                 # 查看指定 gate 历史记录
 driving gate history <gate-id> --path <dir> --platform <platform> --owner <owner> # 同时指定负责人
-driving gate pass <gate-id> --path <dir> --platform <platform>                              # 手动通过门禁
-driving gate pass <gate-id> --path <dir> --platform <platform> --note "说明"                 # 带说明手动通过
-driving gate pass <gate-id> --path <dir> --platform <platform> --owner <owner>               # 指定负责人（state 写入 owner 子目录）
-driving gate pass <gate-id> --path <dir> --platform <platform> --owner <owner> --note "说明" # 指定负责人+说明
 ```
 
 `gate load` 输出格式：
@@ -251,7 +247,7 @@ driving gate pass <gate-id> --path <dir> --platform <platform> --owner <owner> -
 - 任一 ID 找不到时，`gates` 返回空数组 `[]`，不报错退出
 - 多仓库存在相同 ID 时，返回 `driving.config.json` 中排在最前的仓库的 gate，并输出警告
 
-`gate request` / `gate pass` 返回结构（pass/auto_pass 且返工次数达到阈值时，额外包含 `self_refine` 字段）：
+`gate request` / `gate respond` 返回结构（pass/auto_pass 且返工次数达到阈值时，额外包含 `self_refine` 字段）：
 ```json
 {
   "gate_id": "GATE-R1",
