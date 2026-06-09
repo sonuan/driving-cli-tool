@@ -5,14 +5,20 @@
 
 命令行工具，用于管理 AI Coding 规范仓库、框架文档、技能、规则、需求目录和 Agent。
 
-## 安装
+## 安装或升级
 
 ```bash
+# 一键安装（macOS/Linux）- 内网优先，保持更新中
+sudo sh -c 'curl -fsSL http://192.168.100.90/android/ai-tools/driving -o /usr/local/bin/driving && chmod +x /usr/local/bin/driving'
+
 # 一键安装（macOS/Linux）
 sudo sh -c 'curl -fsSL https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving -o /usr/local/bin/driving && chmod +x /usr/local/bin/driving'
 
 # 或从源码安装（开发模式）
 pip3 install -e .
+
+# 升级
+driving update
 ```
 
 ---
