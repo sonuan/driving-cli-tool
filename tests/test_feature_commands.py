@@ -103,7 +103,6 @@ class TestParseFeatureYaml:
     def test_完整frontmatter解析所有字段(self, tmp_path):
         f = _make_feature_md(
             tmp_path, "game-home", "game-home",
-            title="游戏首页",
             description="游戏首页功能",
             status="in-progress",
             priority="high",
@@ -115,7 +114,6 @@ class TestParseFeatureYaml:
         result = parse_feature_yaml(f)
         assert result is not None
         assert result["name"] == "game-home"
-        assert result["title"] == "游戏首页"
         assert result["description"] == "游戏首页功能"
         assert result["status"] == "in-progress"
         assert result["priority"] == "high"
@@ -150,7 +148,6 @@ class TestParseFeatureYaml:
         result = parse_feature_yaml(f)
         assert result is not None
         assert result["name"] == "minimal-feature"
-        assert result["title"] == ""
         assert result["description"] == ""
         assert result["tags"] == []
         assert result["urls"] == []
@@ -215,12 +212,12 @@ class TestScanFeaturesFromDir:
         assert len(result) == 1
         assert result[0]["path"] == "ai-driving/my-local/features/game-home/"
 
-    def test_repo字段等于传入的repo_name(self, tmp_path):
+    def test_feature_file字段等于FEATURE_MD(self, tmp_path):
         features_dir = tmp_path / "features"
         _make_feature_md(features_dir, "feat-x", "feat-x")
 
         result = scan_features_from_dir("driving", features_dir)
-        assert result[0]["repo"] == "driving"
+        assert result[0]["feature_file"] == "FEATURE.md"
 
     def test_跳过无FEATURE_MD的子目录(self, tmp_path):
         features_dir = tmp_path / "features"
@@ -254,6 +251,57 @@ class TestScanFeaturesFromDir:
         result = scan_features_from_dir("repo", features_dir, quiet=True)
         assert len(result) == 1
 
+    def test_无FEATURE_MD时降级读取ios_feature_md(self, tmp_path):
+        """目录中无 FEATURE.md 时，降级读取 iOS/ios-feature.md"""
+        features_dir = tmp_path / "features"
+        feat_dir = features_dir / "ios-only-feat"
+        ios_dir = feat_dir / "iOS"
+        ios_dir.mkdir(parents=True, exist_ok=True)
+        (ios_dir / "ios-feature.md").write_text(
+            "---\nname: ios-only-feat\ntitle: iOS 专属功能\n---\n",
+            encoding="utf-8",
+        )
+
+        result = scan_features_from_dir("repo", features_dir, quiet=True)
+        assert len(result) == 1
+        assert result[0]["name"] == "ios-only-feat"
+
+    def test_FEATURE_MD优先于ios_feature_md(self, tmp_path):
+        """FEATURE.md 和 iOS/ios-feature.md 同时存在时，优先使用 FEATURE.md"""
+        features_dir = tmp_path / "features"
+        feat_dir = features_dir / "both-feat"
+        feat_dir.mkdir(parents=True, exist_ok=True)
+        # FEATURE.md
+        (feat_dir / "FEATURE.md").write_text(
+            "---\nname: from-feature-md\ntitle: 来自FEATURE.MD\n---\n",
+            encoding="utf-8",
+        )
+        # iOS/ios-feature.md
+        ios_dir = feat_dir / "iOS"
+        ios_dir.mkdir(parents=True, exist_ok=True)
+        (ios_dir / "ios-feature.md").write_text(
+            "---\nname: from-ios-feature-md\ntitle: 来自ios-feature.md\n---\n",
+            encoding="utf-8",
+        )
+
+        result = scan_features_from_dir("repo", features_dir, quiet=True)
+        assert len(result) == 1
+        assert result[0]["name"] == "from-feature-md"
+
+    def test_ios_feature_md缺少name时跳过(self, tmp_path):
+        """iOS/ios-feature.md 缺少 name 字段时跳过该目录"""
+        features_dir = tmp_path / "features"
+        feat_dir = features_dir / "bad-ios-feat"
+        ios_dir = feat_dir / "iOS"
+        ios_dir.mkdir(parents=True, exist_ok=True)
+        (ios_dir / "ios-feature.md").write_text(
+            "---\ntitle: 没有name\n---\n",
+            encoding="utf-8",
+        )
+
+        result = scan_features_from_dir("repo", features_dir, quiet=True)
+        assert len(result) == 0
+
 
 # ==================== filter_features ====================
 
@@ -262,18 +310,18 @@ class TestFilterFeatures:
     def _make_features(self):
         return [
             {
-                "name": "game-home", "title": "游戏首页", "description": "游戏列表功能",
+                "name": "game-home", "description": "游戏列表功能",
                 "status": "in-progress", "priority": "high", "module": "module_game",
                 "assignee": "zhangsan", "tags": ["game", "list-page"],
                 "urls": [{"url": "https://example.com/game", "title": "游戏需求文档"}],
-                "path": "ai-driving/my-local/features/game-home/", "repo": "my-local",
+                "path": "ai-driving/my-local/features/game-home/",
             },
             {
-                "name": "profile-home", "title": "个人主页", "description": "用户个人信息展示",
+                "name": "profile-home", "description": "用户个人信息展示",
                 "status": "completed", "priority": "medium", "module": "module_profile",
                 "assignee": "lisi", "tags": ["profile", "mvvm"],
                 "urls": [{"url": "https://example.com/profile", "title": "个人主页设计稿"}],
-                "path": "ai-driving/my-local/features/profile-home/", "repo": "my-local",
+                "path": "ai-driving/my-local/features/profile-home/",
             },
         ]
 
@@ -288,9 +336,9 @@ class TestFilterFeatures:
         assert len(result) == 1
         assert result[0]["name"] == "game-home"
 
-    def test_单关键词匹配title(self):
+    def test_单关键词匹配name中文(self):
         features = self._make_features()
-        result = filter_features(features, ["个人主页"])
+        result = filter_features(features, ["profile-home"])
         assert len(result) == 1
         assert result[0]["name"] == "profile-home"
 
@@ -335,16 +383,16 @@ class TestFilterFeatures:
 class TestFormatFeatureOutput:
     def _make_feature(self):
         return {
-            "name": "game-home", "title": "游戏首页", "description": "描述",
+            "name": "game-home", "description": "描述",
             "status": "in-progress", "priority": "high", "module": "module_game",
             "assignee": "zhangsan", "tags": ["game"], "urls": [],
-            "path": "ai-driving/my-local/features/game-home/", "repo": "my-local",
+            "path": "ai-driving/my-local/features/game-home/", "feature_file": "FEATURE.md",
         }
 
     def test_detail_False只输出精简字段(self):
         feature = self._make_feature()
         result = format_feature_output(feature, detail=False)
-        assert set(result.keys()) == SUMMARY_FIELDS
+        assert set(result.keys()) == set(SUMMARY_FIELDS)
 
     def test_detail_False_urls为字符串数组(self):
         feature = {**self._make_feature(), "urls": [
@@ -421,7 +469,7 @@ class TestFeatureListCommand:
         assert result.exit_code == 0
         data = json.loads(result.output)
         for item in data:
-            assert set(item.keys()) == SUMMARY_FIELDS
+            assert set(item.keys()) == set(SUMMARY_FIELDS)
 
     def test_list_detail输出完整字段(self, runner, project_with_features):
         with patch("driving_cli.commands.feature.find_project_root", return_value=project_with_features):
@@ -455,7 +503,7 @@ class TestFeatureListCommand:
         data = json.loads(result.output)
         assert len(data) == 2
         for item in data:
-            assert item["repo"] == "my-local"
+            assert item["path"].startswith("ai-driving/my-local/")
 
     def test_list_repo不存在时报错(self, runner, project_with_features):
         with patch("driving_cli.commands.feature.find_project_root", return_value=project_with_features):
@@ -747,13 +795,13 @@ class TestScanFeaturesDeep:
         assert names == {"feat-a", "feat-b"}
 
     def test_quarter字段正确提取(self, tmp_path):
-        """quarter 字段应等于第一层子目录名（如 2026-Q2）"""
+        """path 字段中应包含季度层级（如 2026-Q2）"""
         module_dir = tmp_path / "message"
         self._make_deep_feature(module_dir, "2026-Q2", "msg-feat", "msg-feat")
 
         result = scan_features_deep("message", module_dir, "ai-driving/aidoc", quiet=True)
         assert len(result) == 1
-        assert result[0]["quarter"] == "2026-Q2"
+        assert "2026-Q2" in result[0]["path"]
 
     def test_path格式含完整层级(self, tmp_path):
         """path 字段应包含 repo_path/module/quarter/feature_dir/"""
@@ -764,24 +812,25 @@ class TestScanFeaturesDeep:
         assert len(result) == 1
         assert result[0]["path"] == "ai-driving/aidoc/family/2026-Q2/family-bounty/"
 
-    def test_repo字段等于module_name(self, tmp_path):
-        """repo 字段应等于传入的 module_name"""
+    def test_feature_file字段等于module_name(self, tmp_path):
+        """feature_file 字段应为 FEATURE.md"""
         module_dir = tmp_path / "chatroom"
         self._make_deep_feature(module_dir, "2026-Q2", "chat-feat", "chat-feat")
 
         result = scan_features_deep("chatroom", module_dir, "ai-driving/aidoc", quiet=True)
-        assert result[0]["repo"] == "chatroom"
+        assert result[0]["feature_file"] == "FEATURE.md"
 
     def test_跨多个季度目录(self, tmp_path):
-        """跨多个季度目录时，所有 feature 都能扫描到"""
+        """跨多个季度目录时，所有 feature 都能扫描到，path 中含各自季度"""
         module_dir = tmp_path / "family"
         self._make_deep_feature(module_dir, "2026-Q1", "feat-q1", "feat-q1")
         self._make_deep_feature(module_dir, "2026-Q2", "feat-q2", "feat-q2")
 
         result = scan_features_deep("family", module_dir, "ai-driving/aidoc", quiet=True)
         assert len(result) == 2
-        quarters = {f["quarter"] for f in result}
-        assert quarters == {"2026-Q1", "2026-Q2"}
+        paths = {f["path"] for f in result}
+        assert any("2026-Q1" in p for p in paths)
+        assert any("2026-Q2" in p for p in paths)
 
     def test_跳过缺少name的FEATURE_MD(self, tmp_path):
         """FEATURE.md 缺少 name 字段时跳过"""
@@ -803,6 +852,64 @@ class TestScanFeaturesDeep:
 
         result = scan_features_deep("empty-module", module_dir, "ai-driving/aidoc", quiet=True)
         assert result == []
+
+    def test_deep模式无FEATURE_MD时降级读取ios_feature_md(self, tmp_path):
+        """deep 模式中目录无 FEATURE.md 时，降级读取 iOS/ios-feature.md"""
+        module_dir = tmp_path / "chatroom"
+        feat_dir = module_dir / "2026-Q2" / "ios-only-feat"
+        ios_dir = feat_dir / "iOS"
+        ios_dir.mkdir(parents=True, exist_ok=True)
+        (ios_dir / "ios-feature.md").write_text(
+            "---\nname: ios-only-feat\ntitle: iOS 专属功能\n---\n",
+            encoding="utf-8",
+        )
+
+        result = scan_features_deep("chatroom", module_dir, "ai-driving/aidoc", quiet=True)
+        assert len(result) == 1
+        assert result[0]["name"] == "ios-only-feat"
+        assert result[0]["feature_file"] == str(Path("iOS") / "ios-feature.md")
+        assert result[0]["path"] == "ai-driving/aidoc/chatroom/2026-Q2/ios-only-feat/"
+
+    def test_deep模式FEATURE_MD优先于ios_feature_md(self, tmp_path):
+        """deep 模式中 FEATURE.md 和 iOS/ios-feature.md 同时存在时，优先使用 FEATURE.md"""
+        module_dir = tmp_path / "chatroom"
+        feat_dir = module_dir / "2026-Q2" / "both-feat"
+        feat_dir.mkdir(parents=True, exist_ok=True)
+        (feat_dir / "FEATURE.md").write_text(
+            "---\nname: from-feature-md\ntitle: 来自FEATURE.MD\n---\n",
+            encoding="utf-8",
+        )
+        ios_dir = feat_dir / "iOS"
+        ios_dir.mkdir(parents=True, exist_ok=True)
+        (ios_dir / "ios-feature.md").write_text(
+            "---\nname: from-ios-feature-md\ntitle: 来自ios-feature.md\n---\n",
+            encoding="utf-8",
+        )
+
+        result = scan_features_deep("chatroom", module_dir, "ai-driving/aidoc", quiet=True)
+        assert len(result) == 1
+        assert result[0]["name"] == "from-feature-md"
+
+    def test_deep模式混合FEATURE_MD与ios_feature_md(self, tmp_path):
+        """deep 模式中混合存在 FEATURE.md 与 iOS/ios-feature.md 的 feature 目录时全部正确收录"""
+        module_dir = tmp_path / "chatroom"
+        # feat-a 有 FEATURE.md
+        feat_a = module_dir / "2026-Q2" / "feat-a"
+        feat_a.mkdir(parents=True, exist_ok=True)
+        (feat_a / "FEATURE.md").write_text(
+            "---\nname: feat-a\ntitle: 功能A\n---\n", encoding="utf-8"
+        )
+        # feat-b 只有 iOS/ios-feature.md
+        feat_b_ios = module_dir / "2026-Q2" / "feat-b" / "iOS"
+        feat_b_ios.mkdir(parents=True, exist_ok=True)
+        (feat_b_ios / "ios-feature.md").write_text(
+            "---\nname: feat-b\ntitle: 功能B\n---\n", encoding="utf-8"
+        )
+
+        result = scan_features_deep("chatroom", module_dir, "ai-driving/aidoc", quiet=True)
+        assert len(result) == 2
+        names = {f["name"] for f in result}
+        assert names == {"feat-a", "feat-b"}
 
     def test_feature_list_deep模式集成(self, runner, tmp_path):
         """feature list 对 tags=features 的仓库使用深度扫描，能正确输出 quarter 字段"""
@@ -829,10 +936,10 @@ class TestScanFeaturesDeep:
         names = {item["name"] for item in data}
         assert "family-feat" in names
         assert "msg-feat" in names
-        # quarter 字段应存在
+        # feature_file 字段应存在且为 FEATURE.md
         for item in data:
-            assert "quarter" in item
-            assert item["quarter"] == "2026-Q2"
+            assert "feature_file" in item
+            assert item["feature_file"] == "FEATURE.md"
 
     def test_feature_list_deep模式关键词过滤(self, runner, tmp_path):
         """深度扫描模式下，关键词过滤仍然正常工作"""
@@ -844,11 +951,11 @@ class TestScanFeaturesDeep:
             },
         ])
         family_dir = tmp_path / "ai-driving" / "aidoc" / "family"
-        _make_feature_md(family_dir / "2026-Q2", "bounty-task", "bounty-task", title="悬赏任务")
-        _make_feature_md(family_dir / "2026-Q2", "score-card", "score-card", title="积分卡片")
+        _make_feature_md(family_dir / "2026-Q2", "bounty-task", "bounty-task")
+        _make_feature_md(family_dir / "2026-Q2", "score-card", "score-card")
 
         with patch("driving_cli.commands.feature.find_project_root", return_value=tmp_path):
-            result = runner.invoke(cli, ["feature", "list", "--keywords", "悬赏"])
+            result = runner.invoke(cli, ["feature", "list", "--keywords", "bounty"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert len(data) == 1
@@ -873,8 +980,8 @@ def test_property1_feature输出字段完整性(tmp_path_factory, repo_name, fea
     """Property 1: feature 输出字段完整性
 
     对于任意包含有效 FEATURE.md 的 feature 目录，scan_features_from_dir 的输出中
-    每条记录都应包含 name、path、repo 字段，且 path 格式为
-    ai-driving/{repo}/features/{dir_name}/，repo 与传入的 repo_name 一致。
+    每条记录都应包含 name、path、feature_file 字段，且 path 格式为
+    ai-driving/{repo}/features/{dir_name}/，feature_file 为 FEATURE.md。
 
     **Validates: Requirements 1.2, 1.3**
     """
@@ -890,8 +997,8 @@ def test_property1_feature输出字段完整性(tmp_path_factory, repo_name, fea
     for item in result:
         assert "name" in item
         assert "path" in item
-        assert "repo" in item
-        assert item["repo"] == repo_name
+        assert "feature_file" in item
+        assert item["feature_file"] == "FEATURE.md"
         assert item["path"].startswith(f"ai-driving/{repo_name}/features/")
         assert item["path"].endswith("/")
 
@@ -907,8 +1014,8 @@ def test_property1_feature输出字段完整性(tmp_path_factory, repo_name, fea
 def test_property2_repo过滤隔离性(tmp_path_factory, repo_a, repo_b, names_a, names_b):
     """Property 2: --repo 过滤隔离性
 
-    对于任意多仓库配置，当指定 --repo X 时，输出结果中所有记录的 repo 字段都应等于 X，
-    不包含其他仓库的 features。
+    对于任意多仓库配置，各仓库扫描结果的 path 前缀应互不交叉，
+    仓库 A 的结果 path 都以 ai-driving/{repo_a}/ 开头。
 
     **Validates: Requirements 1.4**
     """
@@ -931,12 +1038,10 @@ def test_property2_repo过滤隔离性(tmp_path_factory, repo_a, repo_b, names_a
     # 扫描仓库 B
     result_b = scan_features_from_dir(repo_b, features_dir_b, quiet=True)
 
-    # 合并后按 repo 过滤
-    all_features = result_a + result_b
-    filtered = [f for f in all_features if f["repo"] == repo_a]
-
-    for item in filtered:
-        assert item["repo"] == repo_a
+    for item in result_a:
+        assert item["path"].startswith(f"ai-driving/{repo_a}/")
+    for item in result_b:
+        assert item["path"].startswith(f"ai-driving/{repo_b}/")
 
 
 # Feature: feature-and-rule-commands, Property 3: --keywords 匹配正确性
@@ -1017,7 +1122,7 @@ def test_property4_精简详情字段集合(name, title, description, status, pr
     }
 
     summary = format_feature_output(feature, detail=False)
-    assert set(summary.keys()) == SUMMARY_FIELDS
+    assert set(summary.keys()) == set(SUMMARY_FIELDS)
 
     detail_out = format_feature_output(feature, detail=True)
     for field in ALL_FIELDS:

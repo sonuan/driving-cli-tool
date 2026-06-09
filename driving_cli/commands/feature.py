@@ -13,14 +13,14 @@ import click
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.logger import log_error, log_info, log_warning
 
-# 精简摘要字段集合
-SUMMARY_FIELDS = {"name", "title", "description", "status", "urls", "path", "repo", "quarter"}
+# 精简摘要字段列表（有序）
+SUMMARY_FIELDS = ["name", "description", "status", "path", "feature_file", "urls"]
 
-# 完整字段集合（含计算字段）
-ALL_FIELDS = {
-    "name", "title", "description", "status", "priority",
-    "module", "assignee", "tags", "urls", "path", "repo", "quarter",
-}
+# 完整字段列表（有序）
+ALL_FIELDS = [
+    "name", "description", "status", "priority",
+    "module", "assignee", "tags", "path", "feature_file", "urls",
+]
 
 
 def parse_feature_yaml(feature_md_path: Path) -> Optional[Dict]:
@@ -43,7 +43,6 @@ def parse_feature_yaml(feature_md_path: Path) -> Optional[Dict]:
 
         return {
             "name": str(data.get("name", "")),
-            "title": str(data.get("title", "") or ""),
             "description": str(data.get("description", "") or ""),
             "status": str(data.get("status", "") or ""),
             "priority": str(data.get("priority", "") or ""),
@@ -57,10 +56,35 @@ def parse_feature_yaml(feature_md_path: Path) -> Optional[Dict]:
         return None
 
 
+def _resolve_feature_md(feature_dir: Path) -> Optional[Path]:
+    """在 feature 目录中按优先级查找可用的 feature 描述文件
+
+    优先级：
+    1. FEATURE.md（存在则直接返回）
+    2. iOS/ios-feature.md（FEATURE.md 不存在时降级查找）
+
+    Args:
+        feature_dir: feature 子目录路径
+
+    Returns:
+        Path: 找到的文件路径；None 表示两者均不存在
+    """
+    feature_md = feature_dir / "FEATURE.md"
+    if feature_md.exists():
+        return feature_md
+
+    ios_md = feature_dir / "iOS" / "ios-feature.md"
+    if ios_md.exists():
+        return ios_md
+
+    return None
+
+
 def scan_features_from_dir(repo_name: str, features_dir: Path, quiet: bool = False) -> List[Dict]:
     """扫描单个仓库的 features/ 目录，返回 feature 列表
 
-    遍历 features_dir 下的所有子目录，每个子目录查找 FEATURE.md 文件，
+    遍历 features_dir 下的所有子目录，每个子目录按优先级查找 feature 描述文件：
+    优先 FEATURE.md，不存在时降级查找 iOS/ios-feature.md。
     解析 YAML frontmatter，设置 path 和 repo 字段。
 
     Args:
@@ -77,20 +101,20 @@ def scan_features_from_dir(repo_name: str, features_dir: Path, quiet: bool = Fal
         if not subdir.is_dir():
             continue
 
-        feature_md = subdir / "FEATURE.md"
-        if not feature_md.exists():
+        feature_md = _resolve_feature_md(subdir)
+        if feature_md is None:
             if not quiet:
-                log_warning(f"跳过 {subdir.name}：未找到 FEATURE.md 文件")
+                log_warning(f"跳过 {subdir.name}：未找到 FEATURE.md 或 iOS/ios-feature.md 文件")
             continue
 
         feature_info = parse_feature_yaml(feature_md)
         if feature_info is None:
             if not quiet:
-                log_warning(f"跳过 {subdir.name}：FEATURE.md 缺少 name 字段或解析失败")
+                log_warning(f"跳过 {subdir.name}：{feature_md.name} 缺少 name 字段或解析失败")
             continue
 
         feature_info["path"] = f"ai-driving/{repo_name}/features/{subdir.name}/"
-        feature_info["repo"] = repo_name
+        feature_info["feature_file"] = "FEATURE.md" if feature_md.name == "FEATURE.md" else f"iOS/{feature_md.name}"
         features.append(feature_info)
 
         if not quiet:
@@ -102,7 +126,9 @@ def scan_features_from_dir(repo_name: str, features_dir: Path, quiet: bool = Fal
 def scan_features_deep(module_name: str, module_dir: Path, repo_path: str, quiet: bool = False) -> List[Dict]:
     """深度扫描模块目录，兼容多层目录结构（如 {年度-季度}/{日期}-{feature}/FEATURE.md）
 
-    使用 glob 递归查找所有 FEATURE.md，适用于 tags 包含 "features" 的仓库。
+    收集策略：
+    1. 递归查找所有 FEATURE.md，记录其所在目录
+    2. 递归查找所有 iOS/ios-feature.md，若其父目录（feature 目录）已有 FEATURE.md 则跳过（FEATURE.md 优先）
     path 字段记录相对于项目 ai-driving 根的完整路径。
 
     Args:
@@ -116,13 +142,24 @@ def scan_features_deep(module_name: str, module_dir: Path, repo_path: str, quiet
     """
     features = []
 
-    for feature_md in sorted(module_dir.glob("**/FEATURE.md")):
-        feature_dir = feature_md.parent
+    # 收集所有候选 (feature_dir, feature_md_path) 对
+    # key = feature_dir，确保同一目录只保留一个条目（FEATURE.md 优先）
+    candidates: Dict[Path, Path] = {}
 
+    for feature_md in sorted(module_dir.glob("**/FEATURE.md")):
+        candidates[feature_md.parent] = feature_md
+
+    for ios_md in sorted(module_dir.glob("**/iOS/ios-feature.md")):
+        # iOS/ios-feature.md 的 feature 目录是其祖父目录（.../feature-dir/iOS/ios-feature.md）
+        feature_dir = ios_md.parent.parent
+        if feature_dir not in candidates:
+            candidates[feature_dir] = ios_md
+
+    for feature_dir, feature_md in sorted(candidates.items()):
         feature_info = parse_feature_yaml(feature_md)
         if feature_info is None:
             if not quiet:
-                log_warning(f"跳过 {feature_dir.name}：FEATURE.md 缺少 name 字段或解析失败")
+                log_warning(f"跳过 {feature_dir.name}：{feature_md.name} 缺少 name 字段或解析失败")
             continue
 
         # 计算相对于 module_dir 的路径，提取中间层级（如 "2026-Q2"）
@@ -134,13 +171,12 @@ def scan_features_deep(module_name: str, module_dir: Path, repo_path: str, quiet
         # 构建完整路径：{repo_path}/{module_name}/{...中间层级...}/{feature_dir}/
         path_parts = [repo_path, module_name] + list(rel_parts)
         feature_info["path"] = "/".join(path_parts) + "/"
-        feature_info["repo"] = module_name
 
-        # 将中间层级（如季度 "2026-Q2"）存入 quarter 字段，方便过滤
-        if len(rel_parts) >= 2:
-            feature_info["quarter"] = rel_parts[0]
-        else:
-            feature_info["quarter"] = ""
+        # feature_file：相对于 feature 目录的文件路径
+        try:
+            feature_info["feature_file"] = str(feature_md.relative_to(feature_dir))
+        except ValueError:
+            feature_info["feature_file"] = feature_md.name
 
         features.append(feature_info)
 
@@ -179,7 +215,7 @@ def _feature_matches_any_keyword(feature: Dict, keywords: List[str]) -> bool:
     # 收集所有可搜索的字符串
     searchable_parts = []
 
-    for field in ("name", "title", "description", "status", "priority", "module", "assignee"):
+    for field in ("name", "description", "status", "priority", "module", "assignee"):
         val = feature.get(field)
         if val:
             searchable_parts.append(str(val))
@@ -218,9 +254,9 @@ def format_feature_output(feature: Dict, detail: bool) -> Dict:
     """
     if detail:
         # 输出所有已知字段（保留原始值，缺失字段用 None）
-        return {field: feature.get(field) for field in sorted(ALL_FIELDS)}
+        return {field: feature.get(field) for field in ALL_FIELDS}
     else:
-        result = {field: feature.get(field) for field in sorted(SUMMARY_FIELDS)}
+        result = {field: feature.get(field) for field in SUMMARY_FIELDS}
         # urls 精简为纯字符串数组，只保留 url 字段
         raw_urls = feature.get("urls") or []
         result["urls"] = [
