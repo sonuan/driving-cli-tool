@@ -72,7 +72,8 @@ docs/
 
 
 # 示例
-.kiro
+.kiro/agents
+.kiro/specs
 .gitmodules
 driving.config.json
 ai-driving/my-local
