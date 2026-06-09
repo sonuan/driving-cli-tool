@@ -76,7 +76,7 @@ class InteractiveRunner:
 
         1. forced_interactive 时展示阈值警告
         2. user_amend_count >= 2 时展示返工提示
-        3. 输出未通过的 condition 结果
+        3. 输出全部 condition 结果（通过 ✓，未通过 ✗）
         4. 渲染并展示 template 内容
         5. 展示 action 选择菜单
         6. 如需 note，提示输入
@@ -100,12 +100,14 @@ class InteractiveRunner:
             _echo(f"⚠️ 已返工 {user_amend_count} 次，请仔细检查后再做决定")
             _echo()
 
-        # 3. 输出未通过的 condition 结果
-        failed_results = [r for r in condition_results if not r.passed]
-        if failed_results:
-            for r in failed_results:
-                detail_suffix = f": {r.detail}" if r.detail else ""
-                _echo(f"✗ {r.label}{detail_suffix}")
+        # 3. 输出 condition 结果（通过显示 ✓，未通过显示 ✗）
+        if condition_results:
+            for r in condition_results:
+                if r.passed:
+                    _echo(f"✓ {r.label}")
+                else:
+                    detail_suffix = f": {r.detail}" if r.detail else ""
+                    _echo(f"✗ {r.label}{detail_suffix}")
             _echo()
 
         # 4. 渲染并展示 template 内容

@@ -171,7 +171,12 @@ class GateStateManager:
         """保存 gate-state.json（UTF-8, 2-space indent）
 
         自动创建 <path>/docs/ 目录。
+        --path 为空时跳过保存（不写入文件）。
         """
+        # --path 为空时不存储 state 文件
+        if not self._path:
+            return
+
         # 确保目录存在
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
 

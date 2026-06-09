@@ -385,6 +385,25 @@ class TestSave:
 
         assert manager.state_file.exists()
 
+    def test_path为空时不写入文件(self, tmp_path):
+        """--path 为空字符串时 save() 不写入任何文件"""
+        manager = GateStateManager("")
+        data = {"feature": "test", "updated": "", "gates": {}}
+        # 不应抛出异常，且不创建任何文件
+        manager.save(data)
+        # state_file 指向相对路径 docs/gate-state.json，不应存在
+        from pathlib import Path
+        assert not Path("docs/gate-state.json").exists()
+
+    def test_path为空时record_result不写入文件(self, tmp_path):
+        """--path 为空时 record_result 执行但不持久化到文件"""
+        manager = GateStateManager("")
+        # 不应抛出异常
+        manager.record_result("GATE-R5", "pass", "确认", "")
+        # 内存中不会持久化，state_file 不存在
+        from pathlib import Path
+        assert not Path("docs/gate-state.json").exists()
+
 
 class TestRoundTrip:
     """测试序列化 round-trip - Requirements 14.2, 14.3"""

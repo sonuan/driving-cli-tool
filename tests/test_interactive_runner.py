@@ -331,7 +331,30 @@ class TestForcedInteractive:
 
 
 class TestConditionResultsDisplay:
-    """Requirement 3.5 (related): 未通过 condition 结果展示"""
+    """condition 结果展示：通过显示 ✓，未通过显示 ✗"""
+
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
+    def test_passed_conditions_displayed_with_check_prefix(
+        self, mock_echo, mock_input, runner, sample_gate
+    ):
+        """通过的 condition 以 ✓ 前缀展示"""
+        mock_input.return_value = "1"
+        condition_results = [
+            ConditionResult(passed=True, label="路径合法"),
+            ConditionResult(passed=True, label="文件存在"),
+        ]
+
+        runner.run(
+            gate=sample_gate,
+            condition_results=condition_results,
+            user_amend_count=0,
+            forced_interactive=False,
+        )
+
+        echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
+        assert any("✓ 路径合法" in text for text in echo_texts)
+        assert any("✓ 文件存在" in text for text in echo_texts)
 
     @patch("driving_cli.gate.interactive_runner._prompt")
     @patch("driving_cli.gate.interactive_runner._echo")
@@ -354,32 +377,28 @@ class TestConditionResultsDisplay:
         )
 
         echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
+        assert any("✓ 路径合法" in text for text in echo_texts)
         assert any("✗ 文件存在: 文件不存在: /tmp/x" in text for text in echo_texts)
         assert any("✗ 目录非空: 目录为空" in text for text in echo_texts)
-        # 通过的 condition 不应展示
-        assert not any("路径合法" in text for text in echo_texts if "✗" in text or "✓" in text)
 
     @patch("driving_cli.gate.interactive_runner._prompt")
     @patch("driving_cli.gate.interactive_runner._echo")
-    def test_no_failed_conditions_no_output(
+    def test_empty_condition_results_no_output(
         self, mock_echo, mock_input, runner, sample_gate
     ):
-        """所有 condition 通过时不展示 condition 结果"""
+        """condition_results 为空列表时不输出任何条件行"""
         mock_input.return_value = "1"
-        condition_results = [
-            ConditionResult(passed=True, label="路径合法"),
-            ConditionResult(passed=True, label="文件存在"),
-        ]
 
         runner.run(
             gate=sample_gate,
-            condition_results=condition_results,
+            condition_results=[],
             user_amend_count=0,
             forced_interactive=False,
         )
 
         echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
         assert not any("✗" in text for text in echo_texts)
+        assert not any("✓" in text for text in echo_texts)
 
     @patch("driving_cli.gate.interactive_runner._prompt")
     @patch("driving_cli.gate.interactive_runner._echo")
@@ -401,6 +420,7 @@ class TestConditionResultsDisplay:
 
         echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
         assert any("✗ 路径合法" in text for text in echo_texts)
+        assert not any("✓ 路径合法" in text for text in echo_texts)
 
 
 class TestTemplateRendering:
