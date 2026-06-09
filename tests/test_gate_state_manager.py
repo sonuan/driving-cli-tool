@@ -540,3 +540,60 @@ class TestPlatform:
         state = manager.get_gate_state("GATE-R5")
         assert state.request_count == 0
         assert state.history == []
+
+    # ── owner 路径测试 ──────────────────────────────────────────────
+
+    def test_传owner无前缀时路径含owner_前缀目录(self, tmp_path):
+        manager = GateStateManager(str(tmp_path), "android", "main")
+        expected = tmp_path / "docs" / "android" / "owner-main" / "gate-state.json"
+        assert manager.state_file == expected
+
+    def test_传owner已含前缀时不重复拼接(self, tmp_path):
+        manager = GateStateManager(str(tmp_path), "android", "owner-main")
+        expected = tmp_path / "docs" / "android" / "owner-main" / "gate-state.json"
+        assert manager.state_file == expected
+
+    def test_owner大小写不影响前缀判断(self, tmp_path):
+        manager = GateStateManager(str(tmp_path), "android", "Owner-Apple")
+        expected = tmp_path / "docs" / "android" / "Owner-Apple" / "gate-state.json"
+        assert manager.state_file == expected
+
+    def test_owner非空但platform为空时路径不含owner层(self, tmp_path):
+        """无 platform 时 owner 不生效，保持旧路径兼容"""
+        manager = GateStateManager(str(tmp_path), "", "main")
+        expected = tmp_path / "docs" / "gate-state.json"
+        assert manager.state_file == expected
+
+    def test_owner目录自动创建(self, tmp_path):
+        manager = GateStateManager(str(tmp_path), "android", "main")
+        manager.record_result("GATE-R5", "pass", "确认", "")
+        assert (tmp_path / "docs" / "android" / "owner-main").exists()
+        assert (tmp_path / "docs" / "android" / "owner-main" / "gate-state.json").exists()
+
+    def test_不同owner数据相互独立(self, tmp_path):
+        manager_main = GateStateManager(str(tmp_path), "android", "main")
+        manager_apple = GateStateManager(str(tmp_path), "android", "apple")
+
+        manager_main.record_result("GATE-R5", "pass", "确认", "")
+        manager_apple.record_result("GATE-R5", "amend", "修改", "apple修改")
+
+        main_state = manager_main.get_gate_state("GATE-R5")
+        assert main_state.last_result == "pass"
+        assert main_state.user_amend_count == 0
+
+        apple_state = manager_apple.get_gate_state("GATE-R5")
+        assert apple_state.last_result == "amend"
+        assert apple_state.user_amend_count == 1
+
+    def test_owner与无owner数据相互独立(self, tmp_path):
+        manager_with = GateStateManager(str(tmp_path), "android", "main")
+        manager_without = GateStateManager(str(tmp_path), "android", "")
+
+        manager_with.record_result("GATE-R5", "pass", "确认", "")
+        manager_without.record_result("GATE-R5", "amend", "修改", "无owner记录")
+
+        with_state = manager_with.get_gate_state("GATE-R5")
+        assert with_state.last_result == "pass"
+
+        without_state = manager_without.get_gate_state("GATE-R5")
+        assert without_state.last_result == "amend"

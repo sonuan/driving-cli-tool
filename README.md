@@ -231,8 +231,10 @@ driving gate status --path <dir> --platform <platform> --owner <owner>          
 driving gate status <gate-id> --path <dir> --platform <platform>                  # 查看指定平台的指定 gate 状态
 driving gate history <gate-id> --path <dir> --platform <platform>                 # 查看指定 gate 历史记录
 driving gate history <gate-id> --path <dir> --platform <platform> --owner <owner> # 同时指定负责人
-driving gate pass <gate-id> --path <dir> --platform <platform>                    # 手动通过门禁
-driving gate pass <gate-id> --path <dir> --platform <platform> --note "说明"      # 带说明手动通过
+driving gate pass <gate-id> --path <dir> --platform <platform>                              # 手动通过门禁
+driving gate pass <gate-id> --path <dir> --platform <platform> --note "说明"                 # 带说明手动通过
+driving gate pass <gate-id> --path <dir> --platform <platform> --owner <owner>               # 指定负责人（state 写入 owner 子目录）
+driving gate pass <gate-id> --path <dir> --platform <platform> --owner <owner> --note "说明" # 指定负责人+说明
 ```
 
 `gate load` 输出格式：

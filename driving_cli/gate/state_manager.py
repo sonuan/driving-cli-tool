@@ -19,23 +19,47 @@ class GateStateManager:
     负责 gate-state.json 的读取、写入、状态更新。
     """
 
-    def __init__(self, path: str, platform: str = ""):
+    def __init__(self, path: str, platform: str = "", owner: str = ""):
         """
         Args:
             path: --path 参数值，feature 目录路径
             platform: 开发平台（android/iOS/harmony/kuikly）。
                       非空时 state 文件位于 <path>/docs/<platform>/gate-state.json；
                       为空时保持旧路径 <path>/docs/gate-state.json（向后兼容）。
+            owner: 负责人标识（如 main、apple 或 owner-main）。
+                   非空时 state 文件写入 owner 子目录下：
+                     <path>/docs/<platform>/owner-<owner>/gate-state.json；
+                   已含 "owner-" 前缀则直接使用，不重复拼接。
+                   为空时路径不含 owner 层（向后兼容）。
         """
         self._path = path
         self._platform = platform
+        self._owner = owner
+
+    def _resolve_owner_dir_name(self) -> str:
+        """将 owner 规范化为完整目录名（含 owner- 前缀）。"""
+        if not self._owner:
+            return ""
+        if self._owner.lower().startswith("owner-"):
+            return self._owner
+        return f"owner-{self._owner}"
 
     @property
     def state_file(self) -> Path:
-        """返回 gate-state.json 的完整路径"""
+        """返回 gate-state.json 的完整路径。
+
+        路径规则：
+          - 有 platform + owner → <path>/docs/<platform>/owner-<owner>/gate-state.json
+          - 有 platform，无 owner → <path>/docs/<platform>/gate-state.json
+          - 无 platform            → <path>/docs/gate-state.json（向后兼容）
+        """
+        base = Path(self._path) / "docs"
         if self._platform:
-            return Path(self._path) / "docs" / self._platform / "gate-state.json"
-        return Path(self._path) / "docs" / "gate-state.json"
+            base = base / self._platform
+            owner_dir = self._resolve_owner_dir_name()
+            if owner_dir:
+                base = base / owner_dir
+        return base / "gate-state.json"
 
     def load(self) -> dict:
         """加载 gate-state.json

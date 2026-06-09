@@ -398,7 +398,7 @@ def gate_request(gate_id: str, path: str, platform: str, owner: str, context: st
         sys.exit(1)
 
     # 4. 初始化组件
-    state_manager = GateStateManager(path, platform)
+    state_manager = GateStateManager(path, platform, owner)
     gate_state = state_manager.get_gate_state(gate_id)
 
     gate_state_dict = {
@@ -653,7 +653,7 @@ def gate_request(gate_id: str, path: str, platform: str, owner: str, context: st
 @click.option("--owner", default="", help="负责人标识，如 main、apple 或 owner-main；用于计算 $vars.owner_dir")
 def gate_status(gate_id: Optional[str], path: str, platform: str, owner: str):
     """查看门禁状态"""
-    state_manager = GateStateManager(path, platform)
+    state_manager = GateStateManager(path, platform, owner)
 
     # state 文件不存在时输出提示信息
     if not state_manager.state_file.exists():
@@ -680,7 +680,7 @@ def gate_status(gate_id: Optional[str], path: str, platform: str, owner: str):
 @click.option("--owner", default="", help="负责人标识，如 main、apple 或 owner-main；用于计算 $vars.owner_dir")
 def gate_history(gate_id: str, path: str, platform: str, owner: str):
     """查看门禁历史"""
-    state_manager = GateStateManager(path, platform)
+    state_manager = GateStateManager(path, platform, owner)
     gate_state = state_manager.get_gate_state(gate_id)
 
     if not gate_state.history:
@@ -695,8 +695,9 @@ def gate_history(gate_id: str, path: str, platform: str, owner: str):
 @click.argument("gate_id")
 @click.option("--path", required=True, help="feature 目录路径")
 @click.option("--platform", default="", help="开发平台（android/iOS/harmony/kuikly）")
+@click.option("--owner", default="", help="负责人标识，如 main、apple 或 owner-main；用于计算 $vars.owner_dir")
 @click.option("--note", default="", help="通过说明")
-def gate_pass(gate_id: str, path: str, platform: str, note: str):
+def gate_pass(gate_id: str, path: str, platform: str, owner: str, note: str):
     """手动通过门禁"""
     # 1. 加载所有 gate 定义
     all_gates, _system_prompt, user_prompt, self_refine_threshold = _collect_all_gates_data()
@@ -713,7 +714,7 @@ def gate_pass(gate_id: str, path: str, platform: str, note: str):
         sys.exit(1)
 
     # 3. 初始化状态管理器和前置依赖校验器
-    state_manager = GateStateManager(path, platform)
+    state_manager = GateStateManager(path, platform, owner)
     requires_checker = RequiresChecker(state_manager, all_gates)
 
     # 5. 前置依赖校验
@@ -763,7 +764,7 @@ def gate_pass(gate_id: str, path: str, platform: str, note: str):
         "pass_rate": gate_state.pass_rate,
         "last_result": gate_state.last_result,
     }
-    renderer = TemplateRenderer(path, {}, gate_state_dict, _build_gate_vars(path, platform))
+    renderer = TemplateRenderer(path, {}, gate_state_dict, _build_gate_vars(path, platform, owner))
     next_text = ""
     if action_key and action_key in actions:
         action_def = actions[action_key]
@@ -866,7 +867,7 @@ def gate_respond(gate_id: str, path: str, platform: str, owner: str, action: str
         sys.exit(1)
 
     # 4. 初始化状态管理器
-    state_manager = GateStateManager(path, platform)
+    state_manager = GateStateManager(path, platform, owner)
     gate_state = state_manager.get_gate_state(gate_id)
 
     gate_state_dict = {
