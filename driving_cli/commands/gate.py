@@ -176,25 +176,48 @@ def _get_user_prompt() -> str:
     return user_prompt
 
 
-def _build_gate_vars(path: str, platform: str) -> dict:
+def _resolve_owner(owner: str) -> str:
+    """将 --owner 参数规范化为完整的负责人目录名。
+
+    规则：
+      - 若已包含 "owner-" 前缀（大小写不敏感），直接返回原值（保持原始大小写）
+      - 否则拼接为 "owner-{owner}"
+
+    示例：
+      "main"       → "owner-main"
+      "apple"      → "owner-apple"
+      "owner-main" → "owner-main"
+      "owner-Apple"→ "owner-Apple"
+    """
+    if owner.lower().startswith("owner-"):
+        return owner
+    return f"owner-{owner}"
+
+
+def _build_gate_vars(path: str, platform: str, owner: str = "") -> dict:
     """预计算 gates.json 模板中可用的 CLI 内部常量（{{$vars.xxx}} 变量）。
 
     所有常量以 $vars. 为前缀，集中在此处维护，修改路径结构只需改这一个函数。
 
     当前常量：
       $vars.platform_dir  → {path}/docs/{platform}（无 platform 时为 {path}/docs）
-      $vars.review_dir    → $vars.platform_dir/review
-      $vars.state_file    → $vars.platform_dir/state.json
+      $vars.owner_dir     → 传入 owner 时为 {platform_dir}/owner-{owner}；
+                            未传 owner 时等于 {platform_dir}（向后兼容）
     """
     if platform:
         platform_dir = f"{path}/docs/{platform}"
     else:
         platform_dir = f"{path}/docs"
 
+    if owner:
+        owner_dir_name = _resolve_owner(owner)
+        owner_dir = f"{platform_dir}/{owner_dir_name}"
+    else:
+        owner_dir = platform_dir
+
     return {
         "$vars.platform_dir": platform_dir,
-        "$vars.review_dir": f"{platform_dir}/review",
-        "$vars.state_file": f"{platform_dir}/state.json",
+        "$vars.owner_dir": owner_dir,
     }
 
 
@@ -204,17 +227,12 @@ _GATE_VARS_SCHEMA = [
     {
         "name": "$vars.platform_dir",
         "description": "平台文档根目录：{path}/docs/{platform}，未传 --platform 时为 {path}/docs",
-        "example": "{{$vars.platform_dir}}/state.json",
+        "example": "{{$vars.platform_dir}}/owners-manifest.json",
     },
     {
-        "name": "$vars.review_dir",
-        "description": "审查结果目录：{path}/docs/{platform}/review，未传 --platform 时为 {path}/docs/review",
-        "example": "{{$vars.review_dir}}/review-result.json",
-    },
-    {
-        "name": "$vars.state_file",
-        "description": "工作流状态文件：{path}/docs/{platform}/state.json，未传 --platform 时为 {path}/docs/state.json",
-        "example": "{{$vars.state_file}}",
+        "name": "$vars.owner_dir",
+        "description": "负责人工作目录：传 --owner 时为 {platform_dir}/owner-{owner}（已含 owner- 前缀则直接使用）；未传 --owner 时等于 {platform_dir}，向后兼容",
+        "example": "{{$vars.owner_dir}}/state.json",
     },
 ]
 
@@ -353,9 +371,10 @@ def gate_load(gate_ids: tuple):
 @click.argument("gate_id")
 @click.option("--path", required=True, help="feature 目录路径")
 @click.option("--platform", default="", help="开发平台（android/iOS/harmony/kuikly），决定 gate-state.json 写入路径")
+@click.option("--owner", default="", help="负责人标识，如 main、apple 或 owner-main；用于计算 $vars.owner_dir")
 @click.option("--context", default=None, help="JSON 字符串，用于模板变量渲染")
 @click.option("--dry-run", is_flag=True, default=False, help="仅展示模板，不执行交互")
-def gate_request(gate_id: str, path: str, platform: str, context: str, dry_run: bool):
+def gate_request(gate_id: str, path: str, platform: str, owner: str, context: str, dry_run: bool):
     """执行门禁请求"""
     # 1. 解析 --context JSON
     context_dict = {}
@@ -391,7 +410,7 @@ def gate_request(gate_id: str, path: str, platform: str, context: str, dry_run: 
         "last_result": gate_state.last_result,
     }
 
-    renderer = TemplateRenderer(path, context_dict, gate_state_dict, _build_gate_vars(path, platform))
+    renderer = TemplateRenderer(path, context_dict, gate_state_dict, _build_gate_vars(path, platform, owner))
     checker = ConditionChecker(renderer)
     auto_pass_engine = AutoPassEngine(checker)
     requires_checker = RequiresChecker(state_manager, all_gates)
@@ -554,12 +573,13 @@ def gate_request(gate_id: str, path: str, platform: str, context: str, dry_run: 
         actions = gate.get("actions", {})
         action_names = list(actions.keys())
         platform_opt = f' --platform "{platform}"' if platform else ""
+        owner_opt = f' --owner "{owner}"' if owner else ""
         click.echo("")
         click.echo(
             f"💡 非交互环境，请使用以下命令提交选择："
         )
         click.echo(
-            f"  driving gate respond {gate_id} --path \"{path}\"{platform_opt} --action <操作名> --note \"说明\""
+            f"  driving gate respond {gate_id} --path \"{path}\"{platform_opt}{owner_opt} --action <操作名> --note \"说明\""
         )
         if action_names:
             click.echo(f"  可选操作: {', '.join(action_names)}")
@@ -630,7 +650,8 @@ def gate_request(gate_id: str, path: str, platform: str, context: str, dry_run: 
 @click.argument("gate_id", required=False, default=None)
 @click.option("--path", required=True, help="feature 目录路径")
 @click.option("--platform", default="", help="开发平台（android/iOS/harmony/kuikly）")
-def gate_status(gate_id: Optional[str], path: str, platform: str):
+@click.option("--owner", default="", help="负责人标识，如 main、apple 或 owner-main；用于计算 $vars.owner_dir")
+def gate_status(gate_id: Optional[str], path: str, platform: str, owner: str):
     """查看门禁状态"""
     state_manager = GateStateManager(path, platform)
 
@@ -656,7 +677,8 @@ def gate_status(gate_id: Optional[str], path: str, platform: str):
 @click.argument("gate_id")
 @click.option("--path", required=True, help="feature 目录路径")
 @click.option("--platform", default="", help="开发平台（android/iOS/harmony/kuikly）")
-def gate_history(gate_id: str, path: str, platform: str):
+@click.option("--owner", default="", help="负责人标识，如 main、apple 或 owner-main；用于计算 $vars.owner_dir")
+def gate_history(gate_id: str, path: str, platform: str, owner: str):
     """查看门禁历史"""
     state_manager = GateStateManager(path, platform)
     gate_state = state_manager.get_gate_state(gate_id)
@@ -796,10 +818,11 @@ def gate_pass(gate_id: str, path: str, platform: str, note: str):
 @click.argument("gate_id")
 @click.option("--path", required=True, help="feature 目录路径")
 @click.option("--platform", default="", help="开发平台（android/iOS/harmony/kuikly）")
+@click.option("--owner", default="", help="负责人标识，如 main、apple 或 owner-main；用于计算 $vars.owner_dir")
 @click.option("--action", required=True, help="操作名称（actions 中的 key）")
 @click.option("--note", default="", help="操作说明（修改类操作时必填）")
 @click.option("--context", default=None, help="JSON 字符串，用于模板变量渲染")
-def gate_respond(gate_id: str, path: str, platform: str, action: str, note: str, context: str):
+def gate_respond(gate_id: str, path: str, platform: str, owner: str, action: str, note: str, context: str):
     """非交互式提交门禁操作选择（配合 gate request 在非终端环境使用）"""
     # 1. 解析 --context JSON
     context_dict = {}
@@ -854,7 +877,7 @@ def gate_respond(gate_id: str, path: str, platform: str, action: str, note: str,
         "pass_rate": gate_state.pass_rate,
         "last_result": gate_state.last_result,
     }
-    renderer = TemplateRenderer(path, context_dict, gate_state_dict, _build_gate_vars(path, platform))
+    renderer = TemplateRenderer(path, context_dict, gate_state_dict, _build_gate_vars(path, platform, owner))
 
     # 5. 确定 result_type
     selected_action = actions[action_key]

@@ -872,8 +872,10 @@ class TestGateLoadVarsField:
         assert result.exit_code == 0
         names = [v["name"] for v in json.loads(result.output)["vars"]]
         assert "$vars.platform_dir" in names
-        assert "$vars.review_dir" in names
-        assert "$vars.state_file" in names
+        assert "$vars.owner_dir" in names
+        # review_dir 和 state_file 已移除
+        assert "$vars.review_dir" not in names
+        assert "$vars.state_file" not in names
 
     def test_load指定id时也包含vars字段(self, runner, project_with_gates):
         with patch("driving_cli.commands.gate.find_project_root", return_value=project_with_gates):
@@ -890,3 +892,297 @@ class TestGateLoadVarsField:
         data = json.loads(result.output)
         assert "vars" in data
         assert data["gates"] == []
+
+
+# ==================== _resolve_owner 单元测试 ====================
+
+
+class TestResolveOwner:
+    """_resolve_owner 工具函数单元测试"""
+
+    def test_纯名称自动拼接前缀(self):
+        from driving_cli.commands.gate import _resolve_owner
+        assert _resolve_owner("main") == "owner-main"
+
+    def test_带主题名称自动拼接前缀(self):
+        from driving_cli.commands.gate import _resolve_owner
+        assert _resolve_owner("apple") == "owner-apple"
+
+    def test_已有owner前缀直接返回(self):
+        from driving_cli.commands.gate import _resolve_owner
+        assert _resolve_owner("owner-main") == "owner-main"
+
+    def test_已有owner前缀带主题名直接返回(self):
+        from driving_cli.commands.gate import _resolve_owner
+        assert _resolve_owner("owner-apple") == "owner-apple"
+
+    def test_前缀判断大小写不敏感(self):
+        from driving_cli.commands.gate import _resolve_owner
+        # 传入 OWNER-main，大小写不敏感判断为已有前缀，直接返回原值
+        assert _resolve_owner("OWNER-main") == "OWNER-main"
+
+    def test_保持原始大小写(self):
+        from driving_cli.commands.gate import _resolve_owner
+        assert _resolve_owner("owner-Apple") == "owner-Apple"
+
+    def test_单字符名称(self):
+        from driving_cli.commands.gate import _resolve_owner
+        assert _resolve_owner("a") == "owner-a"
+
+
+# ==================== _build_gate_vars owner 参数测试 ====================
+
+
+class TestBuildGateVarsOwner:
+    """_build_gate_vars 新增 owner 参数的测试"""
+
+    def test_不传owner时owner_dir等于platform_dir(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        result = _build_gate_vars("/workspace/feature", "android")
+        assert result["$vars.owner_dir"] == result["$vars.platform_dir"]
+        assert result["$vars.owner_dir"] == "/workspace/feature/docs/android"
+
+    def test_owner为空字符串时owner_dir等于platform_dir(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        result = _build_gate_vars("/workspace/feature", "android", "")
+        assert result["$vars.owner_dir"] == result["$vars.platform_dir"]
+
+    def test_传owner_main时生成正确路径(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        result = _build_gate_vars("/workspace/feature", "android", "main")
+        assert result["$vars.owner_dir"] == "/workspace/feature/docs/android/owner-main"
+
+    def test_传已有前缀时直接使用(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        result = _build_gate_vars("/workspace/feature", "android", "owner-main")
+        assert result["$vars.owner_dir"] == "/workspace/feature/docs/android/owner-main"
+
+    def test_传主题名时自动拼接前缀(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        result = _build_gate_vars("/workspace/feature", "android", "apple")
+        assert result["$vars.owner_dir"] == "/workspace/feature/docs/android/owner-apple"
+
+    def test_无platform时owner_dir基于docs目录(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        result = _build_gate_vars("/workspace/feature", "", "main")
+        assert result["$vars.owner_dir"] == "/workspace/feature/docs/owner-main"
+
+    def test_传owner时其他vars字段仍正常(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        result = _build_gate_vars("/workspace/feature", "android", "main")
+        assert result["$vars.platform_dir"] == "/workspace/feature/docs/android"
+        assert result["$vars.owner_dir"] == "/workspace/feature/docs/android/owner-main"
+
+    def test_iOS平台时路径正确(self):
+        from driving_cli.commands.gate import _build_gate_vars
+        result = _build_gate_vars("/workspace/feature", "iOS", "main")
+        assert result["$vars.owner_dir"] == "/workspace/feature/docs/iOS/owner-main"
+
+
+# ==================== gate load vars 包含 owner_dir 条目测试 ====================
+
+
+class TestGateLoadVarsOwnerDir:
+    """gate load 输出的 vars schema 包含 $vars.owner_dir 说明"""
+
+    def test_vars包含owner_dir条目(self, runner, project_with_gates):
+        with patch("driving_cli.commands.gate.find_project_root", return_value=project_with_gates):
+            result = runner.invoke(cli, ["gate", "load"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        names = [v["name"] for v in data["vars"]]
+        assert "$vars.owner_dir" in names
+
+    def test_vars现在包含两个内置常量(self, runner, project_with_gates):
+        with patch("driving_cli.commands.gate.find_project_root", return_value=project_with_gates):
+            result = runner.invoke(cli, ["gate", "load"])
+        assert result.exit_code == 0
+        names = [v["name"] for v in json.loads(result.output)["vars"]]
+        assert "$vars.platform_dir" in names
+        assert "$vars.owner_dir" in names
+
+
+# ==================== gate request --owner 参数测试 ====================
+
+
+class TestGateRequestOwnerOption:
+    """gate request --owner 参数测试"""
+
+    def test_不传owner时命令正常执行(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "request", "GATE-R5",
+                "--path", str(feature_dir),
+                "--platform", "android",
+            ])
+        assert result.exit_code == 0
+
+    def test_传owner_main时命令正常执行(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "request", "GATE-R5",
+                "--path", str(feature_dir),
+                "--platform", "android",
+                "--owner", "main",
+            ])
+        assert result.exit_code == 0
+
+    def test_传owner已有前缀时命令正常执行(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "request", "GATE-R5",
+                "--path", str(feature_dir),
+                "--platform", "android",
+                "--owner", "owner-main",
+            ])
+        assert result.exit_code == 0
+
+    def test_nontty时提示包含owner参数(self, runner, tmp_path):
+        """非 TTY 环境下提示中应带 --owner"""
+        _make_config(tmp_path, [
+            {"name": "driving", "type": "local", "path": "ai-driving/driving", "local_path": None},
+        ])
+        repo_dir = tmp_path / "ai-driving" / "driving"
+        _make_manifest(repo_dir)
+        # 使用 human_only 门禁强制进入交互路径，在非 TTY 触发 NonTTYInterrupt
+        gate = {
+            "id": "GATE-H1",
+            "name": "Human Gate",
+            "level": "blocking",
+            "requires": [],
+            "location": "test",
+            "trigger": "触发",
+            "template": ["请确认"],
+            "actions": {"确认": {"next": "继续", "requires_note": False}},
+            "auto_pass": {"mode": "human_only"},
+        }
+        _make_gates_json(repo_dir, [gate])
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        with patch("driving_cli.commands.gate.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, [
+                "gate", "request", "GATE-H1",
+                "--path", str(feature_dir),
+                "--platform", "android",
+                "--owner", "apple",
+            ])
+        assert result.exit_code == 0
+        assert "--owner" in result.output
+        assert "apple" in result.output
+
+
+# ==================== gate respond --owner 参数测试 ====================
+
+
+class TestGateRespondOwnerOption:
+    """gate respond --owner 参数测试"""
+
+    def test_传owner时命令正常执行(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "respond", "GATE-R5",
+                "--path", str(feature_dir),
+                "--platform", "android",
+                "--owner", "main",
+                "--action", "确认",
+            ])
+        assert result.exit_code == 0
+        data = json.loads(result.output.split("门禁结果：\n")[1])
+        assert data["result"] in ("pass", "auto_pass", "amend")
+
+    def test_不传owner时命令仍正常执行(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "respond", "GATE-R5",
+                "--path", str(feature_dir),
+                "--action", "确认",
+            ])
+        assert result.exit_code == 0
+
+
+# ==================== gate status --owner 参数测试 ====================
+
+
+class TestGateStatusOwnerOption:
+    """gate status --owner 参数测试（参数接收 + 不影响正常逻辑）"""
+
+    def test_传owner时status命令正常执行(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        # 先写入状态
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            runner.invoke(cli, [
+                "gate", "request", "GATE-R5",
+                "--path", str(feature_dir),
+                "--platform", "android",
+            ])
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "status",
+                "--path", str(feature_dir),
+                "--platform", "android",
+                "--owner", "main",
+            ])
+        assert result.exit_code == 0
+
+    def test_不传owner时status命令正常执行(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "status",
+                "--path", str(feature_dir),
+            ])
+        assert result.exit_code == 0
+        assert "尚未记录" in result.output
+
+
+# ==================== gate history --owner 参数测试 ====================
+
+
+class TestGateHistoryOwnerOption:
+    """gate history --owner 参数测试（参数接收 + 不影响正常逻辑）"""
+
+    def test_传owner时history命令正常执行(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "history", "GATE-R5",
+                "--path", str(feature_dir),
+                "--platform", "android",
+                "--owner", "apple",
+            ])
+        assert result.exit_code == 0
+        assert "暂无历史记录" in result.output
+
+    def test_不传owner时history命令正常执行(self, runner, project_with_auto_pass_gate, tmp_path):
+        feature_dir = tmp_path / "my-feature"
+        feature_dir.mkdir()
+        with patch("driving_cli.commands.gate.find_project_root",
+                   return_value=project_with_auto_pass_gate):
+            result = runner.invoke(cli, [
+                "gate", "history", "GATE-R5",
+                "--path", str(feature_dir),
+            ])
+        assert result.exit_code == 0
+        assert "暂无历史记录" in result.output

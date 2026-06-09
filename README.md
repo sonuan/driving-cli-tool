@@ -219,14 +219,18 @@ driving gate load <gate-id>                # 加载指定 gate（大小写不敏
 driving gate load <gate-id> <gate-id> ...  # 加载多个指定 gate
 driving gate request <gate-id> --path <dir>                                       # 执行门禁请求（auto_pass → 交互选择）
 driving gate request <gate-id> --path <dir> --platform <platform>                 # 指定平台，gate-state.json 写入 {dir}/docs/{platform}/
+driving gate request <gate-id> --path <dir> --platform <platform> --owner <owner> # 指定负责人（main/owner-main/apple），激活 $vars.owner_dir
 driving gate request <gate-id> --path <dir> --context '{}'                        # 附带 JSON 上下文变量
 driving gate request <gate-id> --path <dir> --dry-run                             # 仅预览模板，不执行交互
 driving gate respond <gate-id> --path <dir> --action <操作名>                      # 非交互式提交门禁选择（配合非终端环境使用）
 driving gate respond <gate-id> --path <dir> --action <操作名> --note ""            # 修改类操作附带说明
+driving gate respond <gate-id> --path <dir> --platform <platform> --owner <owner> --action <操作名>  # 指定平台和负责人
 driving gate status --path <dir>                                                   # 查看所有 gate 状态
 driving gate status --path <dir> --platform <platform>                            # 查看指定平台的 gate 状态
+driving gate status --path <dir> --platform <platform> --owner <owner>            # 同时指定负责人
 driving gate status <gate-id> --path <dir> --platform <platform>                  # 查看指定平台的指定 gate 状态
 driving gate history <gate-id> --path <dir> --platform <platform>                 # 查看指定 gate 历史记录
+driving gate history <gate-id> --path <dir> --platform <platform> --owner <owner> # 同时指定负责人
 driving gate pass <gate-id> --path <dir> --platform <platform>                    # 手动通过门禁
 driving gate pass <gate-id> --path <dir> --platform <platform> --note "说明"      # 带说明手动通过
 ```
@@ -284,8 +288,7 @@ driving gate pass <gate-id> --path <dir> --platform <platform> --note "说明"  
 | `{{context.xxx}}` | `--context` JSON | 用户传入的上下文字段 |
 | `{{state.xxx}}` | gate-state.json | 当前 gate 的历史状态 |
 | `{{$vars.platform_dir}}` | CLI 内部计算 | `{path}/docs/{platform}`（无 platform 时为 `{path}/docs`） |
-| `{{$vars.review_dir}}` | CLI 内部计算 | `{path}/docs/{platform}/review` |
-| `{{$vars.state_file}}` | CLI 内部计算 | `{path}/docs/{platform}/state.json` |
+| `{{$vars.owner_dir}}` | CLI 内部计算 | 传 `--owner` 时为 `{platform_dir}/owner-{owner}`（已含 `owner-` 前缀则直接使用）；未传时等于 `{platform_dir}` |
 
 `{{$vars.xxx}}` 变量由 CLI 在执行 `gate request` 时自动注入，**路径结构变更只需修改 CLI，无需改动 gates.json**。完整变量列表可通过 `driving gate load` 输出的 `vars` 字段查看。
 
