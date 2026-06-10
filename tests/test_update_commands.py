@@ -15,7 +15,7 @@ import stat
 import subprocess
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -45,12 +45,14 @@ def version_info():
     }
 
 
-@pytest.fixture
-def fake_binary(tmp_path):
-    """创建一个足够大的假二进制文件（>1KB）"""
-    binary = tmp_path / "driving.tmp"
-    binary.write_bytes(b"x" * 2048)
-    return binary
+def _make_urlopen_mock():
+    """构造一个模拟下载响应的 urlopen mock"""
+    mock_resp = MagicMock()
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    mock_resp.headers = {"Content-Length": "2048"}
+    mock_resp.read.side_effect = [b"x" * 2048, b""]
+    return mock_resp
 
 
 # ==================== compare_versions 测试 ====================
@@ -75,109 +77,84 @@ class TestCompareVersions:
 # ==================== 安装权限逻辑测试 ====================
 
 class TestInstallPermission:
-    """测试有/无写权限时的 fallback 行为"""
+    """测试有/无写权限时的 fallback 行为。
+    使用真实 tmp_path，让代码自然走 ~/.driving-cli 路径逻辑。
+    """
 
-    def _invoke_update(self, runner, version_info, tmp_path, monkeypatch,
+    def _invoke_update(self, runner, version_info, tmp_path,
                        permission_error=False, sudo_returncode=0):
         """
-        通用辅助：mock 下载 + 安装，触发 update 命令。
-
-        Args:
-            permission_error: _do_install 是否抛 PermissionError
-            sudo_returncode:  sudo 子进程的返回码
+        通用辅助：在 tmp_path 下模拟 ~/.driving-cli/driving 已存在，
+        mock 下载 + os.replace，触发 update 命令。
         """
-        fake_exe = str(tmp_path / "driving")
-        Path(fake_exe).write_bytes(b"old")
+        # 模拟已通过新方式安装
+        user_dir = tmp_path / ".driving-cli"
+        user_dir.mkdir(parents=True)
+        (user_dir / "driving").write_bytes(b"old")
 
-        # mock fetch_version_info
+        # 临时文件也放在同目录（与生产代码逻辑一致）
+        tmp_bin = str(user_dir / "driving.tmp")
+
+        which_result = MagicMock(returncode=0, stdout=str(user_dir / "driving") + "\n")
+        sudo_result = MagicMock(returncode=sudo_returncode)
+
+        def subprocess_side_effect(args, **kwargs):
+            if args[0] == "which":
+                return which_result
+            return sudo_result
+
         with patch("driving_cli.commands.update.fetch_version_info", return_value=version_info), \
              patch("driving_cli.commands.update.get_current_version", return_value="1.0.0"), \
              patch("driving_cli.commands.update._get_update_version_url", return_value="http://x"), \
-             patch("subprocess.run") as mock_subprocess, \
-             patch("urllib.request.urlopen") as mock_urlopen, \
-             patch("tempfile.mkstemp") as mock_mkstemp, \
-             patch("os.fdopen"), \
-             patch("os.fsync"), \
+             patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("subprocess.run", side_effect=subprocess_side_effect) as mock_sub, \
+             patch("urllib.request.urlopen", return_value=_make_urlopen_mock()), \
+             patch("tempfile.mkstemp", return_value=(3, tmp_bin)), \
+             patch("os.fdopen"), patch("os.fsync"), \
              patch("os.path.getsize", return_value=2048), \
-             patch("shutil.move") as mock_move, \
-             patch("os.unlink") as mock_unlink, \
-             patch("os.chmod") as mock_chmod:
+             patch("os.makedirs"), \
+             patch("os.replace") as mock_replace, \
+             patch("os.chmod"):
 
-            # which driving → 返回 fake_exe
-            which_result = MagicMock()
-            which_result.returncode = 0
-            which_result.stdout = fake_exe + "\n"
-
-            sudo_result = MagicMock()
-            sudo_result.returncode = sudo_returncode
-
-            def subprocess_side_effect(args, **kwargs):
-                if args[0] == "which":
-                    return which_result
-                return sudo_result
-
-            mock_subprocess.side_effect = subprocess_side_effect
-
-            # mock 下载响应
-            mock_response = MagicMock()
-            mock_response.__enter__ = lambda s: s
-            mock_response.__exit__ = MagicMock(return_value=False)
-            mock_response.headers = {"Content-Length": "2048"}
-            mock_response.read.side_effect = [b"x" * 2048, b""]
-            mock_urlopen.return_value = mock_response
-
-            # mock tempfile.mkstemp → 返回假路径
-            tmp_bin = str(tmp_path / "driving.tmp")
-            mock_mkstemp.return_value = (3, tmp_bin)
-
-            # 按需让 shutil.move 抛 PermissionError（模拟第一次无权限）
             if permission_error:
-                # os.unlink 在 _do_install 中先被调用，不报错；
-                # shutil.move 抛 PermissionError
-                mock_unlink.return_value = None
-                mock_move.side_effect = PermissionError("Permission denied")
-            else:
-                mock_unlink.return_value = None
-                mock_move.return_value = None
+                mock_replace.side_effect = PermissionError("Permission denied")
 
             result = runner.invoke(update, ["--yes"])
-            return result, mock_subprocess, mock_move, mock_unlink
+            return result, mock_sub, mock_replace
 
     def test_install_without_permission_error(self, runner, version_info, tmp_path):
         """有写权限时直接安装，不调用 sudo"""
-        result, mock_subprocess, mock_move, _ = self._invoke_update(
-            runner, version_info, tmp_path, None, permission_error=False
+        result, mock_sub, mock_replace = self._invoke_update(
+            runner, version_info, tmp_path, permission_error=False
         )
         assert result.exit_code == 0
         assert "更新成功" in result.output
 
-        # sudo sh -c ... 不应被调用
-        sudo_calls = [c for c in mock_subprocess.call_args_list
+        sudo_calls = [c for c in mock_sub.call_args_list
                       if c.args and c.args[0] and c.args[0][0] == "sudo"]
         assert len(sudo_calls) == 0
 
     def test_install_fallback_to_sudo_on_permission_error(self, runner, version_info, tmp_path):
         """无写权限时自动 fallback 到 sudo，且 sudo 成功"""
-        result, mock_subprocess, mock_move, _ = self._invoke_update(
-            runner, version_info, tmp_path, None,
+        result, mock_sub, _ = self._invoke_update(
+            runner, version_info, tmp_path,
             permission_error=True, sudo_returncode=0
         )
         assert result.exit_code == 0
         assert "更新成功" in result.output
 
-        # 确认调用了 sudo sh -c
-        sudo_calls = [c for c in mock_subprocess.call_args_list
+        sudo_calls = [c for c in mock_sub.call_args_list
                       if c.args and c.args[0] and c.args[0][0] == "sudo"]
         assert len(sudo_calls) == 1
         assert "sh" in sudo_calls[0].args[0]
 
     def test_install_sudo_fails(self, runner, version_info, tmp_path):
         """sudo 执行失败时报错"""
-        result, _, _, _ = self._invoke_update(
-            runner, version_info, tmp_path, None,
+        result, _, _ = self._invoke_update(
+            runner, version_info, tmp_path,
             permission_error=True, sudo_returncode=1
         )
-        assert result.exit_code == 0  # click 命令本身不崩溃
+        assert result.exit_code == 0
         assert "安装失败" in result.output
 
 
@@ -193,7 +170,6 @@ class TestCheckMode:
 
         assert result.exit_code == 0
         assert "9.9.9" in result.output
-        # 不应触发下载
         assert "下载" not in result.output
 
     def test_check_already_latest(self, runner, version_info):
@@ -228,50 +204,37 @@ class TestAlreadyLatest:
 class TestInstallPathSelection:
     """测试 ~/.driving-cli/driving 优先逻辑及旧方案兼容回退"""
 
-    def _common_mocks(self, version_info, tmp_path):
-        """返回下载相关的公共 mock context managers 列表（不含路径相关 mock）"""
+    def _base_patches(self, version_info, tmp_path, tmp_bin):
+        """公共 patch 列表（不含路径和 subprocess 相关）"""
         return [
             patch("driving_cli.commands.update.fetch_version_info", return_value=version_info),
             patch("driving_cli.commands.update.get_current_version", return_value="1.0.0"),
             patch("driving_cli.commands.update._get_update_version_url", return_value="http://x"),
-            patch("urllib.request.urlopen", **self._make_urlopen_attrs()),
-            patch("tempfile.mkstemp", return_value=(3, str(tmp_path / "driving.tmp"))),
+            patch("urllib.request.urlopen", return_value=_make_urlopen_mock()),
+            patch("tempfile.mkstemp", return_value=(3, tmp_bin)),
             patch("os.fdopen"),
             patch("os.fsync"),
             patch("os.path.getsize", return_value=2048),
-            patch("os.unlink"),
             patch("os.makedirs"),
-            patch("shutil.move"),
+            patch("os.replace"),
             patch("os.chmod"),
         ]
 
-    def _make_urlopen_attrs(self):
-        mock_resp = MagicMock()
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_resp.headers = {"Content-Length": "2048"}
-        mock_resp.read.side_effect = [b"x" * 2048, b""]
-        return {"return_value": mock_resp}
-
     def test_prefers_user_install_dir_when_exists(self, runner, version_info, tmp_path):
         """~/.driving-cli/driving 存在时，直接用该路径更新，不调用 which"""
-        user_driving = tmp_path / ".driving-cli" / "driving"
-        user_driving.parent.mkdir(parents=True)
-        user_driving.write_bytes(b"old binary")
+        user_dir = tmp_path / ".driving-cli"
+        user_dir.mkdir(parents=True)
+        (user_dir / "driving").write_bytes(b"old binary")
+        tmp_bin = str(user_dir / "driving.tmp")
 
-        with patch("driving_cli.commands.update.fetch_version_info", return_value=version_info), \
-             patch("driving_cli.commands.update.get_current_version", return_value="1.0.0"), \
-             patch("driving_cli.commands.update._get_update_version_url", return_value="http://x"), \
-             patch("pathlib.Path.home", return_value=tmp_path), \
-             patch("urllib.request.urlopen", **self._make_urlopen_attrs()), \
-             patch("tempfile.mkstemp", return_value=(3, str(tmp_path / "driving.tmp"))), \
-             patch("os.fdopen"), patch("os.fsync"), \
-             patch("os.path.getsize", return_value=2048), \
-             patch("os.unlink"), patch("os.makedirs"), \
-             patch("shutil.move"), patch("os.chmod"), \
+        patches = self._base_patches(version_info, tmp_path, tmp_bin) + [
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ]
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+             patches[5], patches[6], patches[7], patches[8], patches[9], \
+             patches[10], patches[11], \
              patch("subprocess.run") as mock_sub:
 
-            # which 不应被调用
             result = runner.invoke(update, ["--yes"])
 
         assert result.exit_code == 0
@@ -285,24 +248,18 @@ class TestInstallPathSelection:
         """~/.driving-cli/driving 不存在时，回退到 which driving"""
         fake_exe = str(tmp_path / "driving")
         Path(fake_exe).write_bytes(b"old")
+        tmp_bin = str(tmp_path / "driving.tmp")
 
-        which_result = MagicMock()
-        which_result.returncode = 0
-        which_result.stdout = fake_exe + "\n"
+        which_result = MagicMock(returncode=0, stdout=fake_exe + "\n")
 
-        with patch("driving_cli.commands.update.fetch_version_info", return_value=version_info), \
-             patch("driving_cli.commands.update.get_current_version", return_value="1.0.0"), \
-             patch("driving_cli.commands.update._get_update_version_url", return_value="http://x"), \
-             patch("pathlib.Path.home", return_value=tmp_path), \
-             patch("urllib.request.urlopen", **self._make_urlopen_attrs()), \
-             patch("tempfile.mkstemp", return_value=(3, str(tmp_path / "driving.tmp"))), \
-             patch("os.fdopen"), patch("os.fsync"), \
-             patch("os.path.getsize", return_value=2048), \
-             patch("os.unlink"), patch("os.makedirs"), \
-             patch("shutil.move"), patch("os.chmod"), \
+        patches = self._base_patches(version_info, tmp_path, tmp_bin) + [
+            patch("pathlib.Path.home", return_value=tmp_path),
+        ]
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+             patches[5], patches[6], patches[7], patches[8], patches[9], \
+             patches[10], patches[11], \
              patch("subprocess.run", return_value=which_result) as mock_sub:
 
-            # ~/.driving-cli 目录不存在（tmp_path 下没有 .driving-cli/driving）
             result = runner.invoke(update, ["--yes"])
 
         assert result.exit_code == 0

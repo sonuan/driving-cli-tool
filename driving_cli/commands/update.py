@@ -124,7 +124,6 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
         driving update --url http://your-server.com/path/version.json
     """
     import os
-    import shutil
     import stat
     import sys
     import tempfile
@@ -211,8 +210,18 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
     try:
         log_info(f"\n正在下载: {download_url}")
 
-        # 下载到系统临时目录
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".tmp", dir=tempfile.gettempdir())
+        # 确定安装目标路径（提前计算，供下载临时目录使用）
+        user_install_dir_early = Path.home() / ".driving-cli"
+        user_install_path_early = user_install_dir_early / "driving"
+
+        # 临时文件与目标放在同一目录，确保 os.rename 是原子操作（避免跨设备 copy）
+        if user_install_path_early.exists():
+            tmp_dir = str(user_install_dir_early)
+            os.makedirs(tmp_dir, exist_ok=True)
+        else:
+            tmp_dir = tempfile.gettempdir()
+
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".tmp", dir=tmp_dir)
 
         try:
             with urllib.request.urlopen(download_url, timeout=30) as response:
@@ -299,11 +308,10 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
 
         # 替换可执行文件
         def _do_install(src: str, dest: str) -> None:
-            """将 src 移动到 dest 并设置执行权限（755）。目标目录不存在时自动创建。"""
+            """将 src 原子替换到 dest 并设置执行权限（755）。目标目录不存在时自动创建。"""
             os.makedirs(os.path.dirname(dest), exist_ok=True)
-            if os.path.exists(dest):
-                os.unlink(dest)
-            shutil.move(src, dest)
+            # os.replace 是原子操作，同设备下等价于 rename，不会有跨设备 copy 权限问题
+            os.replace(src, dest)
             os.chmod(
                 dest,
                 stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH,

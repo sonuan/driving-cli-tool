@@ -51,8 +51,11 @@ else
     exit 1
 fi
 
-# 3. 设置执行权限
+# 3. 设置执行权限，并将所有权归还真实用户（sudo bash 下文件默认属于 root）
 chmod +x "$BINARY_PATH"
+if [ -n "$SUDO_USER" ]; then
+    chown -R "$SUDO_USER" "$INSTALL_DIR"
+fi
 
 # 4. 创建 /usr/local/bin 符号链接（需要权限）
 mkdir -p /usr/local/bin
