@@ -464,6 +464,7 @@ def gate_request(gate_id: str, path: str, platform: str, owner: str, context: st
             note=requires_result.message,
             feature_path=path,
             platform=platform,
+            owner=owner,
             context=context_dict or None,
         )
         return
@@ -555,6 +556,7 @@ def gate_request(gate_id: str, path: str, platform: str, owner: str, context: st
             action=action_key,
             feature_path=path,
             platform=platform,
+            owner=owner,
             context=context_dict or None,
             gate_state=updated_state,
         )
@@ -641,6 +643,7 @@ def gate_request(gate_id: str, path: str, platform: str, owner: str, context: st
         note=note,
         feature_path=path,
         platform=platform,
+        owner=owner,
         context=context_dict or None,
         gate_state=updated_state,
     )
@@ -813,6 +816,7 @@ def gate_respond(gate_id: str, path: str, platform: str, owner: str, action: str
         note=note,
         feature_path=path,
         platform=platform,
+        owner=owner,
         context=context_dict or None,
         gate_state=updated_state,
     )

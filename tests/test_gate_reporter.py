@@ -66,6 +66,28 @@ class TestBuildReportPayload:
         assert payload["platform"] == "iOS"
         assert "env" not in payload
 
+    def test_owner有值时写入顶层(self):
+        payload = build_report_payload(**self._base_kwargs(owner="main"))
+        assert payload["owner"] == "main"
+
+    def test_owner带前缀时原样写入顶层(self):
+        payload = build_report_payload(**self._base_kwargs(owner="owner-apple"))
+        assert payload["owner"] == "owner-apple"
+
+    def test_owner为空时不写入顶层(self):
+        payload = build_report_payload(**self._base_kwargs(owner=""))
+        assert "owner" not in payload
+
+    def test_owner不传时不写入顶层(self):
+        payload = build_report_payload(**self._base_kwargs())
+        assert "owner" not in payload
+
+    def test_owner与platform同时存在均写入顶层(self):
+        payload = build_report_payload(**self._base_kwargs(platform="android", owner="main"))
+        assert payload["platform"] == "android"
+        assert payload["owner"] == "main"
+        assert "owner" not in payload.get("env", {})
+
     def test_repo有值时写入env(self):
         payload = build_report_payload(**self._base_kwargs(repo="driving-base"))
         assert payload["env"]["repo"] == "driving-base"
@@ -176,6 +198,14 @@ class TestReportGateEvent:
     def test_platform未传时payload顶层不含platform(self):
         captured = self._invoke()
         assert "platform" not in captured.get("payload", {})
+
+    def test_owner传入时payload顶层含owner(self):
+        captured = self._invoke({"owner": "apple"})
+        assert captured["payload"]["owner"] == "apple"
+
+    def test_owner未传时payload顶层不含owner(self):
+        captured = self._invoke()
+        assert "owner" not in captured.get("payload", {})
 
     def test_webhook未配置时静默跳过不抛异常(self):
         with patch(

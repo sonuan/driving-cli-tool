@@ -34,6 +34,7 @@ def build_report_payload(
     repo: str = "",
     cli_version: str = "",
     platform: str = "",
+    owner: str = "",
     context: Optional[Dict[str, Any]] = None,
     stats: Optional[Dict[str, Any]] = None,
 ) -> dict:
@@ -51,6 +52,7 @@ def build_report_payload(
         repo:          所属仓库名
         cli_version:   CLI 版本号
         platform:      开发平台（android/iOS/harmony/kuikly）
+        owner:         负责人标识（如 main、apple 或 owner-main）
         context:       业务上下文字段（稀疏传递，只传本 gate 用到的）
         stats:         门禁累计统计
 
@@ -91,6 +93,10 @@ def build_report_payload(
     if platform:
         payload["platform"] = platform
 
+    # owner 直接挂顶层
+    if owner:
+        payload["owner"] = owner
+
     # actor：从 git config 读取执行者姓名
     actor = get_git_user()
     if actor["name"]:
@@ -112,6 +118,7 @@ def report_gate_event(
     repo: str = "",
     cli_version: str = "",
     platform: str = "",
+    owner: str = "",
     context: Optional[Dict[str, Any]] = None,
     gate_state=None,  # GateState 对象，用于提取 stats
 ) -> None:
@@ -144,6 +151,7 @@ def report_gate_event(
         repo=repo,
         cli_version=cli_version,
         platform=platform,
+        owner=owner,
         context=context,
         stats=stats,
     )
