@@ -251,24 +251,31 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
             log_error(f"下载失败: {str(e)}")
             return
 
-        # 获取当前可执行文件路径
-        current_exe = None
+        # 确定安装目标路径
+        # 优先使用 ~/.driving-cli/driving（用户目录，无需 sudo）
+        # 回退到 which driving 的结果（兼容旧版本或 pip 安装方式）
+        user_install_dir = Path.home() / ".driving-cli"
+        user_install_path = user_install_dir / "driving"
 
-        # 首先尝试查找已安装的 driving 命令
-        result = subprocess.run(["which", "driving"], capture_output=True, text=True)
-        if result.returncode == 0:
-            current_exe = result.stdout.strip()
-
-        # 如果没有找到，检查是否是直接运行的可执行文件
-        if not current_exe:
-            if not sys.argv[0].endswith(".py"):
+        if user_install_path.exists():
+            # 新方案：二进制在用户目录，直接更新，无需 sudo
+            current_exe = str(user_install_path)
+        else:
+            # 兼容旧方案：通过 which 查找
+            result = subprocess.run(["which", "driving"], capture_output=True, text=True)
+            if result.returncode == 0:
+                resolved = Path(result.stdout.strip()).resolve()
+                current_exe = str(resolved)
+            elif not sys.argv[0].endswith(".py"):
                 current_exe = os.path.abspath(sys.argv[0])
+            else:
+                current_exe = None
 
         if not current_exe:
             log_error("无法找到 driving 命令的安装位置")
             log_info("请确保:")
-            log_info("  1. 已通过 pip 安装: pip3 install -e .")
-            log_info("  2. 或使用可执行文件: ./dist/driving update")
+            log_info("  1. 已通过安装脚本安装（推荐）")
+            log_info("  2. 或通过 pip 安装: pip3 install -e .")
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
             return
@@ -291,34 +298,42 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
             return
 
         # 替换可执行文件
+        def _do_install(src: str, dest: str) -> None:
+            """将 src 移动到 dest 并设置执行权限（755）。目标目录不存在时自动创建。"""
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            if os.path.exists(dest):
+                os.unlink(dest)
+            shutil.move(src, dest)
+            os.chmod(
+                dest,
+                stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH,
+            )
+
+        def _do_install_with_sudo(src: str, dest: str) -> bool:
+            """使用 sudo mv + chmod 替换文件，返回是否成功。"""
+            log_info("需要管理员权限完成安装，请输入密码：")
+            result = subprocess.run(
+                ["sudo", "sh", "-c", f"mv {src!r} {dest!r} && chmod 755 {dest!r}"]
+            )
+            return result.returncode == 0
+
         try:
             # 在 Unix 系统上，正在运行的可执行文件可以被删除和替换
             # 使用 rename/move 而不是 copy，这样更安全和原子化
-
-            # 先删除旧文件（正在运行的进程仍然可以继续执行）
-            if os.path.exists(current_exe):
-                os.unlink(current_exe)
-
-            # 移动新文件到目标位置（比复制更原子化）
-            shutil.move(tmp_path, current_exe)
-
-            # 设置执行权限 (755: rwxr-xr-x)
-            os.chmod(
-                current_exe,
-                stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH,
-            )
+            try:
+                _do_install(tmp_path, current_exe)
+            except PermissionError:
+                # 无写权限时自动 fallback 到 sudo，用户只需输入一次密码
+                if not _do_install_with_sudo(tmp_path, current_exe):
+                    log_error("安装失败：sudo 执行出错")
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                    return
 
             log_success(f"\n✓ 更新成功！当前版本: {latest_version}")
             log_info("\n提示: 更新将在下次运行 driving 命令时生效")
             log_info("请运行 'driving --version' 验证更新")
 
-        except PermissionError:
-            log_error("权限不足，无法替换文件")
-            log_info("请尝试使用 sudo 运行:")
-            log_info(f"  sudo driving update {'-y' if yes else ''}")
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            return
         except Exception as e:
             log_error(f"安装失败: {str(e)}")
             if os.path.exists(tmp_path):
