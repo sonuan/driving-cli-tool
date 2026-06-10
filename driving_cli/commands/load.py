@@ -5,6 +5,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import click
 
@@ -85,6 +86,59 @@ def _check_cli_update() -> str:
     except Exception:
         pass
     return ""
+
+
+def _try_auto_update(original_cmd: str = "driving load") -> Optional[str]:
+    """检查并同步执行 CLI 自动更新。
+
+    仅在满足以下全部条件时尝试更新：
+    1. 已通过 ~/.driving-cli/driving 安装（用户目录，无需 sudo）
+    2. 检测到有新版本
+
+    Args:
+        original_cmd: 用户原始调用的完整命令，更新成功后提示 AI 原样重新执行
+
+    Returns:
+        str: 更新成功时返回 system_prompt 提示文本，要求 AI 重新执行 driving load
+        None: 无需更新、不满足条件、或更新失败时返回 None（降级，不阻断正常流程）
+    """
+    import subprocess as _sp
+    from pathlib import Path as _Path
+
+    user_binary = _Path.home() / ".driving-cli" / "driving"
+    if not user_binary.exists():
+        _dbg("跳过自动更新：未使用 ~/.driving-cli 安装方式")
+        return None
+
+    try:
+        version_info = fetch_version_info(_get_update_version_url())
+        if not version_info:
+            return None
+        latest = version_info.get("version", "")
+        if not latest or compare_versions(__version__, latest) >= 0:
+            _dbg(f"已是最新版本（{__version__}），跳过自动更新")
+            return None
+
+        _dbg(f"检测到新版本 {latest}，开始同步更新...")
+        result = _sp.run(
+            [str(user_binary), "update", "--yes"],
+            stdout=_sp.DEVNULL,
+            stderr=_sp.DEVNULL,
+            timeout=60,
+        )
+        if result.returncode == 0:
+            _dbg(f"CLI 更新成功：{__version__} → {latest}")
+            return (
+                f"🔄 【CLI已更新】driving CLI 已从 {__version__} 更新到 {latest}，"
+                f"请立即重新执行 `{original_cmd}` 以加载最新版本。"
+                f"当前返回数据无效，不得继续任何操作。"
+            )
+        else:
+            _dbg(f"CLI 更新失败（returncode={result.returncode}），降级继续正常流程")
+            return None
+    except Exception as e:
+        _dbg(f"CLI 自动更新异常，降级继续正常流程：{e}")
+        return None
 
 
 def _collect_repo_system_prompts() -> str:
@@ -510,10 +564,29 @@ def load(keywords: tuple, debug: bool, with_modules: str, platform: str):
         modules = {m.strip().lower() for m in with_modules.split(",") if m.strip()}
 
         # 带关键词时不检查仓库更新；不带关键词时：
-        # 1. 先检查并自动拉取 power 更新（确保合并的 config 是最新的）
+        # 0. 先同步检查并执行 CLI 自动更新，有更新时直接返回提示，要求重新执行 load
+        # 1. 检查并自动拉取 power 更新（确保合并的 config 是最新的）
         # 2. 再检查各 config.json 里的 repos 是否有更新
         repo_update_msg = ""
         if not keywords:
+            _dbg("检查 CLI 自动更新...")
+            t = time.perf_counter()
+            # 拼出原始调用命令，方便 AI 原样重新执行
+            original_cmd_parts = ["driving load"]
+            if with_modules:
+                original_cmd_parts.append(f"--with {with_modules}")
+            if platform:
+                original_cmd_parts.append(f"--platform {platform}")
+            original_cmd = " ".join(original_cmd_parts)
+            update_msg = _try_auto_update(original_cmd)
+            _dbg(f"CLI 自动更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
+            if update_msg:
+                # 更新成功：只返回 system_prompt，要求 AI 重新执行 driving load
+                click.echo(json.dumps(
+                    {"cli_version": __version__, "system_prompt": update_msg},
+                    ensure_ascii=False, indent=2
+                ))
+                return
             t = time.perf_counter()
             _init_unloaded_submodules()
             _dbg(f"未加载 submodule 检测完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")

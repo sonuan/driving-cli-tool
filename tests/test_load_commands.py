@@ -1529,3 +1529,106 @@ class TestRepoConfigRepoBranchSwitch:
         # 应切换到 repo_config 指定的 feature/xxx，而不是 repo.branch 的 master
         assert "feature/xxx" in checked_out
         assert "master" not in checked_out
+
+# ==================== _try_auto_update ====================
+
+from driving_cli.commands.load import _try_auto_update
+
+
+class TestTryAutoUpdate:
+    def test_跳过_非用户目录安装(self, tmp_path):
+        """~/.driving-cli/driving 不存在时，返回 None，不执行更新"""
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("driving_cli.commands.load.fetch_version_info") as mock_fetch, \
+             patch("subprocess.run") as mock_run:
+            result = _try_auto_update()
+
+        assert result is None
+        mock_fetch.assert_not_called()
+        mock_run.assert_not_called()
+
+    def test_跳过_已是最新版本(self, tmp_path):
+        """已是最新版本时返回 None"""
+        user_binary = tmp_path / ".driving-cli" / "driving"
+        user_binary.parent.mkdir(parents=True)
+        user_binary.write_bytes(b"binary")
+
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("driving_cli.commands.load.fetch_version_info",
+                   return_value={"version": "0.0.1"}), \
+             patch("driving_cli.commands.load.compare_versions", return_value=0), \
+             patch("subprocess.run") as mock_run:
+            result = _try_auto_update()
+
+        assert result is None
+        mock_run.assert_not_called()
+
+    def test_更新成功返回system_prompt(self, tmp_path):
+        """有新版本且更新成功时，返回 system_prompt 提示文本"""
+        user_binary = tmp_path / ".driving-cli" / "driving"
+        user_binary.parent.mkdir(parents=True)
+        user_binary.write_bytes(b"binary")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("driving_cli.commands.load.fetch_version_info",
+                   return_value={"version": "9.9.9"}), \
+             patch("driving_cli.commands.load.compare_versions", return_value=-1), \
+             patch("subprocess.run", return_value=mock_proc):
+            result = _try_auto_update()
+
+        assert result is not None
+        assert "driving load" in result
+        assert "9.9.9" in result
+
+    def test_更新成功时system_prompt包含原始命令(self, tmp_path):
+        """original_cmd 参数正确回显到 system_prompt 中"""
+        user_binary = tmp_path / ".driving-cli" / "driving"
+        user_binary.parent.mkdir(parents=True)
+        user_binary.write_bytes(b"binary")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("driving_cli.commands.load.fetch_version_info",
+                   return_value={"version": "9.9.9"}), \
+             patch("driving_cli.commands.load.compare_versions", return_value=-1), \
+             patch("subprocess.run", return_value=mock_proc):
+            result = _try_auto_update("driving load --platform android --with framework")
+
+        assert result is not None
+        assert "driving load --platform android --with framework" in result
+
+    def test_更新失败返回None(self, tmp_path):
+        """更新子进程返回非零时，降级返回 None"""
+        user_binary = tmp_path / ".driving-cli" / "driving"
+        user_binary.parent.mkdir(parents=True)
+        user_binary.write_bytes(b"binary")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 1
+
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("driving_cli.commands.load.fetch_version_info",
+                   return_value={"version": "9.9.9"}), \
+             patch("driving_cli.commands.load.compare_versions", return_value=-1), \
+             patch("subprocess.run", return_value=mock_proc):
+            result = _try_auto_update()
+
+        assert result is None
+
+    def test_异常时降级返回None(self, tmp_path):
+        """网络超时或其他异常时，降级返回 None 不抛出"""
+        user_binary = tmp_path / ".driving-cli" / "driving"
+        user_binary.parent.mkdir(parents=True)
+        user_binary.write_bytes(b"binary")
+
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("driving_cli.commands.load.fetch_version_info",
+                   side_effect=Exception("timeout")):
+            result = _try_auto_update()
+
+        assert result is None
