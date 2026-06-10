@@ -263,12 +263,26 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
         # 确定安装目标路径
         # 优先使用 ~/.driving-cli/driving（用户目录，无需 sudo）
         # 回退到 which driving 的结果（兼容旧版本或 pip 安装方式）
-        user_install_dir = Path.home() / ".driving-cli"
+        #
+        # sudo 执行时 Path.home() 返回 /root，需通过 SUDO_USER 还原真实用户 home
+        sudo_user = os.environ.get("SUDO_USER", "")
+        if sudo_user:
+            import pwd as _pwd
+            try:
+                real_home = Path(_pwd.getpwnam(sudo_user).pw_dir)
+            except KeyError:
+                real_home = Path.home()
+        else:
+            real_home = Path.home()
+
+        user_install_dir = real_home / ".driving-cli"
         user_install_path = user_install_dir / "driving"
+        symlink_path = Path("/usr/local/bin/driving")
 
         if user_install_path.exists():
             # 新方案：二进制在用户目录，直接更新，无需 sudo
             current_exe = str(user_install_path)
+            migrate = False
         else:
             # 兼容旧方案：通过 which 查找
             result = subprocess.run(["which", "driving"], capture_output=True, text=True)
@@ -279,6 +293,18 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
                 current_exe = os.path.abspath(sys.argv[0])
             else:
                 current_exe = None
+
+            # 检测是否为旧安装方式（/usr/local/bin/driving 是真实文件而非符号链接）
+            migrate = (
+                current_exe is not None
+                and symlink_path.exists()
+                and not symlink_path.is_symlink()
+            )
+            if migrate:
+                log_info("检测到旧版安装方式，本次更新将自动迁移到 ~/.driving-cli/driving")
+                log_info("迁移完成后，后续 driving update 无需 sudo")
+                # 目标改为新目录，安装完成后再建符号链接
+                current_exe = str(user_install_path)
 
         if not current_exe:
             log_error("无法找到 driving 命令的安装位置")
@@ -337,6 +363,44 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
                     if os.path.exists(tmp_path):
                         os.unlink(tmp_path)
                     return
+
+            # 旧安装方式迁移收尾：删除旧真实文件，建立符号链接
+            if migrate:
+                def _do_migrate_symlink() -> bool:
+                    """删除 /usr/local/bin/driving 真实文件，创建指向新目录的符号链接"""
+                    try:
+                        if symlink_path.exists() and not symlink_path.is_symlink():
+                            symlink_path.unlink()
+                        symlink_path.symlink_to(current_exe)
+                        return True
+                    except PermissionError:
+                        return False
+
+                migrated = _do_migrate_symlink()
+                if not migrated:
+                    # 需要 sudo 建符号链接
+                    log_info("创建符号链接需要管理员权限，请输入密码：")
+                    r = subprocess.run(
+                        ["sudo", "sh", "-c",
+                         f"rm -f {str(symlink_path)!r} && ln -sf {current_exe!r} {str(symlink_path)!r}"]
+                    )
+                    migrated = r.returncode == 0
+
+                if migrated:
+                    log_success("✓ 已迁移到新安装方式，后续 driving update 无需 sudo")
+                else:
+                    log_warning("符号链接创建失败，但二进制已更新到 ~/.driving-cli/driving")
+                    log_info(f"可手动执行：sudo ln -sf {current_exe} {symlink_path}")
+
+            # sudo 执行时将安装目录所有权归还真实用户，避免 root 权限问题
+            if sudo_user and user_install_dir.exists():
+                try:
+                    subprocess.run(
+                        ["chown", "-R", sudo_user, str(user_install_dir)],
+                        check=True
+                    )
+                except Exception:
+                    pass  # chown 失败不影响主流程
 
             log_success(f"\n✓ 更新成功！当前版本: {latest_version}")
             log_info("\n提示: 更新将在下次运行 driving 命令时生效")
