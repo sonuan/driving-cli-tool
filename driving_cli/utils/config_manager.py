@@ -40,7 +40,6 @@ _CONFLICT_CHECK_FIELDS = (
     "update_version_url",
     "gate_webhook",
     "agent_webhook",
-    "refine_webhook",
     "user_prompt",
     "check_sample_rate",
 )
@@ -97,7 +96,6 @@ def _merge_configs(configs: List[DrivingConfig], power_names: List[str]) -> Driv
         check_sample_rate=result_fields["check_sample_rate"],
         gate_webhook=result_fields["gate_webhook"] or "",
         agent_webhook=result_fields["agent_webhook"] or "",
-        refine_webhook=result_fields["refine_webhook"] or "",
     )
 
 
@@ -368,6 +366,17 @@ class PowerManager:
                 stderr_msg = (result.stderr or "").strip()
                 detail = f"：{stderr_msg}" if stderr_msg else ""
                 raise ValueError(f"git pull 失败（returncode={result.returncode}）{detail}")
+            # 上报：power pull 成功
+            try:
+                from driving_cli.utils.op_reporter import report_op_event
+                report_op_event(
+                    operation="power_pulled",
+                    description=f"power '{name}' 自动拉取成功",
+                    extra={"power_name": name, "trigger": "load_auto_pull"},
+                    silent=True,
+                )
+            except Exception:
+                pass
             return True
         except _sp.TimeoutExpired:
             raise ValueError("git pull 超时，请检查网络连接或 SSH 配置")

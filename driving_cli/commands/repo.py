@@ -731,6 +731,15 @@ def _git_pull(repo_cfg: RepoConfig, project_root: Path):
             return
         # 初始化即完成了 clone，无需继续执行 pull
         log_success(f"仓库 '{repo_cfg.name}' 初始化并拉取成功")
+        try:
+            from driving_cli.utils.op_reporter import report_op_event
+            report_op_event(
+                operation="repo_pulled",
+                description=f"仓库 '{repo_cfg.name}' 初始化并拉取成功（首次 submodule 初始化）",
+                extra={"repo_name": repo_cfg.name, "trigger": "init"},
+            )
+        except Exception:
+            pass
         return
 
     log_info(f"正在拉取仓库 '{repo_cfg.name}'...")
@@ -758,6 +767,15 @@ def _git_pull(repo_cfg: RepoConfig, project_root: Path):
         current_branch = repo.active_branch.name
         repo.remotes.origin.pull(current_branch)
         log_success(f"仓库 '{repo_cfg.name}' 拉取成功")
+        try:
+            from driving_cli.utils.op_reporter import report_op_event
+            report_op_event(
+                operation="repo_pulled",
+                description=f"仓库 '{repo_cfg.name}' 拉取成功（分支：{current_branch}）",
+                extra={"repo_name": repo_cfg.name, "branch": current_branch, "trigger": "pull"},
+            )
+        except Exception:
+            pass
     except git.exc.GitCommandError as e:
         log_error(f"仓库 '{repo_cfg.name}' 拉取失败: {e}")
     except Exception as e:

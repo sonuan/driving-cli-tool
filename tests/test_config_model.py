@@ -309,6 +309,76 @@ class TestDrivingConfig:
         assert restored.repos == []
 
 
+# ==================== agent_webhook 字段测试（统一上报入口）====================
+
+class TestDrivingConfigAgentWebhook:
+    """DrivingConfig.agent_webhook 为统一上报入口的序列化测试"""
+
+    def _base_dict(self, **extra) -> dict:
+        d = {
+            "version": "2",
+            "repos": [],
+            "default_commit_message": "msg",
+            "update_version_url": "",
+        }
+        d.update(extra)
+        return d
+
+    def test_agent_webhook_present_in_to_dict(self):
+        cfg = DrivingConfig(
+            version="2", repos=[], default_commit_message="msg",
+            update_version_url="", agent_webhook="https://example.com/hook",
+        )
+        assert cfg.to_dict()["agent_webhook"] == "https://example.com/hook"
+
+    def test_agent_webhook_absent_when_empty(self):
+        cfg = DrivingConfig(
+            version="2", repos=[], default_commit_message="msg",
+            update_version_url="", agent_webhook="",
+        )
+        assert "agent_webhook" not in cfg.to_dict()
+
+    def test_agent_webhook_roundtrip(self):
+        cfg = DrivingConfig(
+            version="2", repos=[], default_commit_message="msg",
+            update_version_url="", agent_webhook="https://feishu.cn/hook/xxx",
+        )
+        restored = DrivingConfig.from_dict(cfg.to_dict())
+        assert restored.agent_webhook == "https://feishu.cn/hook/xxx"
+
+    def test_op_webhook_字段已废弃_不再序列化(self):
+        """op_webhook 已从模型移除，to_dict() 不应包含该字段"""
+        cfg = DrivingConfig(
+            version="2", repos=[], default_commit_message="msg",
+            update_version_url="", agent_webhook="https://example.com/hook",
+        )
+        assert "op_webhook" not in cfg.to_dict()
+
+    def test_refine_webhook_字段已废弃_不再序列化(self):
+        """refine_webhook 已从模型移除，to_dict() 不应包含该字段"""
+        cfg = DrivingConfig(
+            version="2", repos=[], default_commit_message="msg",
+            update_version_url="", agent_webhook="https://example.com/hook",
+        )
+        assert "refine_webhook" not in cfg.to_dict()
+
+    def test_旧config含op_webhook时反序列化忽略该字段(self):
+        """兼容性：旧 driving.config.json 包含 op_webhook 时不报错，直接忽略"""
+        cfg = DrivingConfig.from_dict(self._base_dict(
+            op_webhook="https://old.hook/op",
+            agent_webhook="https://new.hook/agent",
+        ))
+        assert cfg.agent_webhook == "https://new.hook/agent"
+
+    def test_旧config含refine_webhook时反序列化忽略该字段(self):
+        """兼容性：旧 driving.config.json 包含 refine_webhook 时不报错，直接忽略"""
+        cfg = DrivingConfig.from_dict(self._base_dict(
+            refine_webhook="https://old.hook/refine",
+            agent_webhook="https://new.hook/agent",
+        ))
+        assert cfg.agent_webhook == "https://new.hook/agent"
+
+
 # ============================================================
 # 属性测试（Property-Based Tests）
 # Feature: multi-repo-support, Property 1: 配置序列化往返一致性

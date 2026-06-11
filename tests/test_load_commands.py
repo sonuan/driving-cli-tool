@@ -1632,3 +1632,108 @@ class TestTryAutoUpdate:
             result = _try_auto_update()
 
         assert result is None
+
+
+# ==================== op_reporter 集成：load_invoked / load_auto_updated ====================
+
+class TestLoadOpReporter:
+    """driving load 内 op_reporter 调用行为"""
+
+    @pytest.fixture(autouse=True)
+    def _patch_init_submodules(self):
+        with patch("driving_cli.commands.load._init_unloaded_submodules"):
+            yield
+
+    def _invoke(self, runner, tmp_project, extra_args=None):
+        args = ["load"] + (extra_args or [])
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None):
+            return runner.invoke(cli, args)
+
+    def test_load成功后调用report_op_event_load_invoked(self, runner, tmp_project):
+        """driving load 正常完成后应上报 load_invoked"""
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None), \
+             patch("driving_cli.commands.load.report_op_event") as mock_report:
+            result = runner.invoke(cli, ["load"])
+        assert result.exit_code == 0
+        mock_report.assert_called_once()
+        call_kwargs = mock_report.call_args.kwargs
+        assert call_kwargs["operation"] == "load_invoked"
+        assert call_kwargs.get("silent") is True
+
+    def test_带关键词时不上报load_invoked(self, runner, tmp_project):
+        """driving load <keyword> 不上报 load_invoked（关键词模式不是会话开启）"""
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None), \
+             patch("driving_cli.commands.load.report_op_event") as mock_report:
+            result = runner.invoke(cli, ["load", "driving"])
+        assert result.exit_code == 0
+        mock_report.assert_not_called()
+
+    def test_自动更新成功后上报load_auto_updated(self, tmp_path):
+        """_try_auto_update 成功时应上报 load_auto_updated"""
+        from driving_cli.commands.load import _try_auto_update
+        user_binary = tmp_path / ".driving-cli" / "driving"
+        user_binary.parent.mkdir(parents=True)
+        user_binary.write_bytes(b"binary")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("driving_cli.commands.load.fetch_version_info",
+                   return_value={"version": "9.9.9"}), \
+             patch("driving_cli.commands.load.compare_versions", return_value=-1), \
+             patch("subprocess.run", return_value=mock_proc), \
+             patch("driving_cli.commands.load.report_op_event") as mock_report:
+            result = _try_auto_update()
+
+        assert result is not None
+        mock_report.assert_called_once()
+        call_kwargs = mock_report.call_args.kwargs
+        assert call_kwargs["operation"] == "load_auto_updated"
+        assert call_kwargs.get("silent") is True
+
+    def test_自动更新失败时不上报load_auto_updated(self, tmp_path):
+        """_try_auto_update 失败（returncode != 0）时不上报"""
+        from driving_cli.commands.load import _try_auto_update
+        user_binary = tmp_path / ".driving-cli" / "driving"
+        user_binary.parent.mkdir(parents=True)
+        user_binary.write_bytes(b"binary")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 1
+
+        with patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("driving_cli.commands.load.fetch_version_info",
+                   return_value={"version": "9.9.9"}), \
+             patch("driving_cli.commands.load.compare_versions", return_value=-1), \
+             patch("subprocess.run", return_value=mock_proc), \
+             patch("driving_cli.commands.load.report_op_event") as mock_report:
+            result = _try_auto_update()
+
+        assert result is None
+        mock_report.assert_not_called()
+
+    def test_platform参数传入extra(self, runner, tmp_project):
+        """--platform 参数应出现在上报的 extra 嵌套对象中"""
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None), \
+             patch("driving_cli.commands.load.report_op_event") as mock_report:
+            result = runner.invoke(cli, ["load", "--platform", "android"])
+        assert result.exit_code == 0
+        call_kwargs = mock_report.call_args.kwargs
+        assert call_kwargs.get("extra", {}).get("platform") == "android"

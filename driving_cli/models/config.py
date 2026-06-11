@@ -114,8 +114,7 @@ class DrivingConfig:
     user_prompt: str = ""  # 用户提示词，注入到 driving load 输出的 user_prompt 字段
     check_sample_rate: Optional[int] = None  # 全局更新检测采样率：0=不检测，1~100=概率检测，-1=自动拉取；None 表示未配置（运行时默认 -1，即每次自动检测并更新）
     gate_webhook: str = ""  # Gate 日志上报 Webhook 地址，为空时不上报
-    agent_webhook: str = ""  # Agent 启动上报 Webhook 地址，为空时不上报
-    refine_webhook: str = ""  # Refine 提案上报 Webhook 地址，为空时不上报
+    agent_webhook: str = ""  # 通用操作记录 Webhook 地址（agent 启动、refine、driving load/update 等所有关键操作），为空时不上报
 
     def to_dict(self) -> dict:
         """序列化为字典（JSON 兼容格式）
@@ -137,8 +136,6 @@ class DrivingConfig:
             d["gate_webhook"] = self.gate_webhook
         if self.agent_webhook:
             d["agent_webhook"] = self.agent_webhook
-        if self.refine_webhook:
-            d["refine_webhook"] = self.refine_webhook
         return d
 
     @classmethod
@@ -175,5 +172,4 @@ class DrivingConfig:
             check_sample_rate=int(data["check_sample_rate"]) if "check_sample_rate" in data else None,
             gate_webhook=str(data.get("gate_webhook", "")),
             agent_webhook=str(data.get("agent_webhook", "")),
-            refine_webhook=str(data.get("refine_webhook", "")),
         )

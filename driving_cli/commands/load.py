@@ -38,6 +38,7 @@ from driving_cli.commands.update import (
 )
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.logger import set_silent
+from driving_cli.utils.op_reporter import report_op_event
 
 
 class UpdatePrompt:
@@ -128,6 +129,13 @@ def _try_auto_update(original_cmd: str = "driving load") -> Optional[str]:
         )
         if result.returncode == 0:
             _dbg(f"CLI 更新成功：{__version__} → {latest}")
+            # 上报：load 内自动更新 CLI 成功
+            report_op_event(
+                operation="load_auto_updated",
+                description=f"driving load 内自动更新 CLI：{__version__} → {latest}",
+                extra={"from_version": __version__, "to_version": latest},
+                silent=True,
+            )
             return (
                 f"🔄 【CLI已更新】driving CLI 已从 {__version__} 更新到 {latest}，"
                 f"请立即重新执行 `{original_cmd}` 以加载最新版本。"
@@ -663,6 +671,18 @@ def load(keywords: tuple, debug: bool, with_modules: str, platform: str):
 
         _dbg(f"load 全部完成，总耗时 {(time.perf_counter()-_load_start)*1000:.1f}ms")
         click.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+        # 上报：driving load 调用成功（仅在不带关键词的正常会话开启时上报）
+        if not keywords:
+            report_op_event(
+                operation="load_invoked",
+                description="driving load 调用成功，AI 会话开启",
+                extra={
+                    "with_modules": with_modules or None,
+                    "platform": platform or None,
+                },
+                silent=True,
+            )
     except Exception as e:
         click.echo(json.dumps({"error": str(e)}, ensure_ascii=False))
         raise SystemExit(1)

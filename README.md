@@ -522,6 +522,19 @@ trigger: manual                 # Windsurf 所需
 
 - `skills` / `rules` / `agents` 均支持白名单（`enabled` 非空）和黑名单（`disabled` 非空）两种模式。
 
+- `gate_webhook`：门禁结果（pass / auto_pass / amend / blocked）上报地址，未配置时不上报。
+- `agent_webhook`：通用操作记录上报地址，覆盖以下所有关键操作：
+  - `load_invoked`：`driving load` 调用成功（会话开启）
+  - `load_auto_updated`：`driving load` 内检测到新版本并自动更新 CLI 成功
+  - `update_completed`：`driving update` 手动更新 CLI 成功
+  - `repo_pulled`：`driving repo pull` 或 load 内自动拉取仓库成功
+  - `power_pulled`：`driving load` 内自动拉取 power 成功
+  - `agent_started`：子 agent 启动（`driving agent report`）
+  - `refine_committed`：refine 提案提交（`driving refine commit`）
+  - `refine_merged`：refine 提案合并（`driving refine merge`）
+
+  payload 结构：`operation`、`description`（一句话）、`triggered_at`（北京时间）、`cli_version`、`actor`（git user.name）、`branch`（当前 git 分支），以及各操作专属扩展字段收入 `extra` 嵌套对象。
+
 ### gitlist.json 配置
 
 `project_name`、`url`、`branch` 均为 `__local__` 时，定位到本地项目源码路径，不需要拉取 git 仓库。

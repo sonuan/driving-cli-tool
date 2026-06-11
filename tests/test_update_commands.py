@@ -454,3 +454,71 @@ class TestSudoUserHome:
         chown_calls = [c for c in mock_sub.call_args_list
                        if c.args and c.args[0] and c.args[0][0] == "chown"]
         assert len(chown_calls) == 0
+
+
+# ==================== op_reporter 集成：update_completed ====================
+
+class TestUpdateOpReporter:
+    """driving update 成功后的 op_reporter 上报行为"""
+
+    def _invoke_update_success(self, runner, version_info, tmp_path):
+        """辅助：模拟 update 安装成功的最小场景"""
+        user_dir = tmp_path / ".driving-cli"
+        user_dir.mkdir(parents=True)
+        (user_dir / "driving").write_bytes(b"old")
+        tmp_bin = str(user_dir / "driving.tmp")
+
+        which_result = MagicMock(returncode=0, stdout=str(user_dir / "driving") + "\n")
+
+        with patch("driving_cli.commands.update.fetch_version_info", return_value=version_info), \
+             patch("driving_cli.commands.update.get_current_version", return_value="1.0.0"), \
+             patch("driving_cli.commands.update._get_update_version_url", return_value="http://x"), \
+             patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("subprocess.run", return_value=which_result), \
+             patch("urllib.request.urlopen", return_value=_make_urlopen_mock()), \
+             patch("tempfile.mkstemp", return_value=(3, tmp_bin)), \
+             patch("os.fdopen"), patch("os.fsync"), \
+             patch("os.path.getsize", return_value=2048), \
+             patch("os.makedirs"), \
+             patch("os.replace"), patch("os.chmod"):
+            return runner.invoke(update, ["--yes"])
+
+    def test_更新成功后调用report_op_event(self, runner, version_info, tmp_path):
+        """update 安装成功后应上报 update_completed"""
+        with patch("driving_cli.utils.op_reporter.report_async") as mock_async, \
+             patch("driving_cli.utils.op_reporter._get_webhook_url", return_value="https://hook.example.com"):
+            result = self._invoke_update_success(runner, version_info, tmp_path)
+        assert result.exit_code == 0
+        assert "更新成功" in result.output
+        mock_async.assert_called_once()
+        _, payload = mock_async.call_args.args
+        assert payload["operation"] == "update_completed"
+        # from_version / to_version 现在在 extra 嵌套对象里
+        assert payload.get("extra", {}).get("from_version") == "1.0.0"
+        assert payload.get("extra", {}).get("to_version") == "9.9.9"
+
+    def test_更新成功时cli_version传新版本(self, runner, version_info, tmp_path):
+        """update_completed 上报时 cli_version 应为更新后的新版本"""
+        with patch("driving_cli.utils.op_reporter.report_async") as mock_async, \
+             patch("driving_cli.utils.op_reporter._get_webhook_url", return_value="https://hook.example.com"):
+            self._invoke_update_success(runner, version_info, tmp_path)
+        _, payload = mock_async.call_args.args
+        assert payload.get("cli_version") == "9.9.9"
+
+    def test_已是最新版本时不上报(self, runner, version_info, tmp_path):
+        """当前版本已是最新时不调用 report_op_event"""
+        with patch("driving_cli.commands.update.fetch_version_info", return_value=version_info), \
+             patch("driving_cli.commands.update.get_current_version", return_value="9.9.9"), \
+             patch("driving_cli.commands.update._get_update_version_url", return_value="http://x"), \
+             patch("driving_cli.utils.op_reporter.report_async") as mock_async:
+            result = runner.invoke(update, ["--yes"])
+        assert "最新版本" in result.output
+        mock_async.assert_not_called()
+
+    def test_report_op_event异常不影响update流程(self, runner, version_info, tmp_path):
+        """report_op_event 抛异常时不应影响 update 命令的正常输出"""
+        with patch("driving_cli.utils.op_reporter.report_async", side_effect=Exception("hook err")), \
+             patch("driving_cli.utils.op_reporter._get_webhook_url", return_value="https://hook.example.com"):
+            result = self._invoke_update_success(runner, version_info, tmp_path)
+        assert result.exit_code == 0
+        assert "更新成功" in result.output

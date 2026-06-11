@@ -406,6 +406,18 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
             log_info("\n提示: 更新将在下次运行 driving 命令时生效")
             log_info("请运行 'driving --version' 验证更新")
 
+            # 上报：driving update 手动更新 CLI 成功
+            try:
+                from driving_cli.utils.op_reporter import report_op_event
+                report_op_event(
+                    operation="update_completed",
+                    description=f"driving update 手动更新 CLI：{current_version} → {latest_version}",
+                    cli_version=latest_version,
+                    extra={"from_version": current_version, "to_version": latest_version},
+                )
+            except Exception:
+                pass  # 上报失败不影响更新成功的用户体验
+
         except Exception as e:
             log_error(f"安装失败: {str(e)}")
             if os.path.exists(tmp_path):

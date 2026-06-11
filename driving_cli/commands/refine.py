@@ -13,9 +13,8 @@ import click
 import git
 
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
-from driving_cli.utils.git_helper import get_git_user, push_with_upstream
+from driving_cli.utils.git_helper import push_with_upstream
 from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
-from driving_cli.utils.reporter_utils import do_post, now_timestamp
 
 VALID_TYPES = ("skill", "rule", "agent", "framework")
 
@@ -130,46 +129,43 @@ def _get_all_refines_dirs(config_manager: ConfigManager) -> List[Tuple[str, Path
 _REFINE_LOG_HEADER = "# Refine Log\n# 记录所有已生效的规范变更，refines 合并后由 AI 追加。\n"
 
 
-def _report_to_webhook(
-    webhook_url: str,
-    repo_name: str,
-    file_path: Path,
-    meta: dict,
-    event: str = "refine.committed",
-) -> None:
-    """上报 refine 提案事件到 webhook。
+def _report_refine_event(repo_name: str, file_path: Path, meta: dict, operation: str) -> None:
+    """上报单个 refine 提案事件到 agent_webhook（通过 op_reporter）。
 
     失败时静默处理，不影响主流程。
 
     Args:
-        webhook_url: 目标 webhook 地址
-        repo_name: 仓库名称
-        file_path: refine 文件路径（用于取文件名）
-        meta: 由 _parse_refine_frontmatter 返回的 frontmatter 字典
-        event: 事件类型，refine.committed（提交）或 refine.merged（合并）
+        repo_name:  仓库名称
+        file_path:  refine 文件路径（用于取文件名）
+        meta:       由 _parse_refine_frontmatter 返回的 frontmatter 字典
+        operation:  操作类型，refine_committed 或 refine_merged
     """
+    from driving_cli.utils.op_reporter import report_op_event
+
     trigger = meta.get("trigger") or {}
+    target_type = meta.get("target_type", "")
+    target_name = meta.get("target_name", "")
+    description_text = meta.get("description", "")
 
-    git_user = get_git_user()
+    desc = f"{target_type}:{target_name}"
+    if description_text:
+        desc += f" — {description_text}"
+    if operation == "refine_merged":
+        desc += "（合并）"
 
-    payload: Dict = {
-        "event": event,
-        "at": now_timestamp(),
-        "repo": repo_name,
-        "file": file_path.name,
-        "date": meta.get("date", ""),
-        "target_type": meta.get("target_type", ""),
-        "target_name": meta.get("target_name", ""),
-        "target_file": meta.get("target_file", ""),
-        "description": meta.get("description", ""),
-        "operator": meta.get("operator", ""),
-        "actor": git_user["name"],
-        "status": meta.get("status", "pending"),
-        "trigger_source": trigger.get("source", ""),
-        "trigger_reason": trigger.get("reason", ""),
-    }
-
-    do_post(webhook_url, payload)
+    report_op_event(
+        operation=operation,
+        description=desc,
+        extra={
+            "repo": repo_name,
+            "file": file_path.name,
+            "target_type": target_type or None,
+            "target_name": target_name or None,
+            "trigger_source": trigger.get("source") or None,
+            "trigger_reason": trigger.get("reason") or None,
+        },
+        silent=True,
+    )
 
 
 def _get_refine_log_path(config_manager: ConfigManager, repo_name: str) -> Path:
@@ -394,7 +390,12 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
         if no_push:
             log_info("已跳过 push（--no-push）")
             # commit 成功即上报
-            _trigger_refine_webhook(config_manager, repo_name, repo_dir, valid_files, "refine.committed")
+            for fp in valid_files:
+                f_path = repo_dir / fp
+                if f_path.exists():
+                    meta = _parse_refine_frontmatter(f_path)
+                    if meta:
+                        _report_refine_event(repo_name, f_path, meta, "refine_committed")
             return
 
         if not repo.remotes:
@@ -435,8 +436,13 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
             ok, err = push_with_upstream(repo)
             if ok:
                 log_success(f"仓库 '{repo_name}' 推送成功")
-                # push 成功后上报 webhook
-                _trigger_refine_webhook(config_manager, repo_name, repo_dir, valid_files, "refine.committed")
+                # push 成功后上报
+                for fp in valid_files:
+                    f_path = repo_dir / fp
+                    if f_path.exists():
+                        meta = _parse_refine_frontmatter(f_path)
+                        if meta:
+                            _report_refine_event(repo_name, f_path, meta, "refine_committed")
             else:
                 log_error(f"推送失败：{err}")
                 raise click.Abort()
@@ -488,35 +494,6 @@ def _normalize_refine_path(fp: str, repo_dir: Path) -> str:
         return f"refines/{fp}"
 
     return fp
-
-
-# ---------------------------------------------------------------------------
-# 内部辅助：批量上报 refine 文件到 webhook
-# ---------------------------------------------------------------------------
-
-def _trigger_refine_webhook(
-    config_manager: "ConfigManager",
-    repo_name: str,
-    repo_dir: Path,
-    file_paths: List[str],
-    event: str,
-) -> None:
-    """读取 refine_webhook 配置，逐文件解析 meta 并上报。
-
-    仅上报能成功解析 frontmatter 的文件，其余静默跳过。
-    """
-    webhook_url = config_manager.load().refine_webhook
-    if not webhook_url:
-        import sys
-        print("⚠️ refine_webhook 未配置，refine 事件未上报。请在 driving.config.json 中设置 refine_webhook", file=sys.stderr)
-        return
-    for fp in file_paths:
-        f_path = repo_dir / fp
-        if not f_path.exists():
-            continue
-        meta = _parse_refine_frontmatter(f_path)
-        if meta:
-            _report_to_webhook(webhook_url, repo_name, f_path, meta, event)
 
 
 # ---------------------------------------------------------------------------
@@ -614,18 +591,15 @@ def refine_merge(repo_name: str, file_paths: tuple, changed_files: tuple, operat
                 log_info(f"已创建 {repo_name}/REFINE_LOG.md")
             log_success(f"已追加 REFINE_LOG：{meta['target_name']}")
 
-        # Step 2: 上报 webhook（删除文件前，此时文件仍存在）
-        webhook_url = config_manager.load().refine_webhook
-        if webhook_url:
-            for item in items:
-                # 用本次合并操作的触发信息覆盖提案生成时的 trigger
-                merge_meta = dict(item["meta"])
-                if trigger_source or trigger_reason:
-                    merge_meta["trigger"] = {
-                        "source": trigger_source,
-                        "reason": trigger_reason,
-                    }
-                _report_to_webhook(webhook_url, repo_name, item["f_path"], merge_meta, "refine.merged")
+        # Step 2: 上报（删除文件前，此时文件仍存在）
+        for item in items:
+            merge_meta = dict(item["meta"])
+            if trigger_source or trigger_reason:
+                merge_meta["trigger"] = {
+                    "source": trigger_source,
+                    "reason": trigger_reason,
+                }
+            _report_refine_event(repo_name, item["f_path"], merge_meta, "refine_merged")
 
         # Step 3: 删除 refine 文件
         for item in items:

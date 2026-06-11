@@ -843,7 +843,7 @@ def agent_report(agent_name: str, feature_path: str, source: str):
     示例：
         driving agent report android-reviewer --path features/login --source "dev-review 阶段，由 dev-workflow 触发"
     """
-    from driving_cli.utils.agent_reporter import report_agent_event
+    from driving_cli.utils.op_reporter import report_op_event
 
     try:
         project_root = find_project_root()
@@ -854,8 +854,17 @@ def agent_report(agent_name: str, feature_path: str, source: str):
     except Exception:
         log_warning(f"查找 agent '{agent_name}' 时出错，跳过上报")
 
-    report_agent_event(
-        agent_name=agent_name,
-        feature_path=feature_path,
-        source=source,
+    desc = f"子 agent '{agent_name}' 启动"
+    if source:
+        desc += f"，来源：{source}"
+
+    report_op_event(
+        operation="agent_started",
+        description=desc,
+        extra={
+            "agent_name": agent_name,
+            "feature_path": feature_path or None,
+            "source": source or None,
+        },
+        silent=True,
     )
