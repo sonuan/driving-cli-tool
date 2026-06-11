@@ -750,7 +750,7 @@ def _add_frontmatter_field(agent_dir: Path, field: str, value: str) -> None:
 
 
 class TestAgentExportCommand:
-    def test_export_kiro生成硬链接(self, runner, project_with_full_agent):
+    def test_export_kiro生成实体文件(self, runner, project_with_full_agent):
         agent_dir = project_with_full_agent / "ai-driving" / "my-local" / "agents" / "test-agent"
         _add_frontmatter_field(agent_dir, "tools", '["read", "shell"]')
         with patch("driving_cli.commands.agent.find_project_root",
@@ -758,12 +758,30 @@ class TestAgentExportCommand:
             result = runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "kiro"])
         assert result.exit_code == 0
         out = project_with_full_agent / ".kiro" / "agents" / "test-agent.md"
-        # 硬链接：文件存在且不是符号链接
+        # 复制模式：文件存在且不是符号链接
         assert out.exists()
         assert not out.is_symlink()
-        # 验证硬链接：与源文件共享同一 inode
+        # 验证内容与源文件一致（cp 模式，非硬链接，inode 可以不同）
         source = agent_dir / "AGENTS.md"
-        assert out.stat().st_ino == source.stat().st_ino
+        assert out.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
+
+    def test_export_kiro每次都覆盖无需force(self, runner, project_with_full_agent):
+        """kiro 不同于其他工具，文件已存在时不跳过，每次都覆盖复制"""
+        agent_dir = project_with_full_agent / "ai-driving" / "my-local" / "agents" / "test-agent"
+        _add_frontmatter_field(agent_dir, "tools", '["read", "shell"]')
+        out = project_with_full_agent / ".kiro" / "agents" / "test-agent.md"
+        with patch("driving_cli.commands.agent.find_project_root",
+                   return_value=project_with_full_agent):
+            runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "kiro"])
+            # 修改源文件内容
+            source = agent_dir / "AGENTS.md"
+            original = source.read_text(encoding="utf-8")
+            source.write_text(original + "\n# 新增内容\n", encoding="utf-8")
+            # 再次 export，不加 --force
+            result = runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "kiro"])
+        assert result.exit_code == 0
+        assert "已存在" not in result.output  # 不应跳过
+        assert "新增内容" in out.read_text(encoding="utf-8")  # 内容已同步
 
     def test_export_kiro缺少tools字段报错(self, runner, project_with_full_agent):
         with patch("driving_cli.commands.agent.find_project_root",

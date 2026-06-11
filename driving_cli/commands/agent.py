@@ -575,11 +575,16 @@ SUPPORTED_TOOLS = ["kiro", "claude-code", "cursor", "windsurf", "codex"]
 
 def _export_kiro(agent_name: str, data: Dict, agent_dir: Path,
                  output_dir: Path) -> Path:
-    """生成 Kiro custom agent 硬链接。
+    """将 AGENTS.md 复制到 Kiro custom agent 目录。
+
+    每次执行都覆盖复制，确保内容与源文件始终保持一致。
+    不使用硬链接或软链接，避免 git 回退后链接脱钩的问题。
 
     AGENTS.md frontmatter 需包含 tools 字段，Kiro 才能正确识别。
     参考：https://kiro.dev/docs/chat/subagents/
     """
+    import shutil
+
     meta = data["meta"]
     if "tools" not in meta:
         raise click.ClickException(
@@ -592,11 +597,7 @@ def _export_kiro(agent_name: str, data: Dict, agent_dir: Path,
     out_file = kiro_agents_dir / f"{agent_name}.md"
 
     agents_md = agent_dir / "AGENTS.md"
-    if out_file.exists() or out_file.is_symlink():
-        out_file.unlink()
-    
-    import os
-    os.link(agents_md.resolve(), out_file)
+    shutil.copy2(agents_md.resolve(), out_file)
     return out_file
 
 
@@ -793,9 +794,9 @@ def agent_export(agent_name: str, tool: str, output: Optional[str], force: bool)
 
         output_dir = Path(output).resolve() if output else project_root
 
-        # 文件已存在且非强制模式 → 跳过
+        # 文件已存在且非强制模式 → 跳过（kiro 除外：每次都覆盖复制）
         out_path = output_dir / _TOOL_OUTPUT_PATHS[tool.lower()](agent_name)
-        if not force and (out_path.exists() or out_path.is_symlink()):
+        if tool.lower() != "kiro" and not force and (out_path.exists() or out_path.is_symlink()):
             log_info(f"已存在：{out_path.relative_to(output_dir)}（使用 --force 强制重建）")
             return
 
@@ -812,7 +813,7 @@ def agent_export(agent_name: str, tool: str, output: Optional[str], force: bool)
 
         log_success(f"已生成：{out_file.relative_to(output_dir)}")
         if tool.lower() == "kiro":
-            log_info("硬链接模式：AGENTS.md 更新后自动生效，无需重新导出")
+            log_info("复制模式：每次执行都会覆盖同步，git 回退后重新执行即可更新")
         elif tool.lower() == "codex":
             log_info("TOML 文件模式：AGENTS.md 更新后需重新执行 export（使用 --force）才能同步")
         else:
