@@ -129,16 +129,25 @@ def _get_all_refines_dirs(config_manager: ConfigManager) -> List[Tuple[str, Path
 _REFINE_LOG_HEADER = "# Refine Log\n# 记录所有已生效的规范变更，refines 合并后由 AI 追加。\n"
 
 
-def _report_refine_event(repo_name: str, file_path: Path, meta: dict, operation: str) -> None:
+def _report_refine_event(
+    repo_name: str,
+    file_path: Path,
+    meta: dict,
+    operation: str,
+    trigger_source: str = "",
+    trigger_reason: str = "",
+) -> None:
     """上报单个 refine 提案事件到 agent_webhook（通过 op_reporter）。
 
     失败时静默处理，不影响主流程。
 
     Args:
-        repo_name:  仓库名称
-        file_path:  refine 文件路径（用于取文件名）
-        meta:       由 _parse_refine_frontmatter 返回的 frontmatter 字典
-        operation:  操作类型，refine_committed 或 refine_merged
+        repo_name:      仓库名称
+        file_path:      refine 文件路径（用于取文件名）
+        meta:           由 _parse_refine_frontmatter 返回的 frontmatter 字典
+        operation:      操作类型，refine_committed 或 refine_merged
+        trigger_source: 命令行显式传入的触发来源（优先级高于 meta.trigger.source）
+        trigger_reason: 命令行显式传入的触发原因（优先级高于 meta.trigger.reason）
     """
     from driving_cli.utils.op_reporter import report_op_event
 
@@ -153,19 +162,33 @@ def _report_refine_event(repo_name: str, file_path: Path, meta: dict, operation:
     if operation == "refine_merged":
         desc += "（合并）"
 
+    trigger_text = _build_refine_trigger(trigger, trigger_source, trigger_reason)
+
     report_op_event(
         operation=operation,
         description=desc,
         extra={
-            "repo": repo_name,
+            "repo_name": repo_name,
             "file": file_path.name,
             "target_type": target_type or None,
             "target_name": target_name or None,
-            "trigger_source": trigger.get("source") or None,
-            "trigger_reason": trigger.get("reason") or None,
+            "trigger": trigger_text or None,
         },
         silent=True,
     )
+
+
+def _build_refine_trigger(trigger: dict, trigger_source: str = "", trigger_reason: str = "") -> str:
+    """将 trigger 字典或命令行参数合并为一句话描述。
+
+    优先使用命令行显式传入的 trigger_source / trigger_reason，
+    其次从 trigger 字典中提取 source / reason。
+    """
+    source = trigger_source or trigger.get("source", "")
+    reason = trigger_reason or trigger.get("reason", "")
+    if source and reason:
+        return f"{source} — {reason}"
+    return source or reason or ""
 
 
 def _get_refine_log_path(config_manager: ConfigManager, repo_name: str) -> Path:
@@ -593,13 +616,14 @@ def refine_merge(repo_name: str, file_paths: tuple, changed_files: tuple, operat
 
         # Step 2: 上报（删除文件前，此时文件仍存在）
         for item in items:
-            merge_meta = dict(item["meta"])
-            if trigger_source or trigger_reason:
-                merge_meta["trigger"] = {
-                    "source": trigger_source,
-                    "reason": trigger_reason,
-                }
-            _report_refine_event(repo_name, item["f_path"], merge_meta, "refine_merged")
+            _report_refine_event(
+                repo_name,
+                item["f_path"],
+                item["meta"],
+                "refine_merged",
+                trigger_source=trigger_source,
+                trigger_reason=trigger_reason,
+            )
 
         # Step 3: 删除 refine 文件
         for item in items:

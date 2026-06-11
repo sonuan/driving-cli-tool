@@ -369,10 +369,22 @@ class PowerManager:
             # 上报：power pull 成功
             try:
                 from driving_cli.utils.op_reporter import report_op_event
+                import git as _git
+                _branch = ""
+                try:
+                    _repo_obj = _git.Repo(repo_dir)
+                    if not _repo_obj.head.is_detached:
+                        _branch = _repo_obj.active_branch.name
+                except Exception:
+                    pass
                 report_op_event(
                     operation="power_pulled",
                     description=f"power '{name}' 自动拉取成功",
-                    extra={"power_name": name, "trigger": "load_auto_pull"},
+                    extra={
+                        "repo_name": name,
+                        "branch": _branch or None,
+                        "trigger": "load_auto_pull",
+                    },
                     silent=True,
                 )
             except Exception:

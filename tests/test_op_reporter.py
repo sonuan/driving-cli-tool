@@ -131,17 +131,16 @@ class TestBuildOpPayload:
             operation="refine_committed",
             description="skill:android-standard-page — 补充 LiveData 使用规范",
             extra={
-                "repo": "driving-base",
+                "repo_name": "driving-base",
                 "file": "2026-06-11-skill-xxx.md",
                 "target_type": "skill",
                 "target_name": "android-standard-page",
-                "trigger_source": "gate",
-                "trigger_reason": "返工超过 2 次",
+                "trigger": "gate",
             },
         )
-        assert payload["extra"]["repo"] == "driving-base"
+        assert payload["extra"]["repo_name"] == "driving-base"
         assert payload["extra"]["target_type"] == "skill"
-        assert payload["extra"]["trigger_source"] == "gate"
+        assert payload["extra"]["trigger"] == "gate"
 
 
 # ==================== report_op_event ====================
@@ -218,7 +217,8 @@ class TestReportOpEvent:
         assert payload["operation"] == "repo_pulled"
         assert payload["extra"]["repo_name"] == "driving"
 
-    def test_power_pulled_extra含power_name(self):
+    def test_power_pulled_extra含repo_name(self):
+        """power_pulled extra 已统一为 repo_name / branch / trigger"""
         with patch("driving_cli.utils.op_reporter._get_webhook_url", return_value="https://example.com/hook"), \
              patch("driving_cli.utils.op_reporter.report_async") as mock_async, \
              patch("driving_cli.utils.op_reporter.get_git_user", return_value={"name": "", "email": ""}), \
@@ -227,11 +227,15 @@ class TestReportOpEvent:
             report_op_event(
                 operation="power_pulled",
                 description="power 'driving-base' 自动拉取成功",
-                extra={"power_name": "driving-base"},
+                extra={"repo_name": "driving-base", "branch": "main", "trigger": "load_auto_pull"},
                 silent=True,
             )
         _, payload = mock_async.call_args.args
-        assert payload["extra"]["power_name"] == "driving-base"
+        assert payload["extra"]["repo_name"] == "driving-base"
+        assert payload["extra"]["branch"] == "main"
+        assert payload["extra"]["trigger"] == "load_auto_pull"
+        # power_name 字段已废弃
+        assert "power_name" not in payload["extra"]
 
 
 # ==================== _get_webhook_url 读取 agent_webhook ====================
@@ -301,7 +305,7 @@ class TestAgentStartedViaOpReporter:
     """driving agent report 直接调 report_op_event 的行为"""
 
     def test_agent_started_调用report_op_event(self):
-        """agent_report 命令应直接上报 operation=agent_started"""
+        """agent_report 命令应直接上报 operation=agent_started，trigger 替代 source"""
         with patch("driving_cli.utils.op_reporter._get_webhook_url", return_value="https://example.com/hook"), \
              patch("driving_cli.utils.op_reporter.report_async") as mock_async, \
              patch("driving_cli.utils.op_reporter.get_git_user", return_value={"name": "", "email": ""}), \
@@ -313,7 +317,7 @@ class TestAgentStartedViaOpReporter:
                 extra={
                     "agent_name": "android-reviewer",
                     "feature_path": "features/login",
-                    "source": "dev-review 阶段",
+                    "trigger": "dev-review 阶段，由 dev-workflow 触发",
                 },
                 silent=True,
             )
@@ -322,9 +326,11 @@ class TestAgentStartedViaOpReporter:
         assert "android-reviewer" in payload["description"]
         assert payload["extra"]["agent_name"] == "android-reviewer"
         assert payload["extra"]["feature_path"] == "features/login"
+        assert payload["extra"]["trigger"] == "dev-review 阶段，由 dev-workflow 触发"
+        assert "source" not in payload["extra"]
 
     def test_agent_started_空feature_path被过滤(self):
-        """feature_path=None 时 extra 中不含该字段"""
+        """feature_path=None / trigger=None 时 extra 中不含这两个字段"""
         with patch("driving_cli.utils.op_reporter._get_webhook_url", return_value="https://example.com/hook"), \
              patch("driving_cli.utils.op_reporter.report_async") as mock_async, \
              patch("driving_cli.utils.op_reporter.get_git_user", return_value={"name": "", "email": ""}), \
@@ -336,10 +342,10 @@ class TestAgentStartedViaOpReporter:
                 extra={
                     "agent_name": "android-reviewer",
                     "feature_path": None,
-                    "source": None,
+                    "trigger": None,
                 },
                 silent=True,
             )
         _, payload = mock_async.call_args.args
         assert "feature_path" not in payload.get("extra", {})
-        assert "source" not in payload.get("extra", {})
+        assert "trigger" not in payload.get("extra", {})

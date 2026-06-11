@@ -864,7 +864,7 @@ def agent_report(agent_name: str, feature_path: str, source: str):
         extra={
             "agent_name": agent_name,
             "feature_path": feature_path or None,
-            "source": source or None,
+            "trigger": source or None,
         },
         silent=True,
     )
