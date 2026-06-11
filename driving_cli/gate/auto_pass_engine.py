@@ -38,15 +38,8 @@ class AutoPassEngine:
         """
         mode = auto_pass_config.get("mode", "human_only")
 
-        # mode 为 human_only 时跳过条件检查
-        if mode == "human_only":
-            return AutoPassResult(
-                passed=False,
-                condition_results=[],
-                skipped=True,
-            )
-
-        # mode 为 notify_pass 或 full_auto 时逐条执行 conditions
+        # 所有 mode 均执行 conditions 检查，结果用于展示给用户；
+        # human_only 时不参与自动通过判断，仅作信息展示
         conditions = auto_pass_config.get("conditions", [])
         results: List[ConditionResult] = []
 
@@ -58,6 +51,14 @@ class AutoPassEngine:
                 continue
             result = self._checker.check(condition)
             results.append(result)
+
+        # mode 为 human_only 时：conditions 已执行供展示，但强制返回 passed=False
+        if mode == "human_only":
+            return AutoPassResult(
+                passed=False,
+                condition_results=results,
+                skipped=True,
+            )
 
         all_passed = all(r.passed for r in results)
 

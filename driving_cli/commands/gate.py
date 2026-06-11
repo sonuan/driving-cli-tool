@@ -569,6 +569,7 @@ def gate_request(gate_id: str, path: str, platform: str, owner: str, context: st
             auto_pass_result.condition_results,
             gate_state.user_amend_count,
             auto_pass_result.forced_interactive,
+            skipped=auto_pass_result.skipped,
         )
     except NonTTYInterrupt:
         # 非终端环境：模板和选项已输出，提示使用 gate respond

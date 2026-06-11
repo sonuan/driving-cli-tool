@@ -25,10 +25,11 @@ def engine(mock_checker):
 
 
 class TestHumanOnlyMode:
-    """Requirement 3.1: mode 为 human_only 时跳过条件检查"""
+    """Requirement 3.1: mode 为 human_only 时跳过自动通过判断，但仍执行 conditions 供展示"""
 
     def test_human_only_returns_skipped(self, engine, mock_checker):
-        """human_only 模式应返回 skipped=True，不执行任何 condition"""
+        """human_only 模式应返回 skipped=True、passed=False，且执行 conditions 供展示"""
+        mock_checker.check.return_value = ConditionResult(passed=True, label="文件存在")
         config = {
             "mode": "human_only",
             "conditions": [
@@ -40,13 +41,37 @@ class TestHumanOnlyMode:
 
         assert result.skipped is True
         assert result.passed is False
-        assert result.condition_results == []
         assert result.forced_interactive is False
-        # 不应调用 checker
-        mock_checker.check.assert_not_called()
+        # conditions 应被执行，结果用于展示
+        assert len(result.condition_results) == 1
+        assert result.condition_results[0].label == "文件存在"
+        mock_checker.check.assert_called_once()
+
+    def test_human_only_condition_results_returned(self, engine, mock_checker):
+        """human_only 模式下多个 condition 均应执行并返回结果"""
+        mock_checker.check.side_effect = [
+            ConditionResult(passed=True, label="条件1"),
+            ConditionResult(passed=False, label="条件2", detail="未满足"),
+        ]
+        config = {
+            "mode": "human_only",
+            "conditions": [
+                {"type": "path_valid", "label": "条件1", "target": "a"},
+                {"type": "file_exists", "label": "条件2", "target": "b"},
+            ],
+        }
+
+        result = engine.evaluate(config, user_amend_count=0)
+
+        assert result.skipped is True
+        assert result.passed is False
+        assert len(result.condition_results) == 2
+        assert result.condition_results[0].passed is True
+        assert result.condition_results[1].passed is False
+        assert mock_checker.check.call_count == 2
 
     def test_human_only_ignores_amend_count(self, engine, mock_checker):
-        """human_only 模式不受 user_amend_count 影响"""
+        """human_only 模式不受 user_amend_count 影响（不触发 forced_interactive）"""
         config = {"mode": "human_only", "conditions": []}
 
         result = engine.evaluate(config, user_amend_count=5)
@@ -54,6 +79,16 @@ class TestHumanOnlyMode:
         assert result.skipped is True
         assert result.passed is False
         assert result.forced_interactive is False
+
+    def test_human_only_no_conditions(self, engine, mock_checker):
+        """human_only 模式无 conditions 时返回空列表，不调用 checker"""
+        config = {"mode": "human_only", "conditions": []}
+
+        result = engine.evaluate(config, user_amend_count=0)
+
+        assert result.skipped is True
+        assert result.condition_results == []
+        mock_checker.check.assert_not_called()
 
 
 class TestNotifyPassMode:
@@ -290,7 +325,8 @@ class TestDefaultMode:
     """mode 字段缺失时的默认行为"""
 
     def test_missing_mode_defaults_to_human_only(self, engine, mock_checker):
-        """mode 字段缺失时默认为 human_only"""
+        """mode 字段缺失时默认为 human_only，仍执行 conditions"""
+        mock_checker.check.return_value = ConditionResult(passed=True, label="test")
         config = {
             "conditions": [{"type": "path_valid", "label": "test", "target": "x"}],
         }
@@ -299,4 +335,6 @@ class TestDefaultMode:
 
         assert result.skipped is True
         assert result.passed is False
-        mock_checker.check.assert_not_called()
+        # conditions 依然被执行
+        assert len(result.condition_results) == 1
+        mock_checker.check.assert_called_once()

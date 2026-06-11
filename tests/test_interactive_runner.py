@@ -331,14 +331,86 @@ class TestForcedInteractive:
 
 
 class TestConditionResultsDisplay:
-    """condition 结果展示：通过显示 ✓，未通过显示 ✗"""
+    """condition 结果展示：说明标题 + 通过显示 ✓，未通过显示 ✗"""
+
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
+    def test_human_only_shows_reference_header(
+        self, mock_echo, mock_input, runner, sample_gate
+    ):
+        """skipped=True（human_only）时，说明标题为「供参考，需人工确认」"""
+        mock_input.return_value = "1"
+        condition_results = [
+            ConditionResult(passed=True, label="路径合法"),
+            ConditionResult(passed=False, label="文件存在"),
+        ]
+
+        runner.run(
+            gate=sample_gate,
+            condition_results=condition_results,
+            user_amend_count=0,
+            forced_interactive=False,
+            skipped=True,
+        )
+
+        echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
+        assert any("供参考，需人工确认" in text for text in echo_texts)
+        assert not any("自动检查项" in text for text in echo_texts)
+
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
+    def test_all_passed_shows_all_passed_header(
+        self, mock_echo, mock_input, runner, sample_gate
+    ):
+        """非 human_only 且全部通过时，说明标题为「已全部通过，需人工确认」"""
+        mock_input.return_value = "1"
+        condition_results = [
+            ConditionResult(passed=True, label="路径合法"),
+            ConditionResult(passed=True, label="文件存在"),
+        ]
+
+        runner.run(
+            gate=sample_gate,
+            condition_results=condition_results,
+            user_amend_count=0,
+            forced_interactive=False,
+            skipped=False,
+        )
+
+        echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
+        assert any("已全部通过，需人工确认" in text for text in echo_texts)
+        assert not any("存在未通过项" in text for text in echo_texts)
+
+    @patch("driving_cli.gate.interactive_runner._prompt")
+    @patch("driving_cli.gate.interactive_runner._echo")
+    def test_some_failed_shows_failed_header(
+        self, mock_echo, mock_input, runner, sample_gate
+    ):
+        """非 human_only 且存在未通过项时，说明标题为「存在未通过项，请确认后操作」"""
+        mock_input.return_value = "1"
+        condition_results = [
+            ConditionResult(passed=True, label="路径合法"),
+            ConditionResult(passed=False, label="文件存在", detail="文件不存在"),
+        ]
+
+        runner.run(
+            gate=sample_gate,
+            condition_results=condition_results,
+            user_amend_count=0,
+            forced_interactive=False,
+            skipped=False,
+        )
+
+        echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
+        assert any("存在未通过项，请确认后操作" in text for text in echo_texts)
+        assert not any("已全部通过" in text for text in echo_texts)
 
     @patch("driving_cli.gate.interactive_runner._prompt")
     @patch("driving_cli.gate.interactive_runner._echo")
     def test_passed_conditions_displayed_with_check_prefix(
         self, mock_echo, mock_input, runner, sample_gate
     ):
-        """通过的 condition 以 ✓ 前缀展示"""
+        """通过的 condition 以缩进 ✓ 前缀展示"""
         mock_input.return_value = "1"
         condition_results = [
             ConditionResult(passed=True, label="路径合法"),
@@ -361,7 +433,7 @@ class TestConditionResultsDisplay:
     def test_failed_conditions_displayed_with_cross_prefix(
         self, mock_echo, mock_input, runner, sample_gate
     ):
-        """未通过的 condition 以 ✗ 前缀展示"""
+        """未通过的 condition 以缩进 ✗ 前缀展示，detail 附加在后"""
         mock_input.return_value = "1"
         condition_results = [
             ConditionResult(passed=True, label="路径合法"),
@@ -386,7 +458,7 @@ class TestConditionResultsDisplay:
     def test_empty_condition_results_no_output(
         self, mock_echo, mock_input, runner, sample_gate
     ):
-        """condition_results 为空列表时不输出任何条件行"""
+        """condition_results 为空列表时不输出任何条件行，也不输出标题"""
         mock_input.return_value = "1"
 
         runner.run(
@@ -399,13 +471,14 @@ class TestConditionResultsDisplay:
         echo_texts = [call[0][0] for call in mock_echo.call_args_list if call[0]]
         assert not any("✗" in text for text in echo_texts)
         assert not any("✓" in text for text in echo_texts)
+        assert not any("检查项" in text for text in echo_texts)
 
     @patch("driving_cli.gate.interactive_runner._prompt")
     @patch("driving_cli.gate.interactive_runner._echo")
     def test_failed_condition_without_detail(
         self, mock_echo, mock_input, runner, sample_gate
     ):
-        """失败 condition 无 detail 时只展示 label"""
+        """失败 condition 无 detail 时只展示 label，不附加冒号"""
         mock_input.return_value = "1"
         condition_results = [
             ConditionResult(passed=False, label="路径合法"),

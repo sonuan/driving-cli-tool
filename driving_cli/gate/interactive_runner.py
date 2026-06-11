@@ -71,12 +71,13 @@ class InteractiveRunner:
         condition_results: List[ConditionResult],
         user_amend_count: int,
         forced_interactive: bool,
+        skipped: bool = False,
     ) -> Tuple[str, str]:
         """执行交互流程
 
         1. forced_interactive 时展示阈值警告
         2. user_amend_count >= 2 时展示返工提示
-        3. 输出全部 condition 结果（通过 ✓，未通过 ✗）
+        3. 输出 condition 检查说明及逐条结果（通过 ✓，未通过 ✗）
         4. 渲染并展示 template 内容
         5. 展示 action 选择菜单
         6. 如需 note，提示输入
@@ -86,6 +87,7 @@ class InteractiveRunner:
             condition_results: condition 检查结果列表
             user_amend_count: 当前修改次数
             forced_interactive: 是否由返工阈值强制触发
+            skipped: mode=human_only 时为 True，用于调整说明文案
 
         Returns:
             (action_key, note) 元组
@@ -102,12 +104,20 @@ class InteractiveRunner:
 
         # 3. 输出 condition 结果（通过显示 ✓，未通过显示 ✗）
         if condition_results:
+            if skipped:
+                _echo("📋 检查项（供参考，需人工确认）：")
+            else:
+                all_passed = all(r.passed for r in condition_results)
+                if all_passed:
+                    _echo("📋 自动检查项（已全部通过，需人工确认）：")
+                else:
+                    _echo("📋 自动检查项（存在未通过项，请确认后操作）：")
             for r in condition_results:
                 if r.passed:
-                    _echo(f"✓ {r.label}")
+                    _echo(f"  ✓ {r.label}")
                 else:
                     detail_suffix = f": {r.detail}" if r.detail else ""
-                    _echo(f"✗ {r.label}{detail_suffix}")
+                    _echo(f"  ✗ {r.label}{detail_suffix}")
             _echo()
 
         # 4. 渲染并展示 template 内容
