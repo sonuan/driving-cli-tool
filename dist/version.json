@@ -1,19 +1,19 @@
 {
-  "version": "1.3.7",
-  "build_date": "2026-06-10T21:17:04+08:00",
+  "version": "1.3.8",
+  "build_date": "2026-06-12T14:02:39+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
+      "v1.3.8",
+      "feat：driving gate request 所有mode 都显示 conditions 情况",
+      "feat：driving agent export kiro时采用copy文件方式，因为硬链接在回退代码会丢失链接",
+      "feat：统一webhooks的字段",
+      "feat：统一封装一个webhook，用户上报操作记录",
       "v1.3.7",
       "feat：支持内网打包脚本",
       "feat：driving update 支持迁移 ~/.driving-cli/driving",
       "feat：driving load cli静默更新优化",
-      "feat：解决driving update因为权限问题无法更新的问题",
-      "feat：新增install脚本和修改update不需要sudo，安装路径调整为 ～/.driving-cli/driving 然后再 /usr/local/bin 创建软链接",
-      "feat：gate 上报webhook新增owner字段",
-      "v1.3.6",
-      "feat：feature 目录结构迁移只多平台+多人协作的规范下",
-      "feat: 兼容 iOS/ios-feature.md 修改为 docs/iOS/ios-feature.md"
+      "feat：解决driving update因为权限问题无法更新的问题"
   ]
 }
