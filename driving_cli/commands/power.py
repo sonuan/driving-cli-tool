@@ -251,11 +251,11 @@ def _install_all_uninitialized(pm: PowerManager, project_root):
 
         log_info(f"正在初始化 power '{entry.name}'...")
 
-        # 计算相对于 git 根目录的 submodule 路径
+        # 计算相对于 git 根目录的 submodule 路径，统一用正斜杠
         try:
-            submodule_path = str((project_root / entry.path).relative_to(git_root))
+            submodule_path = str((project_root / entry.path).relative_to(git_root)).replace("\\", "/")
         except (ValueError, TypeError):
-            submodule_path = entry.path
+            submodule_path = entry.path.replace("\\", "/")
 
         ok = ensure_submodule_initialized(
             project_root=project_root,

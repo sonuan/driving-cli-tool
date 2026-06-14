@@ -135,6 +135,7 @@ class TestLoadCommand:
 
     def test_输出合法JSON(self, runner, tmp_project):
         with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
@@ -146,6 +147,7 @@ class TestLoadCommand:
 
     def test_输出包含必需字段(self, runner, tmp_project):
         with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
@@ -158,6 +160,7 @@ class TestLoadCommand:
 
     def test_repos始终全量输出(self, runner, tmp_project):
         with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
@@ -169,6 +172,7 @@ class TestLoadCommand:
 
     def test_repos字段不含status_version_url(self, runner, tmp_project):
         with patch("driving_cli.commands.load.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.skill.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.rule.find_project_root", return_value=tmp_project), \
              patch("driving_cli.commands.agent.find_project_root", return_value=tmp_project), \
@@ -1565,7 +1569,9 @@ class TestTryAutoUpdate:
 
     def test_更新成功返回system_prompt(self, tmp_path):
         """有新版本且更新成功时，返回 system_prompt 提示文本"""
-        user_binary = tmp_path / ".driving-cli" / "driving"
+        import sys
+        exe_name = "driving.exe" if sys.platform == "win32" else "driving"
+        user_binary = tmp_path / ".driving-cli" / exe_name
         user_binary.parent.mkdir(parents=True)
         user_binary.write_bytes(b"binary")
 
@@ -1585,7 +1591,9 @@ class TestTryAutoUpdate:
 
     def test_更新成功时system_prompt包含原始命令(self, tmp_path):
         """original_cmd 参数正确回显到 system_prompt 中"""
-        user_binary = tmp_path / ".driving-cli" / "driving"
+        import sys
+        exe_name = "driving.exe" if sys.platform == "win32" else "driving"
+        user_binary = tmp_path / ".driving-cli" / exe_name
         user_binary.parent.mkdir(parents=True)
         user_binary.write_bytes(b"binary")
 
@@ -1682,8 +1690,10 @@ class TestLoadOpReporter:
 
     def test_自动更新成功后上报load_auto_updated(self, tmp_path):
         """_try_auto_update 成功时应上报 load_auto_updated"""
+        import sys
         from driving_cli.commands.load import _try_auto_update
-        user_binary = tmp_path / ".driving-cli" / "driving"
+        exe_name = "driving.exe" if sys.platform == "win32" else "driving"
+        user_binary = tmp_path / ".driving-cli" / exe_name
         user_binary.parent.mkdir(parents=True)
         user_binary.write_bytes(b"binary")
 

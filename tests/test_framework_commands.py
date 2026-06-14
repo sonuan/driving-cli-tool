@@ -357,7 +357,7 @@ class TestFrameworkInstall:
             "creator": "测试",
             "date": "2024-01-01",
         })
-        (main_fw_dir / "gitlist.json").write_text(json.dumps(gitlist))
+        (main_fw_dir / "gitlist.json").write_text(json.dumps(gitlist, ensure_ascii=False), encoding="utf-8")
 
         with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
             result = runner.invoke(cli, ["framework", "install", "local-fw"])

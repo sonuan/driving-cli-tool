@@ -1068,7 +1068,12 @@ class TestGateRespondOwnerOption:
                 "--action", "确认",
             ])
         assert result.exit_code == 0
-        data = json.loads(result.output.split("门禁结果：\n")[1])
+        # 从输出中提取 JSON（兼容 Windows CRLF 和 stderr 混入）
+        import re as _re
+        # 查找输出中的 JSON 对象
+        json_match = _re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}', result.output, _re.DOTALL)
+        assert json_match is not None, f"未找到 JSON 输出: {result.output!r}"
+        data = json.loads(json_match.group())
         assert data["result"] in ("pass", "auto_pass", "amend")
 
     def test_不传owner时命令仍正常执行(self, runner, project_with_auto_pass_gate, tmp_path):

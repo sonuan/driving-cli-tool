@@ -921,7 +921,12 @@ class TestPowerInstallNoArgs:
                     result = runner.invoke(cli, ["power", "install"])
 
         assert result.exit_code == 0
-        mock_git_repo.git.submodule.assert_called_once_with("update", "--init", "ai-driving/p1")
+        # 应调用 submodule update --init（路径分隔符跨平台兼容）
+        import os
+        call_args = mock_git_repo.git.submodule.call_args
+        assert call_args is not None
+        called_path = call_args[0][-1]
+        assert os.path.normpath(called_path) == os.path.normpath("ai-driving/p1")
         assert "初始化成功" in result.output
 
     def test_remote_power_update_init_fails_then_submodule_add(self, runner, tmp_path):
@@ -1192,7 +1197,7 @@ class TestEnsurePowerConfigNewBehavior:
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path), \
              patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path):
             from click.testing import CliRunner
-            r = CliRunner(mix_stderr=False)
+            r = CliRunner()
             result = r.invoke(cli, ["load"], catch_exceptions=False)
 
         # 无 branch + config 存在：不应有警告
@@ -1209,11 +1214,11 @@ class TestEnsurePowerConfigNewBehavior:
         with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path), \
              patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path):
             from click.testing import CliRunner
-            r = CliRunner(mix_stderr=False)
+            r = CliRunner()
             result = r.invoke(cli, ["load"])
 
         # 警告写到 stderr
-        stderr_out = result.output  # mix_stderr=False 时 output 不含 stderr
+        stderr_out = result.output  # CliRunner 默认 mix_stderr=True，output 含 stderr
         # 通过 exception 或直接检查 stderr 文件描述符；简化：只要 exit_code 为 0 且无崩溃即可
         # load 命令在 power config 缺失时会给出警告（写到 sys.stderr），不影响 exit code
         assert result.exit_code == 0

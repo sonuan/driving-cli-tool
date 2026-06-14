@@ -526,7 +526,8 @@ class TestAllTasksDone:
     def test_全部完成(self, checker, tmp_path):
         target = tmp_path / "tasks.md"
         target.write_text(
-            "- [x] 任务1\n- [x] 任务2\n- [x] 任务3\n其他内容\n"
+            "- [x] 任务1\n- [x] 任务2\n- [x] 任务3\n其他内容\n",
+            encoding="utf-8",
         )
         result = checker.check(
             {
@@ -541,7 +542,8 @@ class TestAllTasksDone:
     def test_部分未完成(self, checker, tmp_path):
         target = tmp_path / "tasks.md"
         target.write_text(
-            "- [x] 任务1\n- [ ] 任务2\n- [x] 任务3\n"
+            "- [x] 任务1\n- [ ] 任务2\n- [x] 任务3\n",
+            encoding="utf-8",
         )
         result = checker.check(
             {
@@ -555,7 +557,7 @@ class TestAllTasksDone:
 
     def test_无匹配行视为通过(self, checker, tmp_path):
         target = tmp_path / "readme.md"
-        target.write_text("# README\n普通内容\n")
+        target.write_text("# README\n普通内容\n", encoding="utf-8")
         result = checker.check(
             {
                 "type": "all_tasks_done",

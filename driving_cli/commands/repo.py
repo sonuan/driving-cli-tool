@@ -253,11 +253,11 @@ def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
 
         log_info(f"正在初始化仓库 '{repo_cfg.name}'...")
 
-        # 计算相对于 git 根目录的 submodule 路径
+        # 计算相对于 git 根目录的 submodule 路径，统一用正斜杠
         try:
-            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root))
+            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root)).replace("\\", "/")
         except ValueError:
-            submodule_path = repo_cfg.path
+            submodule_path = repo_cfg.path.replace("\\", "/")
 
         ok = ensure_submodule_initialized(
             project_root=project_root,
@@ -419,6 +419,9 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
 
     log_info(f"正在添加远程仓库 '{repo_name}'...")
     log_info(f"仓库地址：{url}")
+
+    # 统一使用正斜杠（Windows 下 str(Path) 会用反斜杠，但 git 命令和 .gitmodules 需要正斜杠）
+    submodule_path = submodule_path.replace("\\", "/")
 
     # 清理残留的工作目录，避免 "destination path already exists" 报错
     abs_install_path = project_root / "ai-driving" / repo_name
@@ -626,11 +629,11 @@ def uninstall(repo_name: str):
 
         git_repo = git.Repo(git_root)
 
-        # 计算相对于 git 根目录的 submodule 路径
+        # 计算相对于 git 根目录的 submodule 路径，统一用正斜杠
         try:
-            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root))
+            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root)).replace("\\", "/")
         except ValueError:
-            submodule_path = repo_cfg.path
+            submodule_path = repo_cfg.path.replace("\\", "/")
 
         # 查找并移除 submodule
         submodule = None
@@ -721,9 +724,9 @@ def _git_pull(repo_cfg: RepoConfig, project_root: Path):
             log_error("当前目录不在 Git 仓库中")
             return
         try:
-            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root))
+            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root)).replace("\\", "/")
         except ValueError:
-            submodule_path = repo_cfg.path
+            submodule_path = repo_cfg.path.replace("\\", "/")
         ok = ensure_submodule_initialized(
             project_root=project_root,
             git_root=git_root,
@@ -954,9 +957,9 @@ def _git_checkout(repo_cfg: RepoConfig, project_root: Path, branch: str):
             log_error("当前目录不在 Git 仓库中")
             return
         try:
-            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root))
+            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root)).replace("\\", "/")
         except ValueError:
-            submodule_path = repo_cfg.path
+            submodule_path = repo_cfg.path.replace("\\", "/")
         ok = ensure_submodule_initialized(
             project_root=project_root,
             git_root=git_root,

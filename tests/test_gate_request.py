@@ -17,6 +17,30 @@ from driving_cli.cli import cli
 from driving_cli.gate.state_manager import GateStateManager
 
 
+def _extract_json(output: str) -> dict:
+    """从命令输出中提取第一个完整的 JSON 对象，兼容 Windows（CRLF + stderr 混入）。
+
+    先找到第一个 `{`，然后从该位置开始尝试解析；如果失败（extra data），
+    则逐步缩短尾部直到解析成功，以处理 JSON 后面混入非 JSON 内容的情况。
+    """
+    start = output.index("{")
+    text = output[start:].strip()
+    # 先尝试直接解析
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # 找到第一个 JSON 对象的结束位置（计数大括号）
+        depth = 0
+        for i, ch in enumerate(text):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return json.loads(text[: i + 1])
+        raise ValueError(f"无法从输出中提取 JSON 对象：{output!r}")
+
+
 # ==================== Fixtures ====================
 
 
@@ -230,7 +254,7 @@ class TestGateRequestBlocked:
                 ["gate", "request", "GATE-R5", "--path", str(tmp_path)],
             )
         assert result.exit_code == 0
-        output_json = json.loads(result.output[result.output.index("{"):])
+        output_json = _extract_json(result.output)
         assert output_json["result"] == "blocked"
         assert output_json["action"] == "requires_not_met"
         assert "GATE-R2" in output_json["next"]
@@ -247,7 +271,7 @@ class TestGateRequestBlocked:
                 cli,
                 ["gate", "request", "GATE-R5", "--path", str(tmp_path)],
             )
-        output_json = json.loads(result.output[result.output.index("{"):])
+        output_json = _extract_json(result.output)
         # 验证 6 个必需字段
         assert set(output_json.keys()) == {"gate_id", "result", "action", "next", "note", "user_prompt"}
         assert output_json["action"] == "requires_not_met"
@@ -271,7 +295,7 @@ class TestGateRequestAutoPassFullAuto:
                 ["gate", "request", "GATE-R5", "--path", str(tmp_path)],
             )
         assert result.exit_code == 0
-        output_json = json.loads(result.output[result.output.index("{"):])
+        output_json = _extract_json(result.output)
         assert output_json["result"] == "auto_pass"
         assert output_json["action"] == "确认"
         assert output_json["gate_id"] == "GATE-R5"
@@ -289,7 +313,7 @@ class TestGateRequestAutoPassFullAuto:
                 cli,
                 ["gate", "request", "GATE-R5", "--path", str(tmp_path)],
             )
-        output_json = json.loads(result.output[result.output.index("{"):])
+        output_json = _extract_json(result.output)
         assert "自动通过" in output_json["next"]
         assert "通过，进入下一阶段" in output_json["next"]
 
@@ -506,7 +530,7 @@ class TestGateStatus:
             ["gate", "status", "GATE-R5", "--path", str(tmp_path)],
         )
         assert result.exit_code == 0
-        output_json = json.loads(result.output[result.output.index("{"):])
+        output_json = _extract_json(result.output)
         assert output_json["request_count"] == 3
         assert output_json["auto_pass_count"] == 2
         assert output_json["last_result"] == "auto_pass"
@@ -544,7 +568,7 @@ class TestGateStatus:
             ["gate", "status", "--path", str(tmp_path)],
         )
         assert result.exit_code == 0
-        output_json = json.loads(result.output[result.output.index("{"):])
+        output_json = _extract_json(result.output)
         assert "GATE-R2" in output_json
         assert "GATE-R5" in output_json
 
@@ -562,7 +586,7 @@ class TestGateStatus:
             ["gate", "status", "GATE-NONEXIST", "--path", str(tmp_path)],
         )
         assert result.exit_code == 0
-        output_json = json.loads(result.output[result.output.index("{"):])
+        output_json = _extract_json(result.output)
         assert output_json == {}
 
 

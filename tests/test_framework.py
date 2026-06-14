@@ -107,7 +107,7 @@ class TestFrameworkLoading:
         ]
         
         gitlist_file = tmp_path / "gitlist.json"
-        gitlist_file.write_text(json.dumps(gitlist_data, ensure_ascii=False, indent=2))
+        gitlist_file.write_text(json.dumps(gitlist_data, ensure_ascii=False, indent=2), encoding="utf-8")
         
         # 读取并验证
         with open(gitlist_file, 'r', encoding='utf-8') as f:
@@ -143,7 +143,7 @@ class TestFrameworkLoading:
         ]
         
         gitlist_file = tmp_path / "gitlist.json"
-        gitlist_file.write_text(json.dumps(gitlist_data, ensure_ascii=False, indent=2))
+        gitlist_file.write_text(json.dumps(gitlist_data, ensure_ascii=False, indent=2), encoding="utf-8")
         
         # 读取并验证
         with open(gitlist_file, 'r', encoding='utf-8') as f:
