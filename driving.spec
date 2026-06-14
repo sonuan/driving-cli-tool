@@ -1,37 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec 文件 - 确保所有 driving_cli.commands 子模块被正确打包
+# PyInstaller spec 文件 - 确保所有 driving_cli 子模块被正确打包
 
-hiddenimports = [
-    'driving_cli',
-    'driving_cli.commands',
-    'driving_cli.commands.agent',
-    'driving_cli.commands.check',
-    'driving_cli.commands.feature',
-    'driving_cli.commands.framework',
-    'driving_cli.commands.gate',
-    'driving_cli.commands.ide',
-    'driving_cli.commands.load',
-    'driving_cli.commands.power',
-    'driving_cli.commands.refine',
-    'driving_cli.commands.repo',
-    'driving_cli.commands.rule',
-    'driving_cli.commands.skill',
-    'driving_cli.commands.update',
-    'driving_cli.utils',
-    'driving_cli.utils.config_manager',
-    'driving_cli.utils.logger',
-    'driving_cli.utils.op_reporter',
-    'driving_cli.utils.help_formatter',
-    'driving_cli.utils.git_helper',
-    'driving_cli.utils.match',
-]
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+
+# 强制收集 driving_cli 下所有子模块，不依赖静态分析
+all_hidden = collect_submodules('driving_cli')
 
 a = Analysis(
     ['driving_cli/cli.py'],
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=hiddenimports,
+    hiddenimports=all_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

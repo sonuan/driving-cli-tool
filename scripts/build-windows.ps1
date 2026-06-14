@@ -78,6 +78,15 @@ if ($VersionUrl) {
     # 兼容单行写法
     $content = $content -replace '(_DEFAULT_UPDATE_VERSION_URL\s*=\s*)"[^"]*"', "`$1`"$VersionUrl`""
     Set-Content "driving_cli/commands/update.py" $content -Encoding UTF8
+
+    # 验证修改后文件语法合法
+    python -m py_compile "driving_cli/commands/update.py"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Red "update.py syntax error after URL replacement, restoring backup"
+        Move-Item -Force "driving_cli/commands/update.py.bak" "driving_cli/commands/update.py"
+        exit 1
+    }
+    Write-Host "  update.py syntax OK"
 } else {
     Write-Blue "[STEP 3] Using default update URL from source code"
 }
