@@ -163,7 +163,11 @@ def _collect_all_gates_data() -> Tuple[List[Dict], str, str, int]:
         all_gates,
         "\n".join(system_prompts),
         user_prompt or "按 next 字段执行后续动作",
-        self_refine_threshold if self_refine_threshold is not None else _DEFAULT_SELF_REFINE_THRESHOLD,
+        (
+            self_refine_threshold
+            if self_refine_threshold is not None
+            else _DEFAULT_SELF_REFINE_THRESHOLD
+        ),
     )
 
 
@@ -324,7 +328,7 @@ def gate_load(gate_ids: tuple):
 
     # 传了 ID：按 ID 查找
     id_lower_set = {gid.lower() for gid in gate_ids}
-    found: Dict[str, Dict] = {}          # lower_id -> gate 对象（第一个匹配）
+    found: Dict[str, Dict] = {}  # lower_id -> gate 对象（第一个匹配）
     duplicate_ids: Dict[str, List[str]] = {}  # lower_id -> 重复仓库列表
 
     project_root = find_project_root()
@@ -370,8 +374,14 @@ def gate_load(gate_ids: tuple):
 @gate_group.command(name="request")
 @click.argument("gate_id")
 @click.option("--path", required=True, help="feature 目录路径")
-@click.option("--platform", default="", help="开发平台（android/iOS/harmony/kuikly），决定 gate-state.json 写入路径")
-@click.option("--owner", default="", help="负责人标识，如 main、apple 或 owner-main；用于计算 $vars.owner_dir")
+@click.option(
+    "--platform",
+    default="",
+    help="开发平台（android/iOS/harmony/kuikly），决定 gate-state.json 写入路径",
+)
+@click.option(
+    "--owner", default="", help="负责人标识，如 main、apple 或 owner-main；用于计算 $vars.owner_dir"
+)
 @click.option("--context", default=None, help="JSON 字符串，用于模板变量渲染")
 @click.option("--dry-run", is_flag=True, default=False, help="仅展示模板，不执行交互")
 def gate_request(gate_id: str, path: str, platform: str, owner: str, context: str, dry_run: bool):
@@ -410,7 +420,9 @@ def gate_request(gate_id: str, path: str, platform: str, owner: str, context: st
         "last_result": gate_state.last_result,
     }
 
-    renderer = TemplateRenderer(path, context_dict, gate_state_dict, _build_gate_vars(path, platform, owner))
+    renderer = TemplateRenderer(
+        path, context_dict, gate_state_dict, _build_gate_vars(path, platform, owner)
+    )
     checker = ConditionChecker(renderer)
     auto_pass_engine = AutoPassEngine(checker)
     requires_checker = RequiresChecker(state_manager, all_gates)
@@ -471,9 +483,7 @@ def gate_request(gate_id: str, path: str, platform: str, owner: str, context: st
 
     # 6b. Auto_pass 检查
     auto_pass_config = gate.get("auto_pass", {"mode": "human_only"})
-    auto_pass_result = auto_pass_engine.evaluate(
-        auto_pass_config, gate_state.user_amend_count
-    )
+    auto_pass_result = auto_pass_engine.evaluate(auto_pass_config, gate_state.user_amend_count)
 
     if auto_pass_result.passed:
         # auto_pass 成功
@@ -509,7 +519,9 @@ def gate_request(gate_id: str, path: str, platform: str, owner: str, context: st
             next_text = action_next
 
         # 记录状态
-        state_manager.record_result(gate_id, "auto_pass", action_key, gate_name=gate.get("name", ""))
+        state_manager.record_result(
+            gate_id, "auto_pass", action_key, gate_name=gate.get("name", "")
+        )
 
         # 读取最新状态，构建 self_refine（user_amend_count >= threshold 时触发）
         updated_state = state_manager.get_gate_state(gate_id)
@@ -578,11 +590,9 @@ def gate_request(gate_id: str, path: str, platform: str, owner: str, context: st
         platform_opt = f' --platform "{platform}"' if platform else ""
         owner_opt = f' --owner "{owner}"' if owner else ""
         click.echo("")
+        click.echo(f"💡 非交互环境，请使用以下命令提交选择：")
         click.echo(
-            f"💡 非交互环境，请使用以下命令提交选择："
-        )
-        click.echo(
-            f"  driving gate respond {gate_id} --path \"{path}\"{platform_opt}{owner_opt} --action <操作名> --note \"说明\""
+            f'  driving gate respond {gate_id} --path "{path}"{platform_opt}{owner_opt} --action <操作名> --note "说明"'
         )
         if action_names:
             click.echo(f"  可选操作: {', '.join(action_names)}")
@@ -604,13 +614,19 @@ def gate_request(gate_id: str, path: str, platform: str, owner: str, context: st
         next_text = renderer.render(selected_action.get("next", ""))
 
     # 记录状态
-    state_manager.record_result(gate_id, result_type, action_key, note, gate_name=gate.get("name", ""))
+    state_manager.record_result(
+        gate_id, result_type, action_key, note, gate_name=gate.get("name", "")
+    )
 
     # 读取最新状态
     updated_state = state_manager.get_gate_state(gate_id)
 
     # 构建 self_refine（仅 pass 时触发，amend 不触发）
-    self_refine = build_self_refine(updated_state, threshold=self_refine_threshold) if result_type == "pass" else None
+    self_refine = (
+        build_self_refine(updated_state, threshold=self_refine_threshold)
+        if result_type == "pass"
+        else None
+    )
 
     # 构建 user_prompt（触发 self-refine 时追加动态提示）
     effective_user_prompt = user_prompt
@@ -654,7 +670,9 @@ def gate_request(gate_id: str, path: str, platform: str, owner: str, context: st
 @click.argument("gate_id", required=False, default=None)
 @click.option("--path", required=True, help="feature 目录路径")
 @click.option("--platform", default="", help="开发平台（android/iOS/harmony/kuikly）")
-@click.option("--owner", default="", help="负责人标识，如 main、apple 或 owner-main；用于计算 $vars.owner_dir")
+@click.option(
+    "--owner", default="", help="负责人标识，如 main、apple 或 owner-main；用于计算 $vars.owner_dir"
+)
 def gate_status(gate_id: Optional[str], path: str, platform: str, owner: str):
     """查看门禁状态"""
     state_manager = GateStateManager(path, platform, owner)
@@ -681,7 +699,9 @@ def gate_status(gate_id: Optional[str], path: str, platform: str, owner: str):
 @click.argument("gate_id")
 @click.option("--path", required=True, help="feature 目录路径")
 @click.option("--platform", default="", help="开发平台（android/iOS/harmony/kuikly）")
-@click.option("--owner", default="", help="负责人标识，如 main、apple 或 owner-main；用于计算 $vars.owner_dir")
+@click.option(
+    "--owner", default="", help="负责人标识，如 main、apple 或 owner-main；用于计算 $vars.owner_dir"
+)
 def gate_history(gate_id: str, path: str, platform: str, owner: str):
     """查看门禁历史"""
     state_manager = GateStateManager(path, platform, owner)
@@ -695,16 +715,19 @@ def gate_history(gate_id: str, path: str, platform: str, owner: str):
         click.echo(f"{entry.at}  {entry.action}  {entry.note}")
 
 
-
 @gate_group.command(name="respond")
 @click.argument("gate_id")
 @click.option("--path", required=True, help="feature 目录路径")
 @click.option("--platform", default="", help="开发平台（android/iOS/harmony/kuikly）")
-@click.option("--owner", default="", help="负责人标识，如 main、apple 或 owner-main；用于计算 $vars.owner_dir")
+@click.option(
+    "--owner", default="", help="负责人标识，如 main、apple 或 owner-main；用于计算 $vars.owner_dir"
+)
 @click.option("--action", required=True, help="操作名称（actions 中的 key）")
 @click.option("--note", default="", help="操作说明（修改类操作时必填）")
 @click.option("--context", default=None, help="JSON 字符串，用于模板变量渲染")
-def gate_respond(gate_id: str, path: str, platform: str, owner: str, action: str, note: str, context: str):
+def gate_respond(
+    gate_id: str, path: str, platform: str, owner: str, action: str, note: str, context: str
+):
     """非交互式提交门禁操作选择（配合 gate request 在非终端环境使用）"""
     # 1. 解析 --context JSON
     context_dict = {}
@@ -759,7 +782,9 @@ def gate_respond(gate_id: str, path: str, platform: str, owner: str, action: str
         "pass_rate": gate_state.pass_rate,
         "last_result": gate_state.last_result,
     }
-    renderer = TemplateRenderer(path, context_dict, gate_state_dict, _build_gate_vars(path, platform, owner))
+    renderer = TemplateRenderer(
+        path, context_dict, gate_state_dict, _build_gate_vars(path, platform, owner)
+    )
 
     # 5. 确定 result_type
     selected_action = actions[action_key]
@@ -777,13 +802,19 @@ def gate_respond(gate_id: str, path: str, platform: str, owner: str, action: str
         next_text = renderer.render(selected_action.get("next", ""))
 
     # 6. 记录状态
-    state_manager.record_result(gate_id, result_type, action_key, note, gate_name=gate.get("name", ""))
+    state_manager.record_result(
+        gate_id, result_type, action_key, note, gate_name=gate.get("name", "")
+    )
 
     # 7. 读取最新状态
     updated_state = state_manager.get_gate_state(gate_id)
 
     # 8. 构建 self_refine（仅 pass 时触发）
-    self_refine = build_self_refine(updated_state, threshold=self_refine_threshold) if result_type == "pass" else None
+    self_refine = (
+        build_self_refine(updated_state, threshold=self_refine_threshold)
+        if result_type == "pass"
+        else None
+    )
 
     # 9. 构建 user_prompt
     effective_user_prompt = user_prompt

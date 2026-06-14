@@ -77,9 +77,7 @@ class GateStateManager:
             content = self.state_file.read_text(encoding="utf-8")
             return json.loads(content)
         except (json.JSONDecodeError, ValueError):
-            raise click.ClickException(
-                "gate-state.json 格式非法，请检查文件内容"
-            )
+            raise click.ClickException("gate-state.json 格式非法，请检查文件内容")
 
     def get_gate_state(self, gate_id: str) -> GateState:
         """获取指定 gate 的状态，不存在时返回默认值"""
@@ -137,16 +135,19 @@ class GateStateManager:
             data["gates"] = {}
 
         # 获取或初始化 gate 数据
-        gate_data = data["gates"].get(gate_id, {
-            "name": "",
-            "request_count": 0,
-            "auto_pass_count": 0,
-            "user_pass_count": 0,
-            "user_amend_count": 0,
-            "pass_rate": 0.0,
-            "last_result": "",
-            "history": [],
-        })
+        gate_data = data["gates"].get(
+            gate_id,
+            {
+                "name": "",
+                "request_count": 0,
+                "auto_pass_count": 0,
+                "user_pass_count": 0,
+                "user_amend_count": 0,
+                "pass_rate": 0.0,
+                "last_result": "",
+                "history": [],
+            },
+        )
 
         # 更新 name（始终以最新定义为准）
         if gate_name:

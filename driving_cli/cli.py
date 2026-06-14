@@ -3,9 +3,22 @@
 import click
 
 from driving_cli import __version__
-from driving_cli.commands import agent, check, feature, framework, gate, ide, load, power, refine, repo, rule, skill, update
+from driving_cli.commands import (
+    agent,
+    check,
+    feature,
+    framework,
+    gate,
+    ide,
+    load,
+    power,
+    refine,
+    repo,
+    rule,
+    skill,
+    update,
+)
 from driving_cli.utils.help_formatter import patch_click_help
-
 
 # 全局替换 Click 的 help 渲染，所有命令自动生效
 patch_click_help()
@@ -14,9 +27,7 @@ patch_click_help()
 @click.group()
 @click.version_option(version=__version__)
 def cli():
-    """Driving CLI Tool - AI Coding 工程化管理工具
-
-    """
+    """Driving CLI Tool - AI Coding 工程化管理工具"""
     pass
 
 
@@ -59,7 +70,6 @@ cli.add_command(check.check)
 
 # 注册 load 命令
 cli.add_command(load.load)
-
 
 
 if __name__ == "__main__":

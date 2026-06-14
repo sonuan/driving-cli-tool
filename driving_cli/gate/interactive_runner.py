@@ -156,9 +156,7 @@ class InteractiveRunner:
         completer = WordCompleter(number_strs + action_keys, sentence=True)
 
         # 底部工具栏：[1] 确认  [2] 跳过拆解  [3] 补充
-        toolbar_parts = "  ".join(
-            f"<b>[{i}]</b> {key}" for i, key in enumerate(action_keys, 1)
-        )
+        toolbar_parts = "  ".join(f"<b>[{i}]</b> {key}" for i, key in enumerate(action_keys, 1))
         toolbar = toolbar_parts
 
         while True:

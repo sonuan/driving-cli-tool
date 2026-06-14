@@ -84,7 +84,11 @@ def _parse_refine_frontmatter(file_path: Path) -> Optional[Dict]:
             "target_file": str(data.get("target_file", "")),
             "description": str(data.get("description", "")),
             "operator": str(data.get("operator", "")),
-            "trigger": data.get("trigger") if isinstance(data.get("trigger"), dict) else _parse_trigger_block(file_path),
+            "trigger": (
+                data.get("trigger")
+                if isinstance(data.get("trigger"), dict)
+                else _parse_trigger_block(file_path)
+            ),
             "status": str(data.get("status", "pending")),
         }
     except Exception as e:
@@ -92,7 +96,9 @@ def _parse_refine_frontmatter(file_path: Path) -> Optional[Dict]:
         return None
 
 
-def _scan_refines(repo_name: str, refines_dir: Path, type_filter: Optional[str] = None) -> List[Dict]:
+def _scan_refines(
+    repo_name: str, refines_dir: Path, type_filter: Optional[str] = None
+) -> List[Dict]:
     """扫描单个仓库的 refines/ 目录，返回 refine 信息列表。"""
     results = []
     for f in sorted(refines_dir.iterdir()):
@@ -103,16 +109,18 @@ def _scan_refines(repo_name: str, refines_dir: Path, type_filter: Optional[str] 
             continue
         if type_filter and meta["target_type"] != type_filter:
             continue
-        results.append({
-            "name": f.stem,
-            "description": meta["description"],
-            "path": f"ai-driving/{repo_name}/refines/{f.name}",
-            "date": meta["date"],
-            "target_type": meta["target_type"],
-            "target_name": meta["target_name"],
-            "status": meta["status"],
-            "_file": f,  # 内部用，load 时读取正文
-        })
+        results.append(
+            {
+                "name": f.stem,
+                "description": meta["description"],
+                "path": f"ai-driving/{repo_name}/refines/{f.name}",
+                "date": meta["date"],
+                "target_type": meta["target_type"],
+                "target_name": meta["target_name"],
+                "status": meta["status"],
+                "_file": f,  # 内部用，load 时读取正文
+            }
+        )
     return results
 
 
@@ -212,8 +220,13 @@ def refine_group():
 
 
 @refine_group.command(name="list")
-@click.option("--type", "type_filter", type=click.Choice(VALID_TYPES), default=None,
-              help="只显示指定类型的 refine（skill/rule/agent/framework）")
+@click.option(
+    "--type",
+    "type_filter",
+    type=click.Choice(VALID_TYPES),
+    default=None,
+    help="只显示指定类型的 refine（skill/rule/agent/framework）",
+)
 @click.option("--repo", "repo_name", default=None, help="只显示指定仓库的 refine")
 def refine_list(type_filter: Optional[str], repo_name: Optional[str]):
     """列出所有 pending 状态的 refine 提案，按类型分组显示。
@@ -259,7 +272,9 @@ def refine_list(type_filter: Optional[str], repo_name: Optional[str]):
                 click.echo(f"  [{ttype}]")
                 for item in group:
                     desc = item["description"] or "-"
-                    click.echo(f"    {item['date']}  {item['target_name']}  {desc}  ({item['status']})")
+                    click.echo(
+                        f"    {item['date']}  {item['target_name']}  {desc}  ({item['status']})"
+                    )
                     total += 1
                 if i < len(type_groups) - 1:
                     click.echo("")
@@ -277,8 +292,13 @@ def refine_list(type_filter: Optional[str], repo_name: Optional[str]):
 
 @refine_group.command(name="load")
 @click.argument("names", nargs=-1, required=False)
-@click.option("--type", "type_filter", type=click.Choice(VALID_TYPES), default=None,
-              help="只加载指定类型的 refine（skill/rule/agent/framework）")
+@click.option(
+    "--type",
+    "type_filter",
+    type=click.Choice(VALID_TYPES),
+    default=None,
+    help="只加载指定类型的 refine（skill/rule/agent/framework）",
+)
 def refine_load(names: tuple, type_filter: Optional[str]):
     """输出 refine 提案内容，供 AI 注入上下文检索历史优化经验。
 
@@ -303,11 +323,13 @@ def refine_load(names: tuple, type_filter: Optional[str]):
                 # 名称过滤：文件名包含任意一个关键词即命中
                 if names and not any(n in item["name"] for n in names):
                     continue
-                output.append({
-                    "name": item["name"],
-                    "description": item["description"],
-                    "path": item["path"],
-                })
+                output.append(
+                    {
+                        "name": item["name"],
+                        "description": item["description"],
+                        "path": item["path"],
+                    }
+                )
 
         click.echo(json_module.dumps(output, ensure_ascii=False, indent=2))
 
@@ -319,8 +341,13 @@ def refine_load(names: tuple, type_filter: Optional[str]):
 @refine_group.command(name="commit")
 @click.argument("repo_name")
 @click.option("--no-push", is_flag=True, default=False, help="只 commit，不执行 push（离线场景）")
-@click.option("--file", "file_paths", multiple=True, required=True,
-              help="要提交的文件路径（相对于仓库根目录），可多次指定")
+@click.option(
+    "--file",
+    "file_paths",
+    multiple=True,
+    required=True,
+    help="要提交的文件路径（相对于仓库根目录），可多次指定",
+)
 def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
     """提交指定文件到 git（add + commit + push）
 
@@ -440,7 +467,9 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
                     # 检查远端是否有本地没有的提交
                     behind_commits = list(repo.iter_commits(f"{local_commit}..{remote_ref}"))
                     if behind_commits:
-                        click.echo(f"\n远端有 {len(behind_commits)} 个新提交，建议先 pull 再 push。")
+                        click.echo(
+                            f"\n远端有 {len(behind_commits)} 个新提交，建议先 pull 再 push。"
+                        )
                         do_pull = click.confirm("是否先执行 pull？", default=True)
                         if do_pull:
                             repo.remotes.origin.pull(current_branch)
@@ -487,6 +516,7 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
 # 内部辅助：规范化 refine 文件路径
 # ---------------------------------------------------------------------------
 
+
 def _normalize_refine_path(fp: str, repo_dir: Path) -> str:
     """将用户传入的路径规范化为相对于仓库根目录的路径。
 
@@ -511,7 +541,7 @@ def _normalize_refine_path(fp: str, repo_dir: Path) -> str:
         # 找到 repo_dir 最后一级目录名在 parts 中的位置
         repo_dirname = repo_dir.name
         idx = next(i for i, part in enumerate(parts) if part == repo_dirname)
-        return str(Path(*parts[idx + 1:]))
+        return str(Path(*parts[idx + 1 :]))
     except StopIteration:
         pass
 
@@ -526,21 +556,51 @@ def _normalize_refine_path(fp: str, repo_dir: Path) -> str:
 # refine merge 命令
 # ---------------------------------------------------------------------------
 
+
 @refine_group.command(name="merge")
 @click.argument("repo_name")
-@click.option("--file", "file_paths", multiple=True, required=True,
-              help="已合并的 refine 文件路径（相对于仓库根目录），可多次指定")
-@click.option("--changed-file", "changed_files", multiple=True, default=[],
-              help="实际被修改的正式文件路径（相对于仓库根目录），可多次指定。未传时降级使用 target_file")
-@click.option("--operator", "operator", default="",
-              help="操作者名称，写入 REFINE_LOG 记录，默认取 refine 文件的 operator 字段")
-@click.option("--trigger-source", "trigger_source", default="",
-              help="本次合并操作的触发来源（gate / self / manual），上报 webhook 时使用")
-@click.option("--trigger-reason", "trigger_reason", default="",
-              help="本次合并操作的触发原因，上报 webhook 时使用")
+@click.option(
+    "--file",
+    "file_paths",
+    multiple=True,
+    required=True,
+    help="已合并的 refine 文件路径（相对于仓库根目录），可多次指定",
+)
+@click.option(
+    "--changed-file",
+    "changed_files",
+    multiple=True,
+    default=[],
+    help="实际被修改的正式文件路径（相对于仓库根目录），可多次指定。未传时降级使用 target_file",
+)
+@click.option(
+    "--operator",
+    "operator",
+    default="",
+    help="操作者名称，写入 REFINE_LOG 记录，默认取 refine 文件的 operator 字段",
+)
+@click.option(
+    "--trigger-source",
+    "trigger_source",
+    default="",
+    help="本次合并操作的触发来源（gate / self / manual），上报 webhook 时使用",
+)
+@click.option(
+    "--trigger-reason",
+    "trigger_reason",
+    default="",
+    help="本次合并操作的触发原因，上报 webhook 时使用",
+)
 @click.option("--no-push", is_flag=True, default=False, help="只 commit，不执行 push")
-def refine_merge(repo_name: str, file_paths: tuple, changed_files: tuple, operator: str,
-                 trigger_source: str, trigger_reason: str, no_push: bool):
+def refine_merge(
+    repo_name: str,
+    file_paths: tuple,
+    changed_files: tuple,
+    operator: str,
+    trigger_source: str,
+    trigger_reason: str,
+    no_push: bool,
+):
     """完成 refine 合并收尾：追加 REFINE_LOG → 上报 webhook → 删除 refine 文件 → commit/push。
 
     在 AI 将变更内容写入正式文件后调用本命令，完成合并流程的剩余步骤。
@@ -588,7 +648,9 @@ def refine_merge(repo_name: str, file_paths: tuple, changed_files: tuple, operat
         # 展示待处理清单
         click.echo(f"\n待合并 refine（共 {len(items)} 个）：")
         for item in items:
-            click.echo(f"  {item['fp']}  [{item['meta']['target_type']}] {item['meta']['target_name']}")
+            click.echo(
+                f"  {item['fp']}  [{item['meta']['target_type']}] {item['meta']['target_name']}"
+            )
 
         click.echo("")
         confirmed = click.confirm("确认执行合并收尾？", default=True)
@@ -686,9 +748,11 @@ def refine_merge(repo_name: str, file_paths: tuple, changed_files: tuple, operat
 
         # 自动生成 commit message，格式：target_name: description
         parts = [
-            f"{item['meta']['target_name']}: {item['meta']['description']}"
-            if item["meta"].get("description")
-            else item["meta"]["target_name"]
+            (
+                f"{item['meta']['target_name']}: {item['meta']['description']}"
+                if item["meta"].get("description")
+                else item["meta"]["target_name"]
+            )
             for item in items
         ]
         summary = "; ".join(parts[:3])
@@ -733,8 +797,6 @@ def refine_merge(repo_name: str, file_paths: tuple, changed_files: tuple, operat
     except Exception as e:
         log_error(f"refine merge 失败: {e}")
         raise click.Abort()
-
-
 
 
 @refine_group.group(name="log")

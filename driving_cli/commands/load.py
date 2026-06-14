@@ -107,6 +107,7 @@ def _try_auto_update(original_cmd: str = "driving load") -> Optional[str]:
     from pathlib import Path as _Path
 
     import sys as _sys
+
     _exe_name = "driving.exe" if _sys.platform == "win32" else "driving"
     user_binary = _Path.home() / ".driving-cli" / _exe_name
     if not user_binary.exists():
@@ -346,7 +347,10 @@ def _init_unloaded_submodules() -> None:
                 try:
                     repo_git = _git.Repo(repo_dir)
                     try:
-                        if not repo_git.head.is_detached and repo_git.active_branch.name == target_branch:
+                        if (
+                            not repo_git.head.is_detached
+                            and repo_git.active_branch.name == target_branch
+                        ):
                             _dbg(f"  {label} 已在分支 '{target_branch}'，跳过切换")
                             continue
                     except Exception:
@@ -372,6 +376,7 @@ def _init_unloaded_submodules() -> None:
 
     # ---- 1. Power 模式检测 ----
     from driving_cli.utils.config_manager import PowerManager, POWER_FILE_NAME, CONFIG_FILE_NAME
+
     power_file = project_root / POWER_FILE_NAME
 
     if power_file.exists():
@@ -422,6 +427,7 @@ def _init_unloaded_submodules() -> None:
 
     # ---- 2. 传统模式：检测根目录 driving.config.json 下的 repos ----
     from driving_cli.utils.config_manager import CONFIG_FILE_NAME as _CFG
+
     root_config = project_root / _CFG
     if root_config.exists():
         _dbg("检测传统模式 repos ...")
@@ -436,6 +442,7 @@ def _check_and_pull_powers() -> None:
     t = time.perf_counter()
     try:
         from driving_cli.utils.config_manager import PowerManager
+
         project_root = find_project_root()
         pm = PowerManager(project_root)
         if not pm.exists():
@@ -443,7 +450,9 @@ def _check_and_pull_powers() -> None:
             return
 
         updatable = pm.check_power_updates()
-        _dbg(f"power 更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，有更新的 power 数={len(updatable)}")
+        _dbg(
+            f"power 更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，有更新的 power 数={len(updatable)}"
+        )
 
         for entry in updatable:
             _dbg(f"自动拉取 power '{entry.name}' ...")
@@ -470,20 +479,27 @@ def _check_and_pull_repos() -> str:
             elif rate == -1:
                 _dbg(f"  仓库 '{repo_name}'：采样率=-1（auto_pull），始终检测")
             else:
-                _dbg(f"  仓库 '{repo_name}'：采样率={rate}，随机值={roll}，{'命中' if hit else '未命中'}")
+                _dbg(
+                    f"  仓库 '{repo_name}'：采样率={rate}，随机值={roll}，{'命中' if hit else '未命中'}"
+                )
 
-        _dbg(f"仓库更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，可更新仓库数={len(updatable)}，自动拉取数={len(auto_pull)}")
+        _dbg(
+            f"仓库更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，可更新仓库数={len(updatable)}，自动拉取数={len(auto_pull)}"
+        )
 
         # 自动拉取 check_sample_rate=-1 的仓库
         if auto_pull:
             import subprocess as _sp
+
             auto_pull_names = {r.name for r in auto_pull}
             for repo in auto_pull:
                 _dbg(f"自动拉取仓库 '{repo.name}' ...")
                 try:
                     _sp.run(
                         ["driving", "repo", "pull", repo.name],
-                        stdout=_sp.DEVNULL, stderr=_sp.DEVNULL, timeout=30,
+                        stdout=_sp.DEVNULL,
+                        stderr=_sp.DEVNULL,
+                        timeout=30,
                     )
                 except Exception as e:
                     _dbg(f"自动拉取 '{repo.name}' 失败：{e}")
@@ -532,10 +548,19 @@ def _build_notifications(repo_update_msg: str = "") -> str:
 @click.command("load")
 @click.argument("keywords", nargs=-1, required=False)
 @click.option("--debug", is_flag=True, default=False, help="输出调试日志")
-@click.option("--with", "with_modules", default="", metavar="MODULES",
-              help="附带额外模块，逗号分隔，可选值：framework, agent")
-@click.option("--platform", default="", metavar="PLATFORM",
-              help="当前开发平台（android/iOS/harmony/kuikly），注入 platform 字段到返回值")
+@click.option(
+    "--with",
+    "with_modules",
+    default="",
+    metavar="MODULES",
+    help="附带额外模块，逗号分隔，可选值：framework, agent",
+)
+@click.option(
+    "--platform",
+    default="",
+    metavar="PLATFORM",
+    help="当前开发平台（android/iOS/harmony/kuikly），注入 platform 字段到返回值",
+)
 def load(keywords: tuple, debug: bool, with_modules: str, platform: str):
     """一次性输出所有上下文数据（skills、rules、repos、prompts），供 AI 会话注入
 
@@ -561,9 +586,12 @@ def load(keywords: tuple, debug: bool, with_modules: str, platform: str):
 
     # 支持逗号分隔：将 ("a,b", "c") 展开为 ("a", "b", "c")
     from driving_cli.utils.match import normalize_keywords
+
     keywords = normalize_keywords(keywords)
 
-    _dbg(f"driving load 开始，版本={__version__}，keywords={keywords}，with={with_modules}，platform={platform}")
+    _dbg(
+        f"driving load 开始，版本={__version__}，keywords={keywords}，with={with_modules}，platform={platform}"
+    )
     try:
         project_root = find_project_root()
         config_manager = ConfigManager(project_root)
@@ -592,10 +620,13 @@ def load(keywords: tuple, debug: bool, with_modules: str, platform: str):
             _dbg(f"CLI 自动更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
             if update_msg:
                 # 更新成功：只返回 system_prompt，要求 AI 重新执行 driving load
-                click.echo(json.dumps(
-                    {"cli_version": __version__, "system_prompt": update_msg},
-                    ensure_ascii=False, indent=2
-                ))
+                click.echo(
+                    json.dumps(
+                        {"cli_version": __version__, "system_prompt": update_msg},
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
                 return
             t = time.perf_counter()
             _init_unloaded_submodules()
@@ -622,19 +653,25 @@ def load(keywords: tuple, debug: bool, with_modules: str, platform: str):
         if not keywords:
             t = time.perf_counter()
             repos = collect_repos(keywords)
-            _dbg(f"collect_repos 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(repos)}")
+            _dbg(
+                f"collect_repos 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(repos)}"
+            )
 
         frameworks = None
         if "framework" in modules:
             t = time.perf_counter()
             frameworks = collect_frameworks(keywords)
-            _dbg(f"collect_frameworks 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(frameworks)}")
+            _dbg(
+                f"collect_frameworks 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(frameworks)}"
+            )
 
         agents_data = None
         if "agent" in modules:
             t = time.perf_counter()
             agents_data = collect_agents(keywords)
-            _dbg(f"collect_agents 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(agents_data)}")
+            _dbg(
+                f"collect_agents 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(agents_data)}"
+            )
 
         result = {"cli_version": __version__}
 
@@ -656,7 +693,9 @@ def load(keywords: tuple, debug: bool, with_modules: str, platform: str):
         if not keywords:
             t = time.perf_counter()
             system_prompt = _collect_repo_system_prompts()
-            _dbg(f"collect_repo_system_prompts 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，长度={len(system_prompt)}")
+            _dbg(
+                f"collect_repo_system_prompts 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，长度={len(system_prompt)}"
+            )
 
             t = time.perf_counter()
             notifications = _build_notifications(repo_update_msg)

@@ -29,4 +29,4 @@ def _preserve_get_help(self: click.BaseCommand, ctx: click.Context) -> str:
 def patch_click_help() -> None:
     """全局替换 Click 所有命令的 get_help，一次调用，全局生效"""
     click.BaseCommand.get_help = _preserve_get_help  # type: ignore[method-assign]
-    click.Command.get_help = _preserve_get_help      # type: ignore[method-assign]
+    click.Command.get_help = _preserve_get_help  # type: ignore[method-assign]

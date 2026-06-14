@@ -14,12 +14,7 @@ def normalize_keywords(keywords: tuple) -> tuple:
     Returns:
         展开后的关键词元组
     """
-    return tuple(
-        part.strip()
-        for kw in keywords
-        for part in kw.split(",")
-        if part.strip()
-    )
+    return tuple(part.strip() for kw in keywords for part in kw.split(",") if part.strip())
 
 
 def fuzzy_match(text: str, keywords: tuple) -> bool:

@@ -119,7 +119,9 @@ def framework_group():
 @click.argument("framework_name", required=False)
 @click.option("--table", "output_table", is_flag=True, help="以表格格式输出")
 @click.option("--json", "output_json", is_flag=True, help="以 JSON 格式输出（默认）")
-def framework_list(framework_name: Optional[str] = None, output_table: bool = False, output_json: bool = False):
+def framework_list(
+    framework_name: Optional[str] = None, output_table: bool = False, output_json: bool = False
+):
     """显示可用的框架列表（默认 JSON 格式）
 
     合并所有已安装仓库的 gitlist.json 并展示完整框架列表，
@@ -175,11 +177,13 @@ def framework_list(framework_name: Optional[str] = None, output_table: bool = Fa
                     processed.append(fw_copy)
                 else:
                     # 默认列表，只输出 3 个核心字段
-                    processed.append({
-                        "name": fw.get("name", ""),
-                        "description": fw.get("description", ""),
-                        "repo": repo_name_for_fw,
-                    })
+                    processed.append(
+                        {
+                            "name": fw.get("name", ""),
+                            "description": fw.get("description", ""),
+                            "repo": repo_name_for_fw,
+                        }
+                    )
 
             output_data = {
                 "frameworks": processed,
@@ -438,9 +442,7 @@ def framework_sources(framework_name: str):
                     # 本地项目：使用当前项目根目录
                     try:
                         project_root = find_git_root()
-                        fw_copy["sources"] = [
-                            f"{project_root}/{s}" for s in fw_copy["sources"]
-                        ]
+                        fw_copy["sources"] = [f"{project_root}/{s}" for s in fw_copy["sources"]]
                     except Exception as e:
                         log_error(f"获取本地项目路径失败: {e}")
                         raise click.Abort()
@@ -474,8 +476,16 @@ def framework_sources(framework_name: str):
 
         # 只保留核心字段
         core_fields = [
-            "name", "repo", "description", "project_name", "url",
-            "branch", "module", "creator", "date", "sources",
+            "name",
+            "repo",
+            "description",
+            "project_name",
+            "url",
+            "branch",
+            "module",
+            "creator",
+            "date",
+            "sources",
         ]
         result["repo"] = result.pop("_repo_name", repo_name)
         filtered_result = {k: v for k, v in result.items() if k in core_fields}
@@ -488,8 +498,6 @@ def framework_sources(framework_name: str):
     except Exception as e:
         log_error(f"获取源码列表失败: {e}")
         raise click.Abort()
-
-
 
 
 def _parse_yaml_frontmatter(file_path: Path) -> Dict[str, str]:
@@ -544,12 +552,14 @@ def collect_frameworks(keywords: tuple = (), category: Optional[str] = None) -> 
             if not framework_md.exists():
                 continue
             meta = _parse_yaml_frontmatter(framework_md)
-            repo_results.append({
-                "name": meta.get("name", fw_dir.name),
-                "description": meta.get("description", ""),
-                "category": meta.get("category", ""),
-                "path": f"ai-driving/{repo.name}/frameworks/{fw_dir.name}",
-            })
+            repo_results.append(
+                {
+                    "name": meta.get("name", fw_dir.name),
+                    "description": meta.get("description", ""),
+                    "category": meta.get("category", ""),
+                    "path": f"ai-driving/{repo.name}/frameworks/{fw_dir.name}",
+                }
+            )
         all_by_repo[repo.name] = repo_results
 
     # 按关键词过滤：repo.name 命中则取整个仓库，framework.name 命中则精确匹配
@@ -567,13 +577,17 @@ def collect_frameworks(keywords: tuple = (), category: Optional[str] = None) -> 
             _add(repo_items)
     else:
         from driving_cli.utils.match import fuzzy_match_any
+
         kw_lower = tuple(k.lower() for k in keywords)
         for repo_name, repo_items in all_by_repo.items():
             if repo_name.lower() in kw_lower:
                 _add(repo_items)
                 continue
-            matched = [fw for fw in repo_items
-                       if fuzzy_match_any((fw["name"], fw.get("description", "")), keywords)]
+            matched = [
+                fw
+                for fw in repo_items
+                if fuzzy_match_any((fw["name"], fw.get("description", "")), keywords)
+            ]
             _add(matched)
 
     if category:
@@ -612,7 +626,7 @@ def collect_framework_categories() -> List[Dict]:
             data = json.loads(manifest_path.read_text(encoding="utf-8"))
         except Exception:
             continue
-        for c in (data.get("categories") or []):
+        for c in data.get("categories") or []:
             name = (c.get("name") or "").strip()
             if name and name not in descriptions:
                 descriptions[name] = c.get("description", "")
@@ -626,7 +640,9 @@ def collect_framework_categories() -> List[Dict]:
 
 
 @framework_group.command(name="load")
-@click.option("--category", "category", default=None, help="按 category 过滤（如 ui-component），不区分大小写")
+@click.option(
+    "--category", "category", default=None, help="按 category 过滤（如 ui-component），不区分大小写"
+)
 @click.argument("keywords", nargs=-1, required=False)
 def framework_load(category: Optional[str] = None, keywords: tuple = ()):
     """加载框架文档元信息
@@ -645,6 +661,7 @@ def framework_load(category: Optional[str] = None, keywords: tuple = ()):
         driving framework load driving xstatic
     """
     from driving_cli.utils.match import normalize_keywords
+
     keywords = normalize_keywords(keywords)
 
     try:

@@ -221,7 +221,11 @@ def _parse_block_sequence(lines: List[str], start: int) -> Optional[List]:
         if stripped.startswith("- "):
             # 新的列表项
             if current_item is not None:
-                items.append(current_item if len(current_item) > 1 or _is_dict_item(current_item) else _simplify_item(current_item))
+                items.append(
+                    current_item
+                    if len(current_item) > 1 or _is_dict_item(current_item)
+                    else _simplify_item(current_item)
+                )
             rest = stripped[2:].strip()
             if ":" in rest and not rest.startswith("http"):
                 # 字典项的第一个字段
@@ -242,7 +246,11 @@ def _parse_block_sequence(lines: List[str], start: int) -> Optional[List]:
 
     # 处理最后一项
     if current_item is not None:
-        items.append(current_item if len(current_item) > 1 or _is_dict_item(current_item) else _simplify_item(current_item))
+        items.append(
+            current_item
+            if len(current_item) > 1 or _is_dict_item(current_item)
+            else _simplify_item(current_item)
+        )
 
     if not items:
         return None

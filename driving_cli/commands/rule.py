@@ -42,7 +42,9 @@ def parse_rule_yaml(rule_md_path: Path, header_only: bool = False) -> Optional[D
     }
 
 
-def scan_rules_from_dir(repo_name: str, rules_dir: Path, quiet: bool = False, header_only: bool = False) -> List[Dict]:
+def scan_rules_from_dir(
+    repo_name: str, rules_dir: Path, quiet: bool = False, header_only: bool = False
+) -> List[Dict]:
     """扫描单个仓库的 rules/ 目录，返回规则列表
 
     Args:
@@ -173,7 +175,8 @@ def collect_rules(keywords: tuple = ()) -> list:
     # 优化 1：无关键词时只扫描 base 仓库
     if not keywords:
         rules_dirs = [
-            (n, d) for n, d in rules_dirs
+            (n, d)
+            for n, d in rules_dirs
             if "base" in ((repo_config_map.get(n) and repo_config_map[n].tags) or [])
         ]
 
@@ -182,8 +185,9 @@ def collect_rules(keywords: tuple = ()) -> list:
         rc = repo_config_map.get(repo_name)
         if not keywords:
             # 优先级：driving.config.json > manifest.json > 全量加载
-            effective_rules = (rc.rules if rc and rc.rules is not None
-                               else _load_manifest_rules(rules_dir.parent))
+            effective_rules = (
+                rc.rules if rc and rc.rules is not None else _load_manifest_rules(rules_dir.parent)
+            )
             enabled = (effective_rules or {}).get("enabled") or []
             disabled = (effective_rules or {}).get("disabled") or []
             # 优化 2：enabled 白名单时提前过滤文件
@@ -206,19 +210,20 @@ def collect_rules(keywords: tuple = ()) -> list:
             _add(repo_rules)
     else:
         from driving_cli.utils.match import fuzzy_match_any
+
         kw_lower = tuple(k.lower() for k in keywords)
         for repo_name, repo_rules in all_rules_by_repo.items():
             if repo_name.lower() in kw_lower:
                 _add(repo_rules)
                 continue
-            matched = [r for r in repo_rules
-                       if fuzzy_match_any((r["name"], r.get("description", "")), keywords)]
+            matched = [
+                r
+                for r in repo_rules
+                if fuzzy_match_any((r["name"], r.get("description", "")), keywords)
+            ]
             _add(matched)
 
-    return [
-        {"name": r["name"], "description": r["description"], "path": r["path"]}
-        for r in result
-    ]
+    return [{"name": r["name"], "description": r["description"], "path": r["path"]} for r in result]
 
 
 @rule_group.command(name="load")
@@ -237,6 +242,7 @@ def rule_load(keywords: tuple):
         driving rule load code-style
     """
     from driving_cli.utils.match import normalize_keywords
+
     keywords = normalize_keywords(keywords)
 
     try:
@@ -250,8 +256,12 @@ def rule_load(keywords: tuple):
 @rule_group.command(name="list")
 @click.option("--repo", "repo_name", default=None, help="只显示指定仓库的规则")
 @click.option("--edit", is_flag=True, default=False, help="进入交互模式，勾选/取消规则")
-@click.option("--mode", type=click.Choice(["auto", "enable", "disable"]), default="auto",
-              help="保存模式：auto 自动选择（默认），enable 强制写 enabled，disable 强制写 disabled")
+@click.option(
+    "--mode",
+    type=click.Choice(["auto", "enable", "disable"]),
+    default="auto",
+    help="保存模式：auto 自动选择（默认），enable 强制写 enabled，disable 强制写 disabled",
+)
 def rule_list(repo_name: Optional[str], edit: bool, mode: str):
     """列出所有规则，按仓库分组显示启用状态，支持编辑模式
 
@@ -296,8 +306,7 @@ def rule_list(repo_name: Optional[str], edit: bool, mode: str):
             repo_dir_map[rname] = rdir.parent
 
         def _is_enabled(rc: Optional[RepoConfig], rule_name: str, repo_dir: Path) -> bool:
-            rules_cfg = (rc.rules if rc and rc.rules is not None
-                         else _load_manifest_rules(repo_dir))
+            rules_cfg = rc.rules if rc and rc.rules is not None else _load_manifest_rules(repo_dir)
             if rules_cfg is None:
                 return True
             enabled = rules_cfg.get("enabled") or []
@@ -311,15 +320,17 @@ def rule_list(repo_name: Optional[str], edit: bool, mode: str):
             from prompt_toolkit.shortcuts import checkboxlist_dialog
             from prompt_toolkit.styles import Style as PTStyle
 
-            clean_style = PTStyle.from_dict({
-                "dialog":                        "bg:#1e1e1e",
-                "dialog.body":                   "bg:#1e1e1e fg:#ffffff",
-                "dialog.body checkbox":          "fg:#888888",
-                "dialog.body checkbox-selected": "fg:#00cc00 bold",
-                "dialog.body checkbox-checked":  "fg:#00cc00",
-                "button":                        "bg:#333333 fg:#ffffff",
-                "button.focused":                "bg:#00cc00 fg:#000000",
-            })
+            clean_style = PTStyle.from_dict(
+                {
+                    "dialog": "bg:#1e1e1e",
+                    "dialog.body": "bg:#1e1e1e fg:#ffffff",
+                    "dialog.body checkbox": "fg:#888888",
+                    "dialog.body checkbox-selected": "fg:#00cc00 bold",
+                    "dialog.body checkbox-checked": "fg:#00cc00",
+                    "button": "bg:#333333 fg:#ffffff",
+                    "button.focused": "bg:#00cc00 fg:#000000",
+                }
+            )
 
             for rname, rules in all_rules_by_repo.items():
                 if not rules:

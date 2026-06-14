@@ -257,9 +257,7 @@ class PowerManager:
         # 校验目标目录下有 driving.config.json
         config_path = self._project_root / entry.path / CONFIG_FILE_NAME
         if not config_path.exists():
-            raise ValueError(
-                f"路径 '{entry.path}' 下不存在 driving.config.json，无法作为 power"
-            )
+            raise ValueError(f"路径 '{entry.path}' 下不存在 driving.config.json，无法作为 power")
 
         power_cfg.powers.append(entry)
         self.save_power_config(power_cfg)
@@ -299,6 +297,7 @@ class PowerManager:
         # 清理残留工作目录（--force 场景下目录可能非空）
         if abs_path.exists() and not abs_path.is_symlink():
             import shutil
+
             shutil.rmtree(abs_path)
 
         # 清理残留 .git/modules 数据
@@ -313,7 +312,9 @@ class PowerManager:
                 text=True,
             )
             if result.returncode != 0:
-                raise _sp.CalledProcessError(result.returncode, "git submodule add", stderr=result.stderr)
+                raise _sp.CalledProcessError(
+                    result.returncode, "git submodule add", stderr=result.stderr
+                )
         except _sp.CalledProcessError as e:
             # 主仓库尚无 commit 时 checkout 会失败，但 clone 已完成
             gitmodules = git_root / ".gitmodules"
@@ -322,7 +323,9 @@ class PowerManager:
             else:
                 stderr_msg = (e.stderr or "").strip()
                 detail = f"\n{stderr_msg}" if stderr_msg else ""
-                raise ValueError(f"git submodule add 失败（returncode={e.returncode}）{detail}") from e
+                raise ValueError(
+                    f"git submodule add 失败（returncode={e.returncode}）{detail}"
+                ) from e
 
         # 设置 ignore = all，避免主项目 git status 显示 power 内部变更
         self._set_submodule_ignore(git_root, submodule_path)
@@ -370,6 +373,7 @@ class PowerManager:
             try:
                 from driving_cli.utils.op_reporter import report_op_event
                 import git as _git
+
                 _branch = ""
                 try:
                     _repo_obj = _git.Repo(repo_dir)
@@ -460,6 +464,7 @@ class PowerManager:
     def _cleanup_stale_git_modules(git_root: Path, submodule_path: str) -> None:
         """清理残留的 .git/modules 数据"""
         import shutil
+
         modules_dir = git_root / ".git" / "modules"
         parts = Path(submodule_path).parts
         for depth in range(len(parts), 0, -1):
@@ -494,7 +499,11 @@ class PowerManager:
             if stripped.startswith("["):
                 insert_pos = i
                 break
-            if stripped == "ignore" or stripped.startswith("ignore=") or stripped.startswith("ignore ="):
+            if (
+                stripped == "ignore"
+                or stripped.startswith("ignore=")
+                or stripped.startswith("ignore =")
+            ):
                 return  # 已存在
             i += 1
         indent = "\t"

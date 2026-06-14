@@ -12,7 +12,11 @@ import click
 from driving_cli.models.power_config import PowerEntry
 from driving_cli.utils.config_manager import PowerManager, find_project_root
 from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
-from driving_cli.utils.validators import infer_repo_name_from_url, validate_git_url, validate_repo_name
+from driving_cli.utils.validators import (
+    infer_repo_name_from_url,
+    validate_git_url,
+    validate_repo_name,
+)
 from driving_cli.commands.repo import _checkout_branch_after_install, _set_submodule_ignore
 from driving_cli.utils.git_helper import ensure_submodule_initialized
 
@@ -41,14 +45,35 @@ def power_group():
 
 # ==================== power install ====================
 
+
 @power_group.command(name="install")
 @click.option("--url", default=None, help="远程 Git 仓库地址（作为 submodule 安装）")
-@click.option("--name", "power_name", default=None, help="Power 名称（唯一标识，不指定则从 URL 推断）")
-@click.option("--path", "power_path", default=None, help="本地目录路径（--url 时可选，默认 ai-driving/<name>；本地模式时必填）")
+@click.option(
+    "--name", "power_name", default=None, help="Power 名称（唯一标识，不指定则从 URL 推断）"
+)
+@click.option(
+    "--path",
+    "power_path",
+    default=None,
+    help="本地目录路径（--url 时可选，默认 ai-driving/<name>；本地模式时必填）",
+)
 @click.option("--description", default=None, help="Power 描述")
-@click.option("--branch", default=None, help="指定分支（初始化后自动 checkout；未配置时缺少 driving.config.json 会给出警告）")
-@click.option("--force", is_flag=True, default=False, help="强制覆盖已存在的同名 power（仅有参数时有效）")
-def power_install(url: Optional[str], power_name: Optional[str], power_path: Optional[str], description: Optional[str], branch: Optional[str], force: bool):
+@click.option(
+    "--branch",
+    default=None,
+    help="指定分支（初始化后自动 checkout；未配置时缺少 driving.config.json 会给出警告）",
+)
+@click.option(
+    "--force", is_flag=True, default=False, help="强制覆盖已存在的同名 power（仅有参数时有效）"
+)
+def power_install(
+    url: Optional[str],
+    power_name: Optional[str],
+    power_path: Optional[str],
+    description: Optional[str],
+    branch: Optional[str],
+    force: bool,
+):
     """安装 power 条目
 
     无参数：读取 driving.power.json，初始化所有未就绪的 power。\n
@@ -96,7 +121,11 @@ def power_install(url: Optional[str], power_name: Optional[str], power_path: Opt
         config_json_path = abs_install_path / "driving.config.json"
 
         # 判断当前状态，决定执行路径
-        dir_exists = abs_install_path.exists() and abs_install_path.is_dir() and any(abs_install_path.iterdir())
+        dir_exists = (
+            abs_install_path.exists()
+            and abs_install_path.is_dir()
+            and any(abs_install_path.iterdir())
+        )
         already_registered = False
         if pm.exists():
             try:
@@ -121,12 +150,15 @@ def power_install(url: Optional[str], power_name: Optional[str], power_path: Opt
         # 查找 git 根目录（clone 和注册都需要）
         try:
             from driving_cli.utils.git_helper import find_git_root
+
             git_root = find_git_root(project_root)
         except Exception:
             log_error("当前目录不在 Git 仓库中，请先执行 git init")
             raise click.Abort()
 
-        entry = PowerEntry(name=power_name, path=install_path, url=url, description=description, branch=branch)
+        entry = PowerEntry(
+            name=power_name, path=install_path, url=url, description=description, branch=branch
+        )
 
         # 情况 1：目录不存在 → clone
         if not dir_exists:
@@ -164,6 +196,7 @@ def power_install(url: Optional[str], power_name: Optional[str], power_path: Opt
                     power_cfg = pm.load_power_config()
                 else:
                     from driving_cli.models.power_config import PowerConfig
+
                     power_cfg = PowerConfig(powers=[])
                 power_cfg.powers.append(entry)
                 pm.save_power_config(power_cfg)
@@ -190,7 +223,9 @@ def power_install(url: Optional[str], power_name: Optional[str], power_path: Opt
         log_error("Power 名称只允许字母、数字、连字符和下划线，且必须以字母或数字开头")
         raise click.Abort()
 
-    entry = PowerEntry(name=power_name, path=power_path, url=None, description=description, branch=branch)
+    entry = PowerEntry(
+        name=power_name, path=power_path, url=None, description=description, branch=branch
+    )
 
     try:
         pm.add_power_local(entry)
@@ -221,6 +256,7 @@ def _install_all_uninitialized(pm: PowerManager, project_root):
     if has_remote:
         try:
             from driving_cli.utils.git_helper import find_git_root
+
             git_root = find_git_root(project_root)
         except git.exc.InvalidGitRepositoryError:
             log_error("当前目录不在 Git 仓库中，请先执行 git init")
@@ -253,7 +289,9 @@ def _install_all_uninitialized(pm: PowerManager, project_root):
 
         # 计算相对于 git 根目录的 submodule 路径，统一用正斜杠
         try:
-            submodule_path = str((project_root / entry.path).relative_to(git_root)).replace("\\", "/")
+            submodule_path = str((project_root / entry.path).relative_to(git_root)).replace(
+                "\\", "/"
+            )
         except (ValueError, TypeError):
             submodule_path = entry.path.replace("\\", "/")
 
@@ -273,6 +311,7 @@ def _install_all_uninitialized(pm: PowerManager, project_root):
 
 
 # ==================== power pull ====================
+
 
 @power_group.command(name="pull")
 @click.argument("power_name", required=False, default=None)
@@ -323,6 +362,7 @@ def power_pull(power_name: Optional[str]):
 
 # ==================== power uninstall ====================
 
+
 @power_group.command(name="uninstall")
 @click.argument("power_name")
 def power_uninstall(power_name: str):
@@ -345,10 +385,13 @@ def power_uninstall(power_name: str):
         raise click.Abort()
 
     log_success(f"Power '{power_name}' 已卸载")
-    log_info("注意：submodule 目录和 .gitmodules 条目未删除，如需完全移除请手动执行 git submodule deinit")
+    log_info(
+        "注意：submodule 目录和 .gitmodules 条目未删除，如需完全移除请手动执行 git submodule deinit"
+    )
 
 
 # ==================== power list ====================
+
 
 @power_group.command(name="list")
 def power_list():
@@ -377,13 +420,15 @@ def power_list():
     result = []
     for entry in power_cfg.powers:
         config_path = project_root / entry.path / "driving.config.json"
-        result.append({
-            "name": entry.name,
-            "type": entry.type,
-            "url": entry.url or "",
-            "path": entry.path,
-            "description": entry.description or "",
-            "config_exists": config_path.exists(),
-        })
+        result.append(
+            {
+                "name": entry.name,
+                "type": entry.type,
+                "url": entry.url or "",
+                "path": entry.path,
+                "description": entry.description or "",
+                "config_exists": config_path.exists(),
+            }
+        )
 
     print(_json.dumps(result, ensure_ascii=False, indent=2))

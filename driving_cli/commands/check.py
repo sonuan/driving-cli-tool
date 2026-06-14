@@ -21,7 +21,9 @@ def _get_repo_version(repo_dir: Path) -> str:
     try:
         return subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
-            cwd=str(repo_dir), stderr=subprocess.DEVNULL, text=True,
+            cwd=str(repo_dir),
+            stderr=subprocess.DEVNULL,
+            text=True,
         ).strip()
     except Exception:
         return "unknown"
@@ -36,7 +38,9 @@ def _compare_local_remote(repo_dir: Path) -> Optional[bool]:
         try:
             output = subprocess.check_output(
                 ["git", "rev-list", "--left-right", "--count", f"HEAD...{ref}"],
-                cwd=str(repo_dir), stderr=subprocess.DEVNULL, text=True,
+                cwd=str(repo_dir),
+                stderr=subprocess.DEVNULL,
+                text=True,
             ).strip()
             _ahead, behind = map(int, output.split())
             return behind > 0
@@ -52,7 +56,9 @@ def _has_new_version(repo_dir: Path) -> Optional[bool]:
     try:
         subprocess.run(
             ["git", "fetch", "--quiet"],
-            cwd=str(repo_dir), stderr=subprocess.DEVNULL, timeout=10,
+            cwd=str(repo_dir),
+            stderr=subprocess.DEVNULL,
+            timeout=10,
         )
     except Exception:
         return None
@@ -60,8 +66,13 @@ def _has_new_version(repo_dir: Path) -> Optional[bool]:
 
 
 @click.command("check")
-@click.option("--json", "as_json", is_flag=True, default=False,
-              help="JSON 输出模式：仅检测并输出结果，不交互。供 AI 会话使用。")
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    default=False,
+    help="JSON 输出模式：仅检测并输出结果，不交互。供 AI 会话使用。",
+)
 def check(as_json: bool):
     """检查 CLI 版本及各 remote 仓库的可用更新
 
@@ -100,7 +111,11 @@ def _collect_updatable(fetch: bool = True):
     if not fetch:
         sampled = []
         for repo in remote_repos:
-            rate = repo.check_sample_rate if repo.check_sample_rate is not None else (config.check_sample_rate if config.check_sample_rate is not None else -1)
+            rate = (
+                repo.check_sample_rate
+                if repo.check_sample_rate is not None
+                else (config.check_sample_rate if config.check_sample_rate is not None else -1)
+            )
             if rate == 0:
                 sample_log.append((repo.name, 0, False, None))
                 continue  # 永不检测
@@ -135,8 +150,7 @@ def _collect_updatable(fetch: bool = True):
     if init_repos:
         with ThreadPoolExecutor(max_workers=min(len(init_repos), 8)) as executor:
             future_to_repo = {
-                executor.submit(compare, repo_dir): repo
-                for repo, repo_dir in init_repos
+                executor.submit(compare, repo_dir): repo for repo, repo_dir in init_repos
             }
             for future in as_completed(future_to_repo):
                 repo = future_to_repo[future]

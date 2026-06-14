@@ -41,8 +41,12 @@ class RepoConfig:
     skills: Optional[dict] = None  # 技能过滤配置，格式：{"enabled": [...], "disabled": [...]}
     rules: Optional[dict] = None  # 规则过滤配置，格式：{"enabled": [...], "disabled": [...]}
     agents: Optional[dict] = None  # agent 过滤配置，格式：{"enabled": [...], "disabled": [...]}
-    check_sample_rate: Optional[int] = None  # 更新检测采样率：0=不检测，1~100=概率检测，-1=检测到更新时自动拉取；None 表示继承全局配置（未配置时默认 -1，即每次自动检测并更新）
-    branch: Optional[str] = None  # 指定分支（安装后自动 checkout；未配置时缺少 driving.config.json 会给出警告）
+    check_sample_rate: Optional[int] = (
+        None  # 更新检测采样率：0=不检测，1~100=概率检测，-1=检测到更新时自动拉取；None 表示继承全局配置（未配置时默认 -1，即每次自动检测并更新）
+    )
+    branch: Optional[str] = (
+        None  # 指定分支（安装后自动 checkout；未配置时缺少 driving.config.json 会给出警告）
+    )
 
     def to_dict(self) -> dict:
         """序列化为字典（JSON 兼容格式）"""
@@ -112,9 +116,13 @@ class DrivingConfig:
     default_commit_message: str  # 默认提交信息
     update_version_url: str  # 更新检查 URL
     user_prompt: str = ""  # 用户提示词，注入到 driving load 输出的 user_prompt 字段
-    check_sample_rate: Optional[int] = None  # 全局更新检测采样率：0=不检测，1~100=概率检测，-1=自动拉取；None 表示未配置（运行时默认 -1，即每次自动检测并更新）
+    check_sample_rate: Optional[int] = (
+        None  # 全局更新检测采样率：0=不检测，1~100=概率检测，-1=自动拉取；None 表示未配置（运行时默认 -1，即每次自动检测并更新）
+    )
     gate_webhook: str = ""  # Gate 日志上报 Webhook 地址，为空时不上报
-    agent_webhook: str = ""  # 通用操作记录 Webhook 地址（agent 启动、refine、driving load/update 等所有关键操作），为空时不上报
+    agent_webhook: str = (
+        ""  # 通用操作记录 Webhook 地址（agent 启动、refine、driving load/update 等所有关键操作），为空时不上报
+    )
 
     def to_dict(self) -> dict:
         """序列化为字典（JSON 兼容格式）
@@ -169,7 +177,9 @@ class DrivingConfig:
             default_commit_message=str(data["default_commit_message"]),
             update_version_url=str(data["update_version_url"]),
             user_prompt=str(data.get("user_prompt", "")),
-            check_sample_rate=int(data["check_sample_rate"]) if "check_sample_rate" in data else None,
+            check_sample_rate=(
+                int(data["check_sample_rate"]) if "check_sample_rate" in data else None
+            ),
             gate_webhook=str(data.get("gate_webhook", "")),
             agent_webhook=str(data.get("agent_webhook", "")),
         )

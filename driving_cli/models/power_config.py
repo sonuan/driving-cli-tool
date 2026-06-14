@@ -14,6 +14,7 @@ class RepoOverrideConfig:
     目前支持：
     - branch：driving load 时强制切换到的分支（优先级高于 PowerEntry.branch）
     """
+
     branch: Optional[str] = None
 
     def to_dict(self) -> dict:
@@ -36,11 +37,11 @@ class PowerEntry:
     - url 无值 → local 类型（本地目录）
     """
 
-    name: str                       # power 标识符，用于 --power 参数指定写入目标
-    path: str                       # 安装路径（相对于项目根目录，如 ai-driving/my-config）
-    url: Optional[str] = None       # Git URL（remote 类型必填）
+    name: str  # power 标识符，用于 --power 参数指定写入目标
+    path: str  # 安装路径（相对于项目根目录，如 ai-driving/my-config）
+    url: Optional[str] = None  # Git URL（remote 类型必填）
     description: Optional[str] = None  # 描述，默认为空
-    branch: Optional[str] = None    # 指定分支（安装时 checkout；未配置则不切换）
+    branch: Optional[str] = None  # 指定分支（安装时 checkout；未配置则不切换）
     repo_config: Dict[str, RepoOverrideConfig] = field(default_factory=dict)
     # repo_config：driving load 时各 repo/power 的分支覆盖配置，key 为 repo name 或 power name
     # 示例：{"driving-base": {"branch": "develop"}, "f-message": {"branch": "feature/xxx"}}

@@ -18,8 +18,16 @@ SUMMARY_FIELDS = ["name", "description", "status", "path", "feature_file", "urls
 
 # 完整字段列表（有序）
 ALL_FIELDS = [
-    "name", "description", "status", "priority",
-    "module", "assignee", "tags", "path", "feature_file", "urls",
+    "name",
+    "description",
+    "status",
+    "priority",
+    "module",
+    "assignee",
+    "tags",
+    "path",
+    "feature_file",
+    "urls",
 ]
 
 
@@ -114,7 +122,9 @@ def scan_features_from_dir(repo_name: str, features_dir: Path, quiet: bool = Fal
             continue
 
         feature_info["path"] = f"ai-driving/{repo_name}/features/{subdir.name}/"
-        feature_info["feature_file"] = "FEATURE.md" if feature_md.name == "FEATURE.md" else f"docs/iOS/{feature_md.name}"
+        feature_info["feature_file"] = (
+            "FEATURE.md" if feature_md.name == "FEATURE.md" else f"docs/iOS/{feature_md.name}"
+        )
         features.append(feature_info)
 
         if not quiet:
@@ -123,7 +133,9 @@ def scan_features_from_dir(repo_name: str, features_dir: Path, quiet: bool = Fal
     return features
 
 
-def scan_features_deep(module_name: str, module_dir: Path, repo_path: str, quiet: bool = False) -> List[Dict]:
+def scan_features_deep(
+    module_name: str, module_dir: Path, repo_path: str, quiet: bool = False
+) -> List[Dict]:
     """深度扫描模块目录，兼容多层目录结构（如 {年度-季度}/{日期}-{feature}/FEATURE.md）
 
     收集策略：
@@ -259,9 +271,7 @@ def format_feature_output(feature: Dict, detail: bool) -> Dict:
         result = {field: feature.get(field) for field in SUMMARY_FIELDS}
         # urls 精简为纯字符串数组，只保留 url 字段
         raw_urls = feature.get("urls") or []
-        result["urls"] = [
-            u["url"] for u in raw_urls if isinstance(u, dict) and u.get("url")
-        ]
+        result["urls"] = [u["url"] for u in raw_urls if isinstance(u, dict) and u.get("url")]
         return result
 
 
@@ -298,29 +308,38 @@ def _collect_feature_modules(config_manager: ConfigManager, project_root: Path) 
         has_modules = bool(repo.modules)  # 有具体 module 条目时为 True
         if repo.modules:
             for mod in repo.modules:
-                result.append({
-                    "name": mod.name,
-                    "description": mod.description,
-                    "path": f"{repo.path}/{mod.name}",
-                    "deep": is_deep,
-                    "repo_path": repo.path,
-                })
+                result.append(
+                    {
+                        "name": mod.name,
+                        "description": mod.description,
+                        "path": f"{repo.path}/{mod.name}",
+                        "deep": is_deep,
+                        "repo_path": repo.path,
+                    }
+                )
         # 非 deep 仓库始终追加 features 兜底；deep 仓库在无 modules 条目时也追加兜底
         if not is_deep or not has_modules:
-            result.append({
-                "name": repo.name,
-                "description": repo.description or "",
-                "path": f"{repo.path}/features",
-                "deep": False,
-                "repo_path": repo.path,
-            })
+            result.append(
+                {
+                    "name": repo.name,
+                    "description": repo.description or "",
+                    "path": f"{repo.path}/features",
+                    "deep": False,
+                    "repo_path": repo.path,
+                }
+            )
 
     return result
 
 
 @feature_group.command(name="modules")
-@click.option("--features-only", "features_only", is_flag=True, default=False,
-              help="只输出 tags 包含 'features' 的仓库的模块")
+@click.option(
+    "--features-only",
+    "features_only",
+    is_flag=True,
+    default=False,
+    help="只输出 tags 包含 'features' 的仓库的模块",
+)
 def feature_modules(features_only: bool):
     """列出所有仓库的 features 模块路径，以 JSON 数组格式输出
 
@@ -353,7 +372,12 @@ def feature_modules(features_only: bool):
 
 @feature_group.command(name="list")
 @click.option("--repo", "repo_name", default=None, help="只扫描指定仓库的 features")
-@click.option("--keywords", "keywords", multiple=True, help="关键词过滤，OR 关系（可多次指定，或用逗号分割：--keywords kw1,kw2）")
+@click.option(
+    "--keywords",
+    "keywords",
+    multiple=True,
+    help="关键词过滤，OR 关系（可多次指定，或用逗号分割：--keywords kw1,kw2）",
+)
 @click.option("--detail", is_flag=True, default=False, help="输出完整字段（默认只输出精简摘要）")
 def feature_list(repo_name: Optional[str], keywords: Tuple[str, ...], detail: bool):
     """列出所有 features，支持关键词搜索，以 JSON 数组格式输出
@@ -453,7 +477,7 @@ _V1_INDICATORS = [
     "docs/impact-map.md",
     "docs/coding-plan.md",
     "docs/implementation-notes.md",
-    "review",           # feature 根下的 review/ 目录
+    "review",  # feature 根下的 review/ 目录
     "docs/ui-design",  # docs 下的 ui-design/ 目录
 ]
 
@@ -462,15 +486,15 @@ _V1_INDICATORS = [
 # 目标路径中 {platform} 和 {owner} 为占位符
 _V1_TO_V2_RULES = [
     # 移入 docs/{platform}/{owner}/
-    ("docs/technical-design.md",    "docs/{platform}/{owner}/technical-design.md",    False),
-    ("docs/impact-map.md",          "docs/{platform}/{owner}/impact-map.md",           False),
-    ("docs/coding-plan.md",         "docs/{platform}/{owner}/coding-plan.md",          False),
-    ("docs/implementation-notes.md","docs/{platform}/{owner}/implementation-notes.md", False),
-    ("docs/gate-state.json",        "docs/{platform}/{owner}/gate-state.json",         False),
+    ("docs/technical-design.md", "docs/{platform}/{owner}/technical-design.md", False),
+    ("docs/impact-map.md", "docs/{platform}/{owner}/impact-map.md", False),
+    ("docs/coding-plan.md", "docs/{platform}/{owner}/coding-plan.md", False),
+    ("docs/implementation-notes.md", "docs/{platform}/{owner}/implementation-notes.md", False),
+    ("docs/gate-state.json", "docs/{platform}/{owner}/gate-state.json", False),
     # review/ 目录（feature 根）→ docs/{platform}/{owner}/review/
-    ("review",                      "docs/{platform}/{owner}/review",                  True),
+    ("review", "docs/{platform}/{owner}/review", True),
     # docs/ui-design/ → ui-design/（提升到 feature 根）
-    ("docs/ui-design",              "ui-design",                                       True),
+    ("docs/ui-design", "ui-design", True),
 ]
 
 # 不移动的文件（保留原位）
@@ -501,6 +525,7 @@ def _detect_format_version(feature_dir: Path) -> str:
     feature_md = feature_dir / "FEATURE.md"
     if feature_md.exists():
         from driving_cli.utils.yaml_parser import parse_frontmatter
+
         data = parse_frontmatter(feature_md)
         if data and data.get("format_version"):
             return str(data["format_version"])
@@ -514,9 +539,7 @@ def _detect_format_version(feature_dir: Path) -> str:
     return CURRENT_FORMAT_VERSION
 
 
-def _build_migration_plan(
-    feature_dir: Path, platform: str, owner: str
-) -> List[Dict]:
+def _build_migration_plan(feature_dir: Path, platform: str, owner: str) -> List[Dict]:
     """生成 v1 → v2 迁移计划（操作列表）。
 
     每条操作包含：
@@ -545,21 +568,25 @@ def _build_migration_plan(
         dst = feature_dir / dst_rel
 
         if dst.exists():
-            ops.append({
-                "action": "SKIP",
-                "src": src_rel,
-                "dst": dst_rel,
-                "is_dir": is_dir,
-                "reason": "目标已存在，跳过",
-            })
+            ops.append(
+                {
+                    "action": "SKIP",
+                    "src": src_rel,
+                    "dst": dst_rel,
+                    "is_dir": is_dir,
+                    "reason": "目标已存在，跳过",
+                }
+            )
         else:
-            ops.append({
-                "action": "MOVE",
-                "src": src_rel,
-                "dst": dst_rel,
-                "is_dir": is_dir,
-                "reason": "",
-            })
+            ops.append(
+                {
+                    "action": "MOVE",
+                    "src": src_rel,
+                    "dst": dst_rel,
+                    "is_dir": is_dir,
+                    "reason": "",
+                }
+            )
 
     return ops
 
@@ -669,7 +696,9 @@ def _cleanup_empty_dirs(feature_dir: Path) -> None:
                 pass
 
 
-def _print_migration_plan(feature_name: str, feature_dir: Path, ops: List[Dict], version: str) -> None:
+def _print_migration_plan(
+    feature_name: str, feature_dir: Path, ops: List[Dict], version: str
+) -> None:
     """打印单个 feature 的迁移计划。"""
     click.echo(f"\nFeature: {click.style(feature_name, bold=True)}  [{feature_dir}]")
     if version != "v1":
@@ -680,14 +709,10 @@ def _print_migration_plan(feature_name: str, feature_dir: Path, ops: List[Dict],
         return
     for op in ops:
         if op["action"] == "MOVE":
-            click.echo(
-                f"  {click.style('MOVE', fg='yellow')}  "
-                f"{op['src']:<45} → {op['dst']}"
-            )
+            click.echo(f"  {click.style('MOVE', fg='yellow')}  " f"{op['src']:<45} → {op['dst']}")
         elif op["action"] == "SKIP":
             click.echo(
-                f"  {click.style('SKIP', fg='cyan')}  "
-                f"{op['src']:<45}   ({op['reason']})"
+                f"  {click.style('SKIP', fg='cyan')}  " f"{op['src']:<45}   ({op['reason']})"
             )
 
 
@@ -793,20 +818,38 @@ def _collect_feature_dirs_for_migrate(
 
 
 @feature_group.command(name="migrate")
-@click.option("--platform", "platform", required=True,
-              help="目标平台（必填），如 android、iOS、harmony、kuikly")
-@click.option("--owner", "owner", default="owner-main", show_default=True,
-              help="负责人目录名，默认 owner-main")
-@click.option("--path", "paths", multiple=True,
-              help="指定 feature 目录（可多次指定），不传则扫描全部")
-@click.option("--include", "includes", multiple=True,
-              help="只处理路径包含指定关键词的目录（可多次指定，大小写不敏感）")
-@click.option("--exclude", "excludes", multiple=True,
-              help="跳过路径包含指定关键词的目录（可多次指定，大小写不敏感）")
-@click.option("--dry-run", "dry_run", is_flag=True, default=False,
-              help="只打印迁移计划，不执行实际操作")
-@click.option("--yes", "-y", "yes", is_flag=True, default=False,
-              help="跳过确认提示，直接执行")
+@click.option(
+    "--platform",
+    "platform",
+    required=True,
+    help="目标平台（必填），如 android、iOS、harmony、kuikly",
+)
+@click.option(
+    "--owner",
+    "owner",
+    default="owner-main",
+    show_default=True,
+    help="负责人目录名，默认 owner-main",
+)
+@click.option(
+    "--path", "paths", multiple=True, help="指定 feature 目录（可多次指定），不传则扫描全部"
+)
+@click.option(
+    "--include",
+    "includes",
+    multiple=True,
+    help="只处理路径包含指定关键词的目录（可多次指定，大小写不敏感）",
+)
+@click.option(
+    "--exclude",
+    "excludes",
+    multiple=True,
+    help="跳过路径包含指定关键词的目录（可多次指定，大小写不敏感）",
+)
+@click.option(
+    "--dry-run", "dry_run", is_flag=True, default=False, help="只打印迁移计划，不执行实际操作"
+)
+@click.option("--yes", "-y", "yes", is_flag=True, default=False, help="跳过确认提示，直接执行")
 def feature_migrate(
     platform: str,
     owner: str,

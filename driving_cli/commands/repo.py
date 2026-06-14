@@ -46,18 +46,54 @@ def repo_group():
 
 # ==================== repo install ====================
 
+
 @repo_group.command(name="install")
 @click.option("--url", default=None, help="远程 Git 仓库地址")
-@click.option("--local", "local_path", default=None, is_flag=False, flag_value="", help="注册本地仓库（可选路径）")
+@click.option(
+    "--local",
+    "local_path",
+    default=None,
+    is_flag=False,
+    flag_value="",
+    help="注册本地仓库（可选路径）",
+)
 @click.option("--name", "repo_name", default=None, help="自定义仓库名称")
 @click.option("--description", "description", default=None, help="仓库描述，用于 AI 关键词匹配")
 @click.option("--desc", "desc", default=None, help="仓库描述（--description 的简写）")
-@click.option("--tag", "tags", multiple=True, help="新增仓库标签（可多次指定，如 --tag base --tag features）")
-@click.option("--module", "modules", multiple=True, metavar="NAME:DESCRIPTION", help="新增业务模块（格式：name:description，可多次指定）")
+@click.option(
+    "--tag", "tags", multiple=True, help="新增仓库标签（可多次指定，如 --tag base --tag features）"
+)
+@click.option(
+    "--module",
+    "modules",
+    multiple=True,
+    metavar="NAME:DESCRIPTION",
+    help="新增业务模块（格式：name:description，可多次指定）",
+)
 @click.option("--force", is_flag=True, default=False, help="强制覆盖已存在的同名仓库")
-@click.option("--power", "power_name", default=None, help="Power 模式下指定写入哪个 power 的 driving.config.json")
-@click.option("--branch", default=None, help="指定分支（安装后自动 checkout；未配置时缺少 driving.config.json 会给出警告）")
-def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[str], description: Optional[str], desc: Optional[str], tags: tuple, modules: tuple, force: bool, power_name: Optional[str], branch: Optional[str]):
+@click.option(
+    "--power",
+    "power_name",
+    default=None,
+    help="Power 模式下指定写入哪个 power 的 driving.config.json",
+)
+@click.option(
+    "--branch",
+    default=None,
+    help="指定分支（安装后自动 checkout；未配置时缺少 driving.config.json 会给出警告）",
+)
+def install(
+    url: Optional[str],
+    local_path: Optional[str],
+    repo_name: Optional[str],
+    description: Optional[str],
+    desc: Optional[str],
+    tags: tuple,
+    modules: tuple,
+    force: bool,
+    power_name: Optional[str],
+    branch: Optional[str],
+):
     """安装仓库
 
     无参数：读取配置初始化所有未初始化的远程仓库。\n
@@ -70,6 +106,7 @@ def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[s
     --branch <branch>：指定仓库分支，安装后自动 checkout；未配置时若缺少 driving.config.json 会给出警告。\n
     """
     from driving_cli.utils.config_manager import PowerManager
+
     project_root = find_project_root()
 
     # --desc 是 --description 的简写，优先使用 --description
@@ -77,6 +114,7 @@ def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[s
 
     # 解析 --module name:description 参数
     from driving_cli.models.config import ModuleConfig
+
     parsed_modules = []
     for mod_str in modules:
         if ":" in mod_str:
@@ -98,10 +136,13 @@ def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[s
             else:
                 config_mgr = pm.get_default_config_manager()
                 default_entry = pm.load_power_config().powers[0]
-                log_info(f"Power 模式：写入 power '{default_entry.name}'（{default_entry.path}/driving.config.json）")
+                log_info(
+                    f"Power 模式：写入 power '{default_entry.name}'（{default_entry.path}/driving.config.json）"
+                )
                 log_info("如需写入其他 power，请使用 --power <name> 指定")
         except ValueError as e:
             from driving_cli.utils.logger import log_error
+
             log_error(str(e))
             raise click.Abort()
     else:
@@ -115,13 +156,30 @@ def install(url: Optional[str], local_path: Optional[str], repo_name: Optional[s
 
     # 安装远程仓库
     if url is not None:
-        _install_remote(config_mgr, project_root, url, repo_name, force, effective_description,
-                        list(tags) or None, parsed_modules or None, branch=branch)
+        _install_remote(
+            config_mgr,
+            project_root,
+            url,
+            repo_name,
+            force,
+            effective_description,
+            list(tags) or None,
+            parsed_modules or None,
+            branch=branch,
+        )
         return
 
     # 注册本地仓库（local_path 为 "" 表示 --local 无值，为具体路径表示有值）
-    _install_local(config_mgr, project_root, local_path, repo_name, force, effective_description,
-                   list(tags) or None, parsed_modules or None)
+    _install_local(
+        config_mgr,
+        project_root,
+        local_path,
+        repo_name,
+        force,
+        effective_description,
+        list(tags) or None,
+        parsed_modules or None,
+    )
 
 
 def _set_submodule_config(git_root: Path, submodule_path: str, key: str, value: str):
@@ -205,7 +263,9 @@ def _cleanup_stale_git_modules(git_root: Path, submodule_path: str):
         work_path = git_root / partial_path
 
         # 工作目录不存在，或存在但为空（视为未初始化）
-        work_dir_empty = not work_path.exists() or (work_path.is_dir() and not any(work_path.iterdir()))
+        work_dir_empty = not work_path.exists() or (
+            work_path.is_dir() and not any(work_path.iterdir())
+        )
         if modules_path.exists() and work_dir_empty:
             log_warning(f"检测到残留 git modules 数据：{modules_path}，正在清理...")
             shutil.rmtree(modules_path)
@@ -255,7 +315,9 @@ def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
 
         # 计算相对于 git 根目录的 submodule 路径，统一用正斜杠
         try:
-            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root)).replace("\\", "/")
+            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root)).replace(
+                "\\", "/"
+            )
         except ValueError:
             submodule_path = repo_cfg.path.replace("\\", "/")
 
@@ -276,7 +338,9 @@ def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
     log_info(f"完成：初始化 {initialized_count} 个，跳过 {skipped_count} 个")
 
 
-def _migrate_local_to_remote(config_mgr: ConfigManager, project_root: Path, repo_cfg: "RepoConfig", remote_url: str):
+def _migrate_local_to_remote(
+    config_mgr: ConfigManager, project_root: Path, repo_cfg: "RepoConfig", remote_url: str
+):
     """将本地仓库迁移到远程：添加 remote origin 并推送，再清理本地目录
 
     迁移步骤：
@@ -360,11 +424,22 @@ def _migrate_local_to_remote(config_mgr: ConfigManager, project_root: Path, repo
         install_dir.unlink()
     elif install_dir.exists():
         import shutil
+
         shutil.rmtree(install_dir)
     log_info(f"已清理本地目录：{repo_cfg.path}")
 
 
-def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, repo_name: Optional[str], force: bool, description: Optional[str] = None, tags: Optional[list] = None, modules: Optional[list] = None, branch: Optional[str] = None):
+def _install_remote(
+    config_mgr: ConfigManager,
+    project_root: Path,
+    url: str,
+    repo_name: Optional[str],
+    force: bool,
+    description: Optional[str] = None,
+    tags: Optional[list] = None,
+    modules: Optional[list] = None,
+    branch: Optional[str] = None,
+):
     """安装远程 Git 仓库（submodule）"""
     # 校验 Git URL 格式
     if not validate_git_url(url):
@@ -427,6 +502,7 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
     abs_install_path = project_root / "ai-driving" / repo_name
     if abs_install_path.exists() and not abs_install_path.is_symlink():
         import shutil
+
         log_warning(f"检测到残留工作目录：{submodule_path}，正在清理...")
         shutil.rmtree(abs_install_path)
         log_info(f"已清理：{submodule_path}")
@@ -443,8 +519,12 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
         # 检查 .gitmodules 中是否已有该 submodule 条目来判断 add 是否实际成功。
         if "yet to be born" in err_str or "unable to checkout" in err_str:
             gitmodules_path = git_root / ".gitmodules"
-            if gitmodules_path.exists() and submodule_path in gitmodules_path.read_text(encoding="utf-8"):
-                log_warning("主仓库尚无 commit，submodule 已注册但暂未 checkout，后续执行 'driving repo install' 可完成初始化")
+            if gitmodules_path.exists() and submodule_path in gitmodules_path.read_text(
+                encoding="utf-8"
+            ):
+                log_warning(
+                    "主仓库尚无 commit，submodule 已注册但暂未 checkout，后续执行 'driving repo install' 可完成初始化"
+                )
             else:
                 log_error(f"添加 submodule 失败: {e}")
                 raise click.Abort()
@@ -485,7 +565,16 @@ def _install_remote(config_mgr: ConfigManager, project_root: Path, url: str, rep
     log_info(f"  git commit -m 'Add repo {repo_name}'")
 
 
-def _install_local(config_mgr: ConfigManager, project_root: Path, local_path: str, repo_name: Optional[str], force: bool, description: Optional[str] = None, tags: Optional[list] = None, modules: Optional[list] = None):
+def _install_local(
+    config_mgr: ConfigManager,
+    project_root: Path,
+    local_path: str,
+    repo_name: Optional[str],
+    force: bool,
+    description: Optional[str] = None,
+    tags: Optional[list] = None,
+    modules: Optional[list] = None,
+):
     """注册本地仓库（软链接或普通目录）"""
     # 确定仓库名称
     if repo_name is None:
@@ -494,7 +583,8 @@ def _install_local(config_mgr: ConfigManager, project_root: Path, local_path: st
             repo_name = Path(local_path).name
             # 清理非法字符
             import re
-            repo_name = re.sub(r'[^a-zA-Z0-9_-]', '-', repo_name).strip('-')
+
+            repo_name = re.sub(r"[^a-zA-Z0-9_-]", "-", repo_name).strip("-")
             if not repo_name or not validate_repo_name(repo_name):
                 repo_name = "local"
             log_info(f"自动推断仓库名称：{repo_name}")
@@ -534,6 +624,7 @@ def _install_local(config_mgr: ConfigManager, project_root: Path, local_path: st
                 install_dir.unlink()
             else:
                 import shutil
+
                 shutil.rmtree(install_dir)
 
         # 确保父目录存在
@@ -574,10 +665,12 @@ def _install_local(config_mgr: ConfigManager, project_root: Path, local_path: st
 
 # ==================== repo list ====================
 
+
 @repo_group.command(name="list")
 def repo_list():
     """查看已安装的仓库列表（JSON 格式输出）"""
     import json as _json
+
     project_root = find_project_root()
     config_mgr = ConfigManager(project_root)
 
@@ -600,6 +693,7 @@ def repo_list():
 
 
 # ==================== repo uninstall ====================
+
 
 @repo_group.command(name="uninstall")
 @click.argument("repo_name")
@@ -631,7 +725,9 @@ def uninstall(repo_name: str):
 
         # 计算相对于 git 根目录的 submodule 路径，统一用正斜杠
         try:
-            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root)).replace("\\", "/")
+            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root)).replace(
+                "\\", "/"
+            )
         except ValueError:
             submodule_path = repo_cfg.path.replace("\\", "/")
 
@@ -652,11 +748,13 @@ def uninstall(repo_name: str):
                 # 尝试手动清理目录
                 if repo_dir.exists():
                     import shutil
+
                     shutil.rmtree(repo_dir)
         else:
             log_warning(f"未找到 submodule '{submodule_path}'，尝试直接删除目录")
             if repo_dir.exists():
                 import shutil
+
                 shutil.rmtree(repo_dir)
                 log_info(f"已删除目录：{repo_cfg.path}")
 
@@ -667,6 +765,7 @@ def uninstall(repo_name: str):
             log_success(f"已移除软链接：{repo_cfg.path}")
         elif repo_dir.exists():
             import shutil
+
             shutil.rmtree(repo_dir)
             log_success(f"已删除目录：{repo_cfg.path}")
         else:
@@ -683,6 +782,7 @@ def uninstall(repo_name: str):
 
 
 # ==================== repo pull ====================
+
 
 @repo_group.command(name="pull")
 @click.argument("repo_name", required=False, default=None)
@@ -724,7 +824,9 @@ def _git_pull(repo_cfg: RepoConfig, project_root: Path):
             log_error("当前目录不在 Git 仓库中")
             return
         try:
-            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root)).replace("\\", "/")
+            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root)).replace(
+                "\\", "/"
+            )
         except ValueError:
             submodule_path = repo_cfg.path.replace("\\", "/")
         ok = ensure_submodule_initialized(
@@ -742,6 +844,7 @@ def _git_pull(repo_cfg: RepoConfig, project_root: Path):
         log_success(f"仓库 '{repo_cfg.name}' 初始化并拉取成功")
         try:
             from driving_cli.utils.op_reporter import report_op_event
+
             report_op_event(
                 operation="repo_pulled",
                 description=f"仓库 '{repo_cfg.name}' 初始化并拉取成功（首次 submodule 初始化）",
@@ -778,6 +881,7 @@ def _git_pull(repo_cfg: RepoConfig, project_root: Path):
         log_success(f"仓库 '{repo_cfg.name}' 拉取成功")
         try:
             from driving_cli.utils.op_reporter import report_op_event
+
             report_op_event(
                 operation="repo_pulled",
                 description=f"仓库 '{repo_cfg.name}' 拉取成功（分支：{current_branch}）",
@@ -792,6 +896,7 @@ def _git_pull(repo_cfg: RepoConfig, project_root: Path):
 
 
 # ==================== repo commit ====================
+
 
 @repo_group.command(name="commit")
 @click.argument("repo_name", required=False, default=None)
@@ -865,6 +970,7 @@ def _git_commit(repo_cfg: RepoConfig, project_root: Path, message: str):
 
 # ==================== repo push ====================
 
+
 @repo_group.command(name="push")
 @click.argument("repo_name", required=False, default=None)
 def push(repo_name: Optional[str]):
@@ -910,6 +1016,7 @@ def _git_push(repo_cfg: RepoConfig, project_root: Path):
 
 
 # ==================== repo checkout ====================
+
 
 @repo_group.command(name="checkout")
 @click.argument("repo_name")
@@ -957,7 +1064,9 @@ def _git_checkout(repo_cfg: RepoConfig, project_root: Path, branch: str):
             log_error("当前目录不在 Git 仓库中")
             return
         try:
-            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root)).replace("\\", "/")
+            submodule_path = str((project_root / repo_cfg.path).relative_to(git_root)).replace(
+                "\\", "/"
+            )
         except ValueError:
             submodule_path = repo_cfg.path.replace("\\", "/")
         ok = ensure_submodule_initialized(
@@ -985,7 +1094,9 @@ def _git_checkout(repo_cfg: RepoConfig, project_root: Path, branch: str):
             try:
                 repo.remotes.origin.fetch()
             except git.exc.GitCommandError as e:
-                log_warning(f"仓库 '{repo_cfg.name}' fetch 失败，将使用本地分支信息（{e.stderr.strip() if e.stderr else str(e)}）")
+                log_warning(
+                    f"仓库 '{repo_cfg.name}' fetch 失败，将使用本地分支信息（{e.stderr.strip() if e.stderr else str(e)}）"
+                )
 
         # 执行 checkout
         repo.git.checkout(branch)
@@ -1001,6 +1112,7 @@ def _git_checkout(repo_cfg: RepoConfig, project_root: Path, branch: str):
 
 # ==================== repo load ====================
 
+
 @repo_group.command(name="load")
 @click.argument("keywords", nargs=-1, required=False)
 def load(keywords: tuple):
@@ -1015,6 +1127,7 @@ def load(keywords: tuple):
     """
     import json as _json
     from driving_cli.utils.match import normalize_keywords
+
     keywords = normalize_keywords(keywords)
 
     result = collect_repos(keywords)
@@ -1042,7 +1155,8 @@ def collect_repos(keywords: tuple = ()) -> list:
     else:
         kw_lower = tuple(k.lower() for k in keywords)
         matched = [
-            r for r in repos
+            r
+            for r in repos
             if r.name.lower() in kw_lower or fuzzy_match(r.description or "", keywords)
         ]
 
@@ -1058,6 +1172,7 @@ def collect_repos(keywords: tuple = ()) -> list:
 
 
 # ==================== 辅助函数 ====================
+
 
 def _resolve_repos(config_mgr: ConfigManager, repo_name: Optional[str], operation: str):
     """解析要操作的仓库列表

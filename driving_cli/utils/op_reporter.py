@@ -48,6 +48,7 @@ def _get_git_branch() -> str:
     try:
         import git as _git
         from pathlib import Path
+
         repo = _git.Repo(Path.cwd(), search_parent_directories=True)
         if repo.head.is_detached:
             return ""
@@ -60,6 +61,7 @@ def _get_cli_version() -> str:
     """返回当前 CLI 版本号"""
     try:
         from driving_cli import __version__
+
         return __version__
     except Exception:
         return ""

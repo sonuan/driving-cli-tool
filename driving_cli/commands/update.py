@@ -181,6 +181,7 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
 
     # Windows 上自动在 download_url 后拼接 ".exe"
     import sys as _sys
+
     if _sys.platform == "win32":
         if not download_url.endswith(".exe"):
             download_url = download_url + ".exe"
@@ -278,6 +279,7 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
         if sudo_user and not is_windows:
             try:
                 import pwd as _pwd
+
                 real_home = Path(_pwd.getpwnam(sudo_user).pw_dir)
             except (KeyError, ImportError):
                 real_home = Path.home()
@@ -402,6 +404,7 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
             if not is_windows:
                 # 旧安装方式迁移收尾：删除旧真实文件，建立符号链接（仅 Unix）
                 if migrate:
+
                     def _do_migrate_symlink() -> bool:
                         """删除 /usr/local/bin/driving 真实文件，创建指向新目录的符号链接"""
                         try:
@@ -417,8 +420,12 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
                         # 需要 sudo 建符号链接
                         log_info("创建符号链接需要管理员权限，请输入密码：")
                         r = subprocess.run(
-                            ["sudo", "sh", "-c",
-                             f"rm -f {str(symlink_path)!r} && ln -sf {current_exe!r} {str(symlink_path)!r}"]
+                            [
+                                "sudo",
+                                "sh",
+                                "-c",
+                                f"rm -f {str(symlink_path)!r} && ln -sf {current_exe!r} {str(symlink_path)!r}",
+                            ]
                         )
                         migrated = r.returncode == 0
 
@@ -432,8 +439,7 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
                 if sudo_user and user_install_dir.exists():
                     try:
                         subprocess.run(
-                            ["chown", "-R", sudo_user, str(user_install_dir)],
-                            check=True
+                            ["chown", "-R", sudo_user, str(user_install_dir)], check=True
                         )
                     except Exception:
                         pass  # chown 失败不影响主流程
@@ -443,7 +449,9 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
                 path_env = os.environ.get("PATH", "")
                 if install_dir_str.lower() not in path_env.lower():
                     log_warning(f"\n提示: {install_dir_str} 不在 PATH 中")
-                    log_info("请将该目录加入用户环境变量 PATH，或运行以下 PowerShell 命令（需重启终端生效）：")
+                    log_info(
+                        "请将该目录加入用户环境变量 PATH，或运行以下 PowerShell 命令（需重启终端生效）："
+                    )
                     log_info(f'  $env:Path += ";{install_dir_str}"')
 
             log_success(f"\n✓ 更新成功！当前版本: {latest_version}")
@@ -453,6 +461,7 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
             # 上报：driving update 手动更新 CLI 成功
             try:
                 from driving_cli.utils.op_reporter import report_op_event
+
                 report_op_event(
                     operation="update_completed",
                     description=f"driving update 手动更新 CLI：{current_version} → {latest_version}",

@@ -19,10 +19,10 @@ from driving_cli.models.config import RepoConfig
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
 
-
 # ---------------------------------------------------------------------------
 # YAML frontmatter 解析
 # ---------------------------------------------------------------------------
+
 
 def _parse_frontmatter(md_path: Path) -> Optional[Dict]:
     """解析 .md 文件的 YAML frontmatter，返回字段字典。
@@ -31,12 +31,14 @@ def _parse_frontmatter(md_path: Path) -> Optional[Dict]:
     缺少 name 字段时返回 None。
     """
     from driving_cli.utils.yaml_parser import parse_frontmatter
+
     return parse_frontmatter(md_path, required_fields=["name"])
 
 
 # ---------------------------------------------------------------------------
 # 扫描 / 过滤
 # ---------------------------------------------------------------------------
+
 
 def _load_manifest_agents(repo_dir: Path) -> Optional[dict]:
     """读取仓库 manifest.json 中的 agents 配置，作为仓库级默认值"""
@@ -90,16 +92,18 @@ def scan_agents_from_dir(repo_name: str, agents_dir: Path, quiet: bool = False) 
         if isinstance(raw_skills, str):
             raw_skills = [s.strip() for s in raw_skills.split(",") if s.strip()]
 
-        agents.append({
-            "name": str(meta["name"]),
-            "description": description,
-            "role": str(meta.get("role", "") or ""),
-            "version": str(meta.get("version", "") or ""),
-            "skills": raw_skills,
-            "path": f"ai-driving/{repo_name}/agents/{agent_dir.name}/",
-            "has_soul": has_soul,
-            "has_memory": has_memory,
-        })
+        agents.append(
+            {
+                "name": str(meta["name"]),
+                "description": description,
+                "role": str(meta.get("role", "") or ""),
+                "version": str(meta.get("version", "") or ""),
+                "skills": raw_skills,
+                "path": f"ai-driving/{repo_name}/agents/{agent_dir.name}/",
+                "has_soul": has_soul,
+                "has_memory": has_memory,
+            }
+        )
 
         if not quiet:
             log_info(f"发现 agent: {meta['name']} (来自仓库 {repo_name})")
@@ -120,9 +124,11 @@ def _filter_agents(agents: List[Dict], repo_config: RepoConfig) -> List[Dict]:
     return agents
 
 
-def _merge_agents(agents_dirs: List[Tuple[str, Path]],
-                  repo_configs: Optional[List[RepoConfig]] = None,
-                  quiet: bool = False) -> List[Dict]:
+def _merge_agents(
+    agents_dirs: List[Tuple[str, Path]],
+    repo_configs: Optional[List[RepoConfig]] = None,
+    quiet: bool = False,
+) -> List[Dict]:
     """合并所有仓库的 agent 列表，同名 agent 按仓库顺序去重。"""
     repo_config_map: Dict[str, RepoConfig] = {}
     if repo_configs:
@@ -157,6 +163,7 @@ def _merge_agents(agents_dirs: List[Tuple[str, Path]],
 # 命令组
 # ---------------------------------------------------------------------------
 
+
 @click.group(name="agent")
 def agent_group():
     """Agent 管理
@@ -170,11 +177,16 @@ def agent_group():
 
 # ── agent list ──────────────────────────────────────────────────────────────
 
+
 @agent_group.command(name="list")
 @click.option("--repo", "repo_name", default=None, help="只显示指定仓库的 agent")
 @click.option("--edit", is_flag=True, default=False, help="进入交互模式，勾选启用/禁用 agent")
-@click.option("--mode", type=click.Choice(["auto", "enable", "disable"]), default="auto",
-              help="保存模式：auto 自动选择（默认），enable 强制写 enabled，disable 强制写 disabled")
+@click.option(
+    "--mode",
+    type=click.Choice(["auto", "enable", "disable"]),
+    default="auto",
+    help="保存模式：auto 自动选择（默认），enable 强制写 enabled，disable 强制写 disabled",
+)
 def agent_list(repo_name: Optional[str], edit: bool, mode: str):
     """列出所有 agent，按仓库分组显示启用状态，支持编辑模式。
 
@@ -214,8 +226,9 @@ def agent_list(repo_name: Optional[str], edit: bool, mode: str):
             repo_dir_map[rname] = adir.parent
 
         def _is_enabled(rc: Optional[RepoConfig], aname: str, repo_dir: Path) -> bool:
-            agents_cfg = (rc.agents if rc and rc.agents is not None
-                          else _load_manifest_agents(repo_dir))
+            agents_cfg = (
+                rc.agents if rc and rc.agents is not None else _load_manifest_agents(repo_dir)
+            )
             if agents_cfg is None:
                 return True
             enabled = agents_cfg.get("enabled") or []
@@ -228,15 +241,17 @@ def agent_list(repo_name: Optional[str], edit: bool, mode: str):
             from prompt_toolkit.shortcuts import checkboxlist_dialog
             from prompt_toolkit.styles import Style as PTStyle
 
-            clean_style = PTStyle.from_dict({
-                "dialog":                        "bg:#1e1e1e",
-                "dialog.body":                   "bg:#1e1e1e fg:#ffffff",
-                "dialog.body checkbox":          "fg:#888888",
-                "dialog.body checkbox-selected": "fg:#00cc00 bold",
-                "dialog.body checkbox-checked":  "fg:#00cc00",
-                "button":                        "bg:#333333 fg:#ffffff",
-                "button.focused":                "bg:#00cc00 fg:#000000",
-            })
+            clean_style = PTStyle.from_dict(
+                {
+                    "dialog": "bg:#1e1e1e",
+                    "dialog.body": "bg:#1e1e1e fg:#ffffff",
+                    "dialog.body checkbox": "fg:#888888",
+                    "dialog.body checkbox-selected": "fg:#00cc00 bold",
+                    "dialog.body checkbox-checked": "fg:#00cc00",
+                    "button": "bg:#333333 fg:#ffffff",
+                    "button.focused": "bg:#00cc00 fg:#000000",
+                }
+            )
 
             for rname, agents in all_agents_by_repo.items():
                 if not agents:
@@ -244,7 +259,9 @@ def agent_list(repo_name: Optional[str], edit: bool, mode: str):
                 rc = repo_config_map.get(rname)
                 repo_dir = repo_dir_map.get(rname, Path("."))
                 values = [(a["name"], a["name"]) for a in agents]
-                default_checked = [a["name"] for a in agents if _is_enabled(rc, a["name"], repo_dir)]
+                default_checked = [
+                    a["name"] for a in agents if _is_enabled(rc, a["name"], repo_dir)
+                ]
 
                 result = checkboxlist_dialog(
                     title=f"仓库：{rname}",
@@ -262,7 +279,9 @@ def agent_list(repo_name: Optional[str], edit: bool, mode: str):
                 unchecked = set(all_names) - checked
 
                 # 计算变更内容：对比有效状态（config 或 manifest）
-                prev_agents = rc.agents if rc.agents is not None else _load_manifest_agents(repo_dir)
+                prev_agents = (
+                    rc.agents if rc.agents is not None else _load_manifest_agents(repo_dir)
+                )
                 old_disabled = set((prev_agents or {}).get("disabled") or [])
                 if prev_agents and (prev_agents.get("enabled") or []):
                     old_enabled_set = set(prev_agents["enabled"])
@@ -317,6 +336,7 @@ def agent_list(repo_name: Optional[str], edit: bool, mode: str):
 
 # ── agent load ───────────────────────────────────────────────────────────────
 
+
 def collect_agents(keywords: tuple = ()) -> list:
     """收集可用 agent 列表，供 agent load 和 driving load 复用。"""
 
@@ -333,7 +353,8 @@ def collect_agents(keywords: tuple = ()) -> list:
     # 优化 1：无关键词时只扫描 base 仓库
     if not keywords:
         agents_dirs = [
-            (n, d) for n, d in agents_dirs
+            (n, d)
+            for n, d in agents_dirs
             if "base" in ((repo_config_map.get(n) and repo_config_map[n].tags) or [])
         ]
 
@@ -343,8 +364,11 @@ def collect_agents(keywords: tuple = ()) -> list:
         repo_agents = scan_agents_from_dir(repo_name, agents_dir, quiet=True)
         if not keywords:
             # 优先级：driving.config.json > manifest.json > 全量加载
-            effective_agents = (rc.agents if rc and rc.agents is not None
-                                else _load_manifest_agents(agents_dir.parent))
+            effective_agents = (
+                rc.agents
+                if rc and rc.agents is not None
+                else _load_manifest_agents(agents_dir.parent)
+            )
             if effective_agents is not None:
                 enabled = effective_agents.get("enabled") or []
                 disabled = effective_agents.get("disabled") or []
@@ -368,13 +392,17 @@ def collect_agents(keywords: tuple = ()) -> list:
             _add(repo_agents)
     else:
         from driving_cli.utils.match import fuzzy_match_any
+
         kw_lower = tuple(k.lower() for k in keywords)
         for repo_name, repo_agents in all_agents_by_repo.items():
             if repo_name.lower() in kw_lower:
                 _add(repo_agents)
                 continue
-            matched = [a for a in repo_agents
-                       if fuzzy_match_any((a["name"], a.get("description", "")), keywords)]
+            matched = [
+                a
+                for a in repo_agents
+                if fuzzy_match_any((a["name"], a.get("description", "")), keywords)
+            ]
             _add(matched)
 
     return [
@@ -400,6 +428,7 @@ def agent_load(keywords: tuple):
         driving agent load android ios
     """
     from driving_cli.utils.match import normalize_keywords
+
     keywords = normalize_keywords(keywords)
 
     try:
@@ -411,6 +440,7 @@ def agent_load(keywords: tuple):
 
 
 # ── agent memory ─────────────────────────────────────────────────────────────
+
 
 @agent_group.group(name="memory")
 def agent_memory():
@@ -566,6 +596,7 @@ def memory_clear(agent_name: str, yes: bool):
         log_error(f"清空记忆失败: {e}")
         raise click.Abort()
 
+
 # ---------------------------------------------------------------------------
 # agent export
 # ---------------------------------------------------------------------------
@@ -574,9 +605,7 @@ def memory_clear(agent_name: str, yes: bool):
 SUPPORTED_TOOLS = ["kiro", "claude-code", "cursor", "windsurf", "codex"]
 
 
-
-def _export_kiro(agent_name: str, data: Dict, agent_dir: Path,
-                 output_dir: Path) -> Path:
+def _export_kiro(agent_name: str, data: Dict, agent_dir: Path, output_dir: Path) -> Path:
     """将 AGENTS.md 复制到 Kiro custom agent 目录。
 
     每次执行都覆盖复制，确保内容与源文件始终保持一致。
@@ -589,7 +618,7 @@ def _export_kiro(agent_name: str, data: Dict, agent_dir: Path,
     if "tools" not in meta:
         raise click.ClickException(
             f"AGENTS.md 缺少 tools 字段，无法导出到 kiro。\n"
-            f"请在 {agent_dir}/AGENTS.md frontmatter 中添加：tools: [\"read\", \"shell\"]"
+            f'请在 {agent_dir}/AGENTS.md frontmatter 中添加：tools: ["read", "shell"]'
         )
 
     kiro_agents_dir = output_dir / ".kiro" / "agents"
@@ -601,10 +630,9 @@ def _export_kiro(agent_name: str, data: Dict, agent_dir: Path,
     return out_file
 
 
-def _export_claude_code(agent_name: str, data: Dict, agent_dir: Path,
-                        output_dir: Path) -> Path:
+def _export_claude_code(agent_name: str, data: Dict, agent_dir: Path, output_dir: Path) -> Path:
     """生成 Claude Code sub-agent 文件。输出：<output_dir>/.claude/agents/<name>.md
-    
+
     macOS/Linux：软链接；Windows：强制复制（不支持软链接）。
     """
     out_dir = output_dir / ".claude" / "agents"
@@ -621,8 +649,7 @@ def _export_claude_code(agent_name: str, data: Dict, agent_dir: Path,
     return out_file
 
 
-def _export_cursor(agent_name: str, data: Dict, agent_dir: Path,
-                   output_dir: Path) -> Path:
+def _export_cursor(agent_name: str, data: Dict, agent_dir: Path, output_dir: Path) -> Path:
     """生成 Cursor Rules 文件。AGENTS.md 需含 alwaysApply 字段。
 
     输出：<output_dir>/.cursor/rules/<name>.mdc
@@ -649,8 +676,7 @@ def _export_cursor(agent_name: str, data: Dict, agent_dir: Path,
     return out_file
 
 
-def _export_windsurf(agent_name: str, data: Dict, agent_dir: Path,
-                     output_dir: Path) -> Path:
+def _export_windsurf(agent_name: str, data: Dict, agent_dir: Path, output_dir: Path) -> Path:
     """生成 Windsurf Rules 文件。AGENTS.md 需含 trigger 字段。
 
     输出：<output_dir>/.windsurf/rules/<name>.md
@@ -697,8 +723,7 @@ def _read_agents_md_body(agents_md: Path) -> str:
     return content[body_start:]
 
 
-def _export_codex(agent_name: str, data: Dict, agent_dir: Path,
-                  output_dir: Path) -> Path:
+def _export_codex(agent_name: str, data: Dict, agent_dir: Path, output_dir: Path) -> Path:
     """生成 OpenAI Codex sub-agent TOML 配置文件。
 
     输出：<output_dir>/.codex/agents/<name>.toml
@@ -726,7 +751,7 @@ def _export_codex(agent_name: str, data: Dict, agent_dir: Path,
         desc = str(meta["description"]).strip()
         if "\n" in desc:
             # 多行 description 使用 TOML 多行字符串，转义内部的 """
-            escaped_desc = desc.replace('\\', '\\\\').replace('"""', '\\"\\"\\"')
+            escaped_desc = desc.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
             lines.append(f'description = """\n{escaped_desc}\n"""')
         else:
             lines.append(f'description = "{desc.replace(chr(34), chr(92) + chr(34))}"')
@@ -737,7 +762,7 @@ def _export_codex(agent_name: str, data: Dict, agent_dir: Path,
     if meta.get("codex_sandbox_mode"):
         lines.append(f'sandbox_mode = "{meta["codex_sandbox_mode"]}"')
     # developer_instructions 使用多行字符串
-    escaped_body = body.replace('\\', '\\\\').replace('"""', '\\"\\"\\"')
+    escaped_body = body.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
     lines.append(f'developer_instructions = """\n{escaped_body}\n"""')
 
     if out_file.exists() or out_file.is_symlink():
@@ -757,29 +782,32 @@ _EXPORTERS = {
 
 # 各工具对应的输出文件路径（相对于 output_dir）
 _TOOL_OUTPUT_PATHS = {
-    "kiro":        lambda name: Path(".kiro") / "agents" / f"{name}.md",
+    "kiro": lambda name: Path(".kiro") / "agents" / f"{name}.md",
     "claude-code": lambda name: Path(".claude") / "agents" / f"{name}.md",
-    "cursor":      lambda name: Path(".cursor") / "rules" / f"{name}.mdc",
-    "windsurf":    lambda name: Path(".windsurf") / "rules" / f"{name}.md",
-    "codex":       lambda name: Path(".codex") / "agents" / f"{name}.toml",
+    "cursor": lambda name: Path(".cursor") / "rules" / f"{name}.mdc",
+    "windsurf": lambda name: Path(".windsurf") / "rules" / f"{name}.md",
+    "codex": lambda name: Path(".codex") / "agents" / f"{name}.toml",
 }
 
 
 @agent_group.command(name="export")
 @click.argument("agent_name")
 @click.option(
-    "--tool", "-t",
+    "--tool",
+    "-t",
     type=click.Choice(SUPPORTED_TOOLS, case_sensitive=False),
     required=True,
     help="目标 AI 工具（kiro、claude-code、cursor、windsurf、codex）",
 )
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     default=None,
     help="输出根目录（默认为项目根目录）",
 )
 @click.option(
-    "--force", "-f",
+    "--force",
+    "-f",
     is_flag=True,
     default=False,
     help="强制重建软链接（默认：文件已存在则跳过）",
@@ -844,10 +872,13 @@ def agent_export(agent_name: str, tool: str, output: Optional[str], force: bool)
 # agent report
 # ---------------------------------------------------------------------------
 
+
 @agent_group.command(name="report")
 @click.argument("agent_name")
 @click.option("--path", "feature_path", required=True, help="需求目录路径")
-@click.option("--source", default="", help="触发来源（来自 agent-dispatcher 构建 prompt 时的触发来源描述）")
+@click.option(
+    "--source", default="", help="触发来源（来自 agent-dispatcher 构建 prompt 时的触发来源描述）"
+)
 def agent_report(agent_name: str, feature_path: str, source: str):
     """上报子 agent 启动事件（由子 agent 在加载步骤第 0 步调用）。
 

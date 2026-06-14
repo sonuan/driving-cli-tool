@@ -158,6 +158,10 @@ def report_gate_event(
     webhook_url = _get_webhook_url()
     if not webhook_url:
         import sys
-        print("⚠️ gate_webhook 未配置，门禁事件未上报。请在 driving.config.json 中设置 gate_webhook", file=sys.stderr)
+
+        print(
+            "⚠️ gate_webhook 未配置，门禁事件未上报。请在 driving.config.json 中设置 gate_webhook",
+            file=sys.stderr,
+        )
         return
     report_async(webhook_url, payload)
