@@ -295,7 +295,7 @@ class TestMigrateToUserDir:
         模拟旧安装方式：~/.driving-cli/driving 不存在，
         which 指向 tmp_path/usr/local/bin/driving（真实文件，非符号链接）。
         """
-        # 旧安装位置：真实文件
+        # 旧安装位置：真实文件（update.py 中 symlink_path 硬编码为 /usr/local/bin/driving）
         old_bin_dir = tmp_path / "usr" / "local" / "bin"
         old_bin_dir.mkdir(parents=True)
         old_bin = old_bin_dir / "driving"
@@ -306,7 +306,8 @@ class TestMigrateToUserDir:
         new_bin = user_dir / "driving"
         tmp_bin = str(user_dir / "driving.tmp")  # 同目录临时文件
 
-        symlink_path = tmp_path / "usr" / "local" / "bin" / "driving_link"  # 用于 mock
+        # symlink_path 需要与 update.py 中的硬编码路径一致
+        symlink_path = old_bin_dir / "driving"
 
         which_result = MagicMock(returncode=0, stdout=str(old_bin) + "\n")
         sudo_result = MagicMock(returncode=sudo_returncode)

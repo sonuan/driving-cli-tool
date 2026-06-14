@@ -357,10 +357,8 @@ class TestGateRequestAutoPassNotifyPass:
         # 第一行应该是通知行
         assert "✅" in lines[0]
         assert "自动通过" in lines[0]
-        # 空行 + "门禁结果：" + JSON
-        assert lines[2].strip() == "门禁结果："
-        json_text = "\n".join(lines[3:])
-        output_json = json.loads(json_text)
+        # 使用 _extract_json 提取 JSON（处理 stderr 混入等情况）
+        output_json = _extract_json(result.output)
         assert output_json["result"] == "auto_pass"
 
 
@@ -386,16 +384,8 @@ class TestGateRequestInteractive:
                 ["gate", "request", "GATE-R5", "--path", str(tmp_path)],
             )
         assert result.exit_code == 0
-        # 从输出中找到 JSON 块
-        output_lines = result.output.strip().split("\n")
-        json_start = None
-        for i, line in enumerate(output_lines):
-            if line.strip().startswith("{"):
-                json_start = i
-                break
-        assert json_start is not None
-        json_text = "\n".join(output_lines[json_start:])
-        output_json = json.loads(json_text)
+        # 使用 _extract_json 提取 JSON（处理 stderr 混入等情况）
+        output_json = _extract_json(result.output)
         assert output_json["result"] == "pass"
         assert output_json["action"] == "确认"
 
@@ -417,17 +407,8 @@ class TestGateRequestInteractive:
                 ["gate", "request", "GATE-R5", "--path", str(tmp_path)],
             )
         assert result.exit_code == 0
-        # 找到最后的 JSON 输出
-        output_lines = result.output.strip().split("\n")
-        # 从后往前找到 JSON 开始
-        json_start = None
-        for i, line in enumerate(output_lines):
-            if line.strip().startswith("{"):
-                json_start = i
-                break
-        assert json_start is not None
-        json_text = "\n".join(output_lines[json_start:])
-        output_json = json.loads(json_text)
+        # 使用 _extract_json 提取 JSON（处理 stderr 混入等情况）
+        output_json = _extract_json(result.output)
         assert output_json["result"] == "amend"
         assert output_json["action"] == "修改"
         assert output_json["note"] == "需要修改边界条件"
@@ -474,16 +455,8 @@ class TestGateRequestReworkThreshold:
         assert result.exit_code == 0
         # 应该有阈值警告
         assert "返工次数已达阈值" in result.output
-        # 最终输出 Result_JSON
-        output_lines = result.output.strip().split("\n")
-        json_start = None
-        for i, line in enumerate(output_lines):
-            if line.strip().startswith("{"):
-                json_start = i
-                break
-        assert json_start is not None
-        json_text = "\n".join(output_lines[json_start:])
-        output_json = json.loads(json_text)
+        # 使用 _extract_json 提取 JSON（处理 stderr 混入等情况）
+        output_json = _extract_json(result.output)
         assert output_json["result"] == "pass"
 
 
