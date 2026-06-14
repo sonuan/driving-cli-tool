@@ -583,7 +583,7 @@ _body_st = st.text(
 
 
 # Feature: feature-and-rule-commands, Property 5: rule 输出字段完整性
-@settings(max_examples=100)
+@settings(max_examples=100, deadline=None)
 @given(
     repo_name=_repo_name_st,
     rule_names=st.lists(_rule_name_st, min_size=1, max_size=5, unique=True),

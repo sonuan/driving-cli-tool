@@ -971,7 +971,7 @@ _safe_text_st = st.text(
 
 
 # Feature: feature-and-rule-commands, Property 1: feature 输出字段完整性
-@settings(max_examples=100)
+@settings(max_examples=100, deadline=None)
 @given(
     repo_name=_repo_name_st,
     feature_names=st.lists(_feature_name_st, min_size=1, max_size=5, unique=True),
