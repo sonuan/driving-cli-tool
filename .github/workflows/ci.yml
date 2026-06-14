@@ -105,7 +105,7 @@ jobs:
       run: python -m build
 
     - name: Check package
-      run: twine check dist/*
+      run: twine check dist/*.whl dist/*.tar.gz
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
