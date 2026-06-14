@@ -73,11 +73,11 @@ if ($VersionUrl) {
     Write-Blue "[STEP 3] Setting default update URL: $VersionUrl"
     Copy-Item "driving_cli/commands/update.py" "driving_cli/commands/update.py.bak"
 
-    $content = Get-Content "driving_cli/commands/update.py" -Raw
+    $content = Get-Content "driving_cli/commands/update.py" -Raw -Encoding UTF8
     $content = $content -replace '(_DEFAULT_UPDATE_VERSION_URL\s*=\s*\(\s*\n\s*)"[^"]*"', "`$1`"$VersionUrl`""
     # 兼容单行写法
     $content = $content -replace '(_DEFAULT_UPDATE_VERSION_URL\s*=\s*)"[^"]*"', "`$1`"$VersionUrl`""
-    Set-Content "driving_cli/commands/update.py" $content -Encoding UTF8
+    [System.IO.File]::WriteAllText((Resolve-Path "driving_cli/commands/update.py").Path, $content, [System.Text.Encoding]::UTF8)
 
     # 验证修改后文件语法合法
     python -m py_compile "driving_cli/commands/update.py"
