@@ -175,7 +175,7 @@ def _process_mcp_json(file_path: Path, target_dir: Path) -> Set[str]:
 
 def _copy_directory_incremental(
     source_dir: Path, target_dir: Path, project_root: Path
-) -> tuple[int, int, int, Set[str]]:
+) -> Tuple[int, int, int, Set[str]]:
     """增量复制目录，只覆盖同名文件，保留目标目录中的其他文件
 
     Args:

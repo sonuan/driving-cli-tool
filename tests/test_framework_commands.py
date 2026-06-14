@@ -5,6 +5,7 @@
 
 import json
 from pathlib import Path
+from typing import Dict, List
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -733,7 +734,7 @@ def test_property6_框架列表聚合完整性(repo1_name, repo2_name, repo1_cou
         return
 
     # 构造两个仓库各自的框架列表（名称不重复）
-    def make_unique_frameworks(repo_name: str, count: int, prefix: str) -> list[dict]:
+    def make_unique_frameworks(repo_name: str, count: int, prefix: str) -> List[Dict]:
         return [
             {
                 "name": f"{prefix}-fw-{i}",

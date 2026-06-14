@@ -23,14 +23,14 @@ def _get_config_manager() -> ConfigManager:
     return ConfigManager(find_project_root())
 
 
-def _load_all_frameworks_with_repo(config_manager: ConfigManager) -> list[dict]:
+def _load_all_frameworks_with_repo(config_manager: ConfigManager) -> List[Dict]:
     """从所有仓库的 gitlist.json 加载框架，并附加 repo_name 字段
 
     Args:
         config_manager: ConfigManager 实例
 
     Returns:
-        list[dict]: 每个框架 dict 包含额外的 _repo_name 字段
+        List[Dict]: 每个框架 dict 包含额外的 _repo_name 字段
 
     Raises:
         click.Abort: 未找到任何配置文件或框架时
@@ -63,7 +63,7 @@ def _load_all_frameworks_with_repo(config_manager: ConfigManager) -> list[dict]:
     return all_frameworks
 
 
-def _resolve_framework_name(framework_name: str, all_frameworks: list[dict]) -> Tuple[dict, str]:
+def _resolve_framework_name(framework_name: str, all_frameworks: List[Dict]) -> Tuple[Dict, str]:
     """解析框架名称，支持 <repo-name>/<framework-name> 格式
 
     Args:
@@ -71,7 +71,7 @@ def _resolve_framework_name(framework_name: str, all_frameworks: list[dict]) -> 
         all_frameworks: 所有框架列表（含 _repo_name 字段）
 
     Returns:
-        Tuple[dict, str]: (框架配置, 仓库名称)
+        Tuple[Dict, str]: (框架配置, 仓库名称)
 
     Raises:
         click.Abort: 未找到框架或存在同名冲突时
