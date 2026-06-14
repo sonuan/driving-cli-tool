@@ -90,6 +90,19 @@ python -m PyInstaller `
     --console `
     --clean `
     --distpath $DistDir `
+    --hidden-import driving_cli.commands.agent `
+    --hidden-import driving_cli.commands.check `
+    --hidden-import driving_cli.commands.feature `
+    --hidden-import driving_cli.commands.framework `
+    --hidden-import driving_cli.commands.gate `
+    --hidden-import driving_cli.commands.ide `
+    --hidden-import driving_cli.commands.load `
+    --hidden-import driving_cli.commands.power `
+    --hidden-import driving_cli.commands.refine `
+    --hidden-import driving_cli.commands.repo `
+    --hidden-import driving_cli.commands.rule `
+    --hidden-import driving_cli.commands.skill `
+    --hidden-import driving_cli.commands.update `
     driving_cli/cli.py
 
 $buildResult = $LASTEXITCODE
