@@ -3,7 +3,19 @@
 import click
 
 from driving_cli import __version__
-from driving_cli.commands import agent, check, feature, framework, gate, ide, load, power, refine, repo, rule, skill, update
+import driving_cli.commands.agent as agent
+import driving_cli.commands.check as check
+import driving_cli.commands.feature as feature
+import driving_cli.commands.framework as framework
+import driving_cli.commands.gate as gate
+import driving_cli.commands.ide as ide
+import driving_cli.commands.load as load
+import driving_cli.commands.power as power
+import driving_cli.commands.refine as refine
+import driving_cli.commands.repo as repo
+import driving_cli.commands.rule as rule
+import driving_cli.commands.skill as skill
+import driving_cli.commands.update as update
 from driving_cli.utils.help_formatter import patch_click_help
 
 
