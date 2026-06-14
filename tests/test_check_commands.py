@@ -255,3 +255,87 @@ class TestCheckJsonCommand:
             result = runner.invoke(cli, ["check", "--json"])
         data = json.loads(result.output)
         assert "driving" in data["updatable"]
+
+
+# ==================== driving repo pull 子进程调用测试 ====================
+
+class TestCheckRepoPullCommand:
+    """验证用户确认更新后，driving repo pull 子进程以正确路径调用"""
+
+    def _setup_updatable(self, tmp_path: Path) -> None:
+        """创建一个有可更新 remote 仓库的环境"""
+        _make_config(tmp_path, [
+            {"name": "driving", "type": "remote", "url": "https://github.com/org/driving",
+             "path": "ai-driving/driving"},
+        ])
+        repo_dir = tmp_path / "ai-driving" / "driving"
+        repo_dir.mkdir(parents=True)
+        (repo_dir / ".git").mkdir()
+
+    def test_用shutil_which找到driving命令(self, runner, tmp_path):
+        """shutil.which 能找到 driving 时，用 which 的结果调用子进程"""
+        self._setup_updatable(tmp_path)
+        fake_driving = "/usr/local/bin/driving"
+
+        with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.check._has_new_version", return_value=True), \
+             patch("driving_cli.commands.check.shutil.which", return_value=fake_driving), \
+             patch("driving_cli.commands.check.subprocess.run",
+                   return_value=MagicMock(returncode=0)) as mock_run:
+            # 模拟用户输入 "y" 确认更新
+            result = runner.invoke(cli, ["check"], input="y\n")
+
+        assert result.exit_code == 0
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args.args[0]
+        assert cmd[0] == fake_driving
+        assert cmd[1:] == ["repo", "pull", "driving"]
+
+    def test_which找不到时回退到sys_argv0(self, runner, tmp_path):
+        """shutil.which 返回 None 时，回退到 sys.argv[0]"""
+        self._setup_updatable(tmp_path)
+        fake_argv0 = "/home/user/.driving-cli/driving"
+
+        with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.check._has_new_version", return_value=True), \
+             patch("driving_cli.commands.check.shutil.which", return_value=None), \
+             patch("driving_cli.commands.check.sys.argv", [fake_argv0]), \
+             patch("driving_cli.commands.check.subprocess.run",
+                   return_value=MagicMock(returncode=0)) as mock_run:
+            result = runner.invoke(cli, ["check"], input="y\n")
+
+        assert result.exit_code == 0
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args.args[0]
+        assert cmd[0] == fake_argv0
+        assert cmd[1:] == ["repo", "pull", "driving"]
+
+    def test_windows下which找到exe(self, runner, tmp_path):
+        """Windows 环境下 shutil.which 应能找到 driving.exe"""
+        self._setup_updatable(tmp_path)
+        fake_exe = r"C:\Users\user\.driving-cli\driving.exe"
+
+        with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.check._has_new_version", return_value=True), \
+             patch("driving_cli.commands.check.shutil.which", return_value=fake_exe), \
+             patch("driving_cli.commands.check.subprocess.run",
+                   return_value=MagicMock(returncode=0)) as mock_run:
+            result = runner.invoke(cli, ["check"], input="y\n")
+
+        assert result.exit_code == 0
+        cmd = mock_run.call_args.args[0]
+        assert cmd[0] == fake_exe
+
+    def test_用户拒绝更新时不调用子进程(self, runner, tmp_path):
+        """用户输入 n 拒绝更新时不应调用 subprocess.run"""
+        self._setup_updatable(tmp_path)
+
+        with patch("driving_cli.commands.check.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.check._has_new_version", return_value=True), \
+             patch("driving_cli.commands.check.shutil.which", return_value="/usr/local/bin/driving"), \
+             patch("driving_cli.commands.check.subprocess.run",
+                   return_value=MagicMock(returncode=0)) as mock_run:
+            result = runner.invoke(cli, ["check"], input="n\n")
+
+        assert result.exit_code == 0
+        mock_run.assert_not_called()

@@ -2,7 +2,9 @@
 
 import json
 import random
+import shutil
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
@@ -197,8 +199,11 @@ def _check_interactive():
     for repo in updatable:
         if click.confirm(f"  更新仓库 '{repo.name}'？", default=True):
             click.echo(f"  正在更新 '{repo.name}'...")
+            # 优先用 shutil.which 找到 driving 命令路径，
+            # 找不到时回退到当前进程路径（兼容 .exe 安装、pip 安装、源码运行所有场景）
+            driving_cmd = shutil.which("driving") or sys.argv[0]
             ret = subprocess.run(
-                ["driving", "repo", "pull", repo.name],
+                [driving_cmd, "repo", "pull", repo.name],
             )
             if ret.returncode == 0:
                 log_success(f"  '{repo.name}' 更新成功 ✓")

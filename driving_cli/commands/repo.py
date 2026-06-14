@@ -5,6 +5,7 @@
 """
 
 from pathlib import Path
+import sys
 from typing import Optional
 
 import click
@@ -534,6 +535,11 @@ def _install_local(config_mgr: ConfigManager, project_root: Path, local_path: st
 
         # 确保父目录存在
         install_dir.parent.mkdir(parents=True, exist_ok=True)
+        if sys.platform == "win32":
+            log_error("Windows 不支持本地仓库软链接（--local <path>）。")
+            log_info("请改用 --local 不带路径参数创建空目录，再手动将文件复制到该目录：")
+            log_info(f"  driving repo install --local --name {repo_name}")
+            raise click.Abort()
         install_dir.symlink_to(src_path)
         log_success(f"已创建软链接：{install_path} → {src_path}")
         stored_local_path = str(src_path)

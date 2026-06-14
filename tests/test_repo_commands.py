@@ -238,7 +238,8 @@ class TestRepoInstall:
         assert repo_cfg.modules[0].description == ""
 
     def test_install_local_with_path_creates_symlink(self, runner, tmp_project, tmp_path):
-        """--local <path> 时创建软链接并写入配置"""
+        """--local <path> 时 Unix 创建软链接，Windows 给出错误提示"""
+        import sys
         # 创建一个真实的本地目录
         src_dir = tmp_path / "my-source"
         src_dir.mkdir()
@@ -247,15 +248,35 @@ class TestRepoInstall:
             result = runner.invoke(repo_group, [
                 "install", "--local", str(src_dir), "--name", "linked-repo"
             ])
-        assert result.exit_code == 0
-        link_path = tmp_project / "ai-driving" / "linked-repo"
-        assert link_path.is_symlink()
-        # 验证配置
-        mgr = ConfigManager(tmp_project)
-        repo_cfg = mgr.get_repo("linked-repo")
-        assert repo_cfg is not None
-        assert repo_cfg.type == "local"
-        assert repo_cfg.local_path == str(src_dir.resolve())
+
+        if sys.platform == "win32":
+            # Windows：应给出错误提示，不创建软链接
+            assert result.exit_code != 0
+            assert "Windows" in result.output or "不支持" in result.output
+        else:
+            assert result.exit_code == 0
+            link_path = tmp_project / "ai-driving" / "linked-repo"
+            assert link_path.is_symlink()
+            # 验证配置
+            mgr = ConfigManager(tmp_project)
+            repo_cfg = mgr.get_repo("linked-repo")
+            assert repo_cfg is not None
+            assert repo_cfg.type == "local"
+            assert repo_cfg.local_path == str(src_dir.resolve())
+
+    def test_install_local_with_path_windows_error(self, runner, tmp_project, tmp_path):
+        """Windows 下 --local <path> 给出友好错误提示"""
+        src_dir = tmp_path / "my-source"
+        src_dir.mkdir()
+
+        with patch("sys.platform", "win32"), \
+             patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project):
+            result = runner.invoke(repo_group, [
+                "install", "--local", str(src_dir), "--name", "linked-repo"
+            ])
+        assert result.exit_code != 0
+        assert "Windows" in result.output
+        assert "不支持" in result.output
 
     def test_install_no_args_initializes_uninitialized(self, runner, tmp_project, config_mgr):
         """无参数 install 对未初始化的远程仓库执行 submodule update"""

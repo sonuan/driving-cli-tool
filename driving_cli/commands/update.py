@@ -179,6 +179,15 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
         log_error("版本信息中缺少下载地址")
         return
 
+    # Windows 上自动将 download_url 中的 /driving 替换为 /driving.exe
+    import sys as _sys
+    if _sys.platform == "win32":
+        win_url = version_info.get("download_url_windows", "")
+        if win_url:
+            download_url = win_url
+        elif download_url.endswith("/driving"):
+            download_url = download_url + ".exe"
+
     # 检查是否需要更新
     comparison = compare_versions(current_version, latest_version)
 
@@ -212,7 +221,8 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
 
         # 确定安装目标路径（提前计算，供下载临时目录使用）
         user_install_dir_early = Path.home() / ".driving-cli"
-        user_install_path_early = user_install_dir_early / "driving"
+        _exe_name_early = "driving.exe" if sys.platform == "win32" else "driving"
+        user_install_path_early = user_install_dir_early / _exe_name_early
 
         # 临时文件与目标放在同一目录，确保 os.rename 是原子操作（避免跨设备 copy）
         if user_install_path_early.exists():
@@ -262,41 +272,48 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
 
         # 确定安装目标路径
         # 优先使用 ~/.driving-cli/driving（用户目录，无需 sudo）
-        # 回退到 which driving 的结果（兼容旧版本或 pip 安装方式）
+        # 回退到 which/where driving 的结果（兼容旧版本或 pip 安装方式）
         #
         # sudo 执行时 Path.home() 返回 /root，需通过 SUDO_USER 还原真实用户 home
+        is_windows = sys.platform == "win32"
+
         sudo_user = os.environ.get("SUDO_USER", "")
-        if sudo_user:
-            import pwd as _pwd
+        if sudo_user and not is_windows:
             try:
+                import pwd as _pwd
                 real_home = Path(_pwd.getpwnam(sudo_user).pw_dir)
-            except KeyError:
+            except (KeyError, ImportError):
                 real_home = Path.home()
         else:
             real_home = Path.home()
 
         user_install_dir = real_home / ".driving-cli"
-        user_install_path = user_install_dir / "driving"
-        symlink_path = Path("/usr/local/bin/driving")
+        # Windows 可执行文件带 .exe 后缀
+        exe_name = "driving.exe" if is_windows else "driving"
+        user_install_path = user_install_dir / exe_name
+        symlink_path = Path("/usr/local/bin/driving") if not is_windows else None
 
         if user_install_path.exists():
             # 新方案：二进制在用户目录，直接更新，无需 sudo
             current_exe = str(user_install_path)
             migrate = False
         else:
-            # 兼容旧方案：通过 which 查找
-            result = subprocess.run(["which", "driving"], capture_output=True, text=True)
+            # 兼容旧方案：通过 which/where 查找
+            find_cmd = "where" if is_windows else "which"
+            result = subprocess.run([find_cmd, "driving"], capture_output=True, text=True)
             if result.returncode == 0:
-                resolved = Path(result.stdout.strip()).resolve()
+                resolved = Path(result.stdout.strip().splitlines()[0]).resolve()
                 current_exe = str(resolved)
             elif not sys.argv[0].endswith(".py"):
                 current_exe = os.path.abspath(sys.argv[0])
             else:
                 current_exe = None
 
-            # 检测是否为旧安装方式（/usr/local/bin/driving 是真实文件而非符号链接）
+            # 检测是否为旧安装方式（/usr/local/bin/driving 是真实文件而非符号链接，仅 Unix）
             migrate = (
-                current_exe is not None
+                not is_windows
+                and current_exe is not None
+                and symlink_path is not None
                 and symlink_path.exists()
                 and not symlink_path.is_symlink()
             )
@@ -334,17 +351,33 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
 
         # 替换可执行文件
         def _do_install(src: str, dest: str) -> None:
-            """将 src 原子替换到 dest 并设置执行权限（755）。目标目录不存在时自动创建。"""
+            """将 src 原子替换到 dest 并设置执行权限。目标目录不存在时自动创建。"""
             os.makedirs(os.path.dirname(dest), exist_ok=True)
+            # Windows 上无法替换正在运行的文件，先尝试重命名旧文件
+            if is_windows and os.path.exists(dest):
+                old_dest = dest + ".old"
+                try:
+                    os.replace(dest, old_dest)
+                except Exception:
+                    pass
             # os.replace 是原子操作，同设备下等价于 rename，不会有跨设备 copy 权限问题
             os.replace(src, dest)
-            os.chmod(
-                dest,
-                stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH,
-            )
+            if not is_windows:
+                os.chmod(
+                    dest,
+                    stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH,
+                )
+            # 清理 Windows 旧备份文件
+            if is_windows:
+                old_dest = dest + ".old"
+                try:
+                    if os.path.exists(old_dest):
+                        os.unlink(old_dest)
+                except Exception:
+                    pass  # 清理失败不影响主流程
 
         def _do_install_with_sudo(src: str, dest: str) -> bool:
-            """使用 sudo mv + chmod 替换文件，返回是否成功。"""
+            """使用 sudo mv + chmod 替换文件，返回是否成功（仅 Unix）。"""
             log_info("需要管理员权限完成安装，请输入密码：")
             result = subprocess.run(
                 ["sudo", "sh", "-c", f"mv {src!r} {dest!r} && chmod 755 {dest!r}"]
@@ -357,50 +390,64 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
             try:
                 _do_install(tmp_path, current_exe)
             except PermissionError:
-                # 无写权限时自动 fallback 到 sudo，用户只需输入一次密码
+                if is_windows:
+                    log_error("安装失败：没有写入权限，请以管理员身份运行 PowerShell 后重试")
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                    return
+                # Unix：无写权限时自动 fallback 到 sudo，用户只需输入一次密码
                 if not _do_install_with_sudo(tmp_path, current_exe):
                     log_error("安装失败：sudo 执行出错")
                     if os.path.exists(tmp_path):
                         os.unlink(tmp_path)
                     return
 
-            # 旧安装方式迁移收尾：删除旧真实文件，建立符号链接
-            if migrate:
-                def _do_migrate_symlink() -> bool:
-                    """删除 /usr/local/bin/driving 真实文件，创建指向新目录的符号链接"""
+            if not is_windows:
+                # 旧安装方式迁移收尾：删除旧真实文件，建立符号链接（仅 Unix）
+                if migrate:
+                    def _do_migrate_symlink() -> bool:
+                        """删除 /usr/local/bin/driving 真实文件，创建指向新目录的符号链接"""
+                        try:
+                            if symlink_path.exists() and not symlink_path.is_symlink():
+                                symlink_path.unlink()
+                            symlink_path.symlink_to(current_exe)
+                            return True
+                        except PermissionError:
+                            return False
+
+                    migrated = _do_migrate_symlink()
+                    if not migrated:
+                        # 需要 sudo 建符号链接
+                        log_info("创建符号链接需要管理员权限，请输入密码：")
+                        r = subprocess.run(
+                            ["sudo", "sh", "-c",
+                             f"rm -f {str(symlink_path)!r} && ln -sf {current_exe!r} {str(symlink_path)!r}"]
+                        )
+                        migrated = r.returncode == 0
+
+                    if migrated:
+                        log_success("✓ 已迁移到新安装方式，后续 driving update 无需 sudo")
+                    else:
+                        log_warning("符号链接创建失败，但二进制已更新到 ~/.driving-cli/driving")
+                        log_info(f"可手动执行：sudo ln -sf {current_exe} {symlink_path}")
+
+                # sudo 执行时将安装目录所有权归还真实用户，避免 root 权限问题
+                if sudo_user and user_install_dir.exists():
                     try:
-                        if symlink_path.exists() and not symlink_path.is_symlink():
-                            symlink_path.unlink()
-                        symlink_path.symlink_to(current_exe)
-                        return True
-                    except PermissionError:
-                        return False
-
-                migrated = _do_migrate_symlink()
-                if not migrated:
-                    # 需要 sudo 建符号链接
-                    log_info("创建符号链接需要管理员权限，请输入密码：")
-                    r = subprocess.run(
-                        ["sudo", "sh", "-c",
-                         f"rm -f {str(symlink_path)!r} && ln -sf {current_exe!r} {str(symlink_path)!r}"]
-                    )
-                    migrated = r.returncode == 0
-
-                if migrated:
-                    log_success("✓ 已迁移到新安装方式，后续 driving update 无需 sudo")
-                else:
-                    log_warning("符号链接创建失败，但二进制已更新到 ~/.driving-cli/driving")
-                    log_info(f"可手动执行：sudo ln -sf {current_exe} {symlink_path}")
-
-            # sudo 执行时将安装目录所有权归还真实用户，避免 root 权限问题
-            if sudo_user and user_install_dir.exists():
-                try:
-                    subprocess.run(
-                        ["chown", "-R", sudo_user, str(user_install_dir)],
-                        check=True
-                    )
-                except Exception:
-                    pass  # chown 失败不影响主流程
+                        subprocess.run(
+                            ["chown", "-R", sudo_user, str(user_install_dir)],
+                            check=True
+                        )
+                    except Exception:
+                        pass  # chown 失败不影响主流程
+            else:
+                # Windows：检查安装目录是否在 PATH 中，不在则提示用户
+                install_dir_str = str(user_install_dir)
+                path_env = os.environ.get("PATH", "")
+                if install_dir_str.lower() not in path_env.lower():
+                    log_warning(f"\n提示: {install_dir_str} 不在 PATH 中")
+                    log_info("请将该目录加入用户环境变量 PATH，或运行以下 PowerShell 命令（需重启终端生效）：")
+                    log_info(f'  $env:Path += ";{install_dir_str}"')
 
             log_success(f"\n✓ 更新成功！当前版本: {latest_version}")
             log_info("\n提示: 更新将在下次运行 driving 命令时生效")

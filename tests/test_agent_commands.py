@@ -795,7 +795,12 @@ class TestAgentExportCommand:
             result = runner.invoke(cli, ["agent", "export", "test-agent", "--tool", "claude-code"])
         assert result.exit_code == 0
         out = project_with_full_agent / ".claude" / "agents" / "test-agent.md"
-        assert out.is_symlink()
+        # Unix：软链接；Windows：复制的实体文件
+        import sys
+        if sys.platform == "win32":
+            assert out.exists() and not out.is_symlink()
+        else:
+            assert out.is_symlink()
 
     def test_export_cursor缺少alwaysApply字段报错(self, runner, project_with_full_agent):
         with patch("driving_cli.commands.agent.find_project_root",
@@ -817,7 +822,11 @@ class TestAgentExportCommand:
             result = runner.invoke(cli, ["agent", "export", "symlink-agent", "--tool", "cursor"])
         assert result.exit_code == 0
         out = tmp_path / ".cursor" / "rules" / "symlink-agent.mdc"
-        assert out.is_symlink()
+        import sys
+        if sys.platform == "win32":
+            assert out.exists() and not out.is_symlink()
+        else:
+            assert out.is_symlink()
 
     def test_export_windsurf缺少trigger字段报错(self, runner, project_with_full_agent):
         with patch("driving_cli.commands.agent.find_project_root",
@@ -839,7 +848,11 @@ class TestAgentExportCommand:
             result = runner.invoke(cli, ["agent", "export", "symlink-agent", "--tool", "windsurf"])
         assert result.exit_code == 0
         out = tmp_path / ".windsurf" / "rules" / "symlink-agent.md"
-        assert out.is_symlink()
+        import sys
+        if sys.platform == "win32":
+            assert out.exists() and not out.is_symlink()
+        else:
+            assert out.is_symlink()
 
     def test_export已存在时跳过(self, runner, project_with_full_agent):
         with patch("driving_cli.commands.agent.find_project_root",
@@ -1018,8 +1031,65 @@ class TestAgentExportCommand:
         assert out.exists()
         assert "developer_instructions" in out.read_text(encoding="utf-8")
 
+    # ---- Windows 平台专项测试 ----
 
-# ==================== agent report ====================
+    def _make_agent(self, tmp_path: Path, name: str, extra_fields: str = "") -> Path:
+        """辅助：在 tmp_path 下创建最小 agent"""
+        _make_config(tmp_path, [
+            {"name": "my-local", "type": "local", "path": "ai-driving/my-local", "local_path": None},
+        ])
+        agent_dir = tmp_path / "ai-driving" / "my-local" / "agents" / name
+        agent_dir.mkdir(parents=True)
+        (agent_dir / "AGENTS.md").write_text(
+            f"---\nname: {name}\ndescription: 测试\n{extra_fields}---\n\n内容\n",
+            encoding="utf-8",
+        )
+        return agent_dir
+
+    def test_export_claude_code_windows下复制实体文件(self, runner, tmp_path):
+        """Windows 下 claude-code export 应复制实体文件，而非软链接"""
+        self._make_agent(tmp_path, "win-agent")
+        with patch("sys.platform", "win32"), \
+             patch("driving_cli.commands.agent.sys.platform", "win32"), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["agent", "export", "win-agent", "--tool", "claude-code"])
+        assert result.exit_code == 0
+        out = tmp_path / ".claude" / "agents" / "win-agent.md"
+        assert out.exists()
+        assert not out.is_symlink()
+        assert "内容" in out.read_text(encoding="utf-8")
+
+    def test_export_cursor_windows下复制实体文件(self, runner, tmp_path):
+        """Windows 下 cursor export 应复制实体文件，而非软链接"""
+        self._make_agent(tmp_path, "win-agent", "alwaysApply: false\n")
+        with patch("driving_cli.commands.agent.sys.platform", "win32"), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["agent", "export", "win-agent", "--tool", "cursor"])
+        assert result.exit_code == 0
+        out = tmp_path / ".cursor" / "rules" / "win-agent.mdc"
+        assert out.exists()
+        assert not out.is_symlink()
+
+    def test_export_windsurf_windows下复制实体文件(self, runner, tmp_path):
+        """Windows 下 windsurf export 应复制实体文件，而非软链接"""
+        self._make_agent(tmp_path, "win-agent", "trigger: manual\n")
+        with patch("driving_cli.commands.agent.sys.platform", "win32"), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
+            result = runner.invoke(cli, ["agent", "export", "win-agent", "--tool", "windsurf"])
+        assert result.exit_code == 0
+        out = tmp_path / ".windsurf" / "rules" / "win-agent.md"
+        assert out.exists()
+        assert not out.is_symlink()
+
+    def test_export_windows复制文件内容与源一致(self, runner, tmp_path):
+        """Windows 复制模式下输出文件内容应与源 AGENTS.md 一致"""
+        agent_dir = self._make_agent(tmp_path, "win-agent")
+        source_content = (agent_dir / "AGENTS.md").read_text(encoding="utf-8")
+        with patch("driving_cli.commands.agent.sys.platform", "win32"), \
+             patch("driving_cli.commands.agent.find_project_root", return_value=tmp_path):
+            runner.invoke(cli, ["agent", "export", "win-agent", "--tool", "claude-code"])
+        out = tmp_path / ".claude" / "agents" / "win-agent.md"
+        assert out.read_text(encoding="utf-8") == source_content
 
 
 class TestAgentReport:

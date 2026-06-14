@@ -106,7 +106,9 @@ def _try_auto_update(original_cmd: str = "driving load") -> Optional[str]:
     import subprocess as _sp
     from pathlib import Path as _Path
 
-    user_binary = _Path.home() / ".driving-cli" / "driving"
+    import sys as _sys
+    _exe_name = "driving.exe" if _sys.platform == "win32" else "driving"
+    user_binary = _Path.home() / ".driving-cli" / _exe_name
     if not user_binary.exists():
         _dbg("跳过自动更新：未使用 ~/.driving-cli 安装方式")
         return None

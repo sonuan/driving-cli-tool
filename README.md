@@ -21,6 +21,33 @@ pip3 install -e .
 driving update
 ```
 
+### Windows 安装
+
+**方式一：pip 安装（推荐，无需额外步骤）**
+
+```powershell
+# 前提：Python 3.8+（python.org 下载，安装时勾选 "Add Python to PATH"）
+pip install git+https://github.com/sonuan/driving-cli-tool.git
+
+# 验证
+driving --version
+
+# 升级
+driving update
+```
+
+**方式二：预编译 .exe（无需 Python 环境）**
+
+```powershell
+# 安装（PowerShell，从 GitHub 下载）
+irm https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/install.ps1 | iex
+
+# 升级（重新打开终端后）
+driving update
+```
+
+> **注意**：`driving update` 在 Windows 权限不足时会提示以管理员身份运行 PowerShell。`driving agent export` 在 Windows 下使用文件复制替代软链接，`driving repo install --local <path>` 不支持 Windows（可改用 `--local --name` 创建空目录后手动复制文件）。
+
 ---
 
 ## load — 一次性加载所有上下文
@@ -50,7 +77,7 @@ driving repo install --url <url> --branch main              # 安装时指定分
 driving repo install --url <url> --tag base --tag features  # 安装时指定标签（可多次指定）
 driving repo install --url <url> --desc "描述"              # 安装时指定描述（--description 的简写）
 driving repo install --url <url> --module "order:订单模块" --module "pay:支付模块"  # 安装时指定业务模块
-driving repo install --local <path>           # 安装本地仓库（软链接）
+driving repo install --local <path>           # 安装本地仓库（软链接，仅 macOS/Linux；Windows 不支持）
 driving repo install --local --name <name> --tag features --module "chat:聊天"  # 本地仓库 + 标签 + 模块
 driving repo install --url <url> --power <power-name>  # Power 模式下指定写入哪个 power 的配置
 driving repo uninstall <name>                 # 卸载仓库
@@ -372,13 +399,13 @@ driving agent memory set <name> <content>        # 覆盖写入（会提示确�
 driving agent memory set <name> <content> --force  # 强制覆盖
 driving agent memory clear <name>                # 清空 MEMORY.md
 
-# 导出到外部 AI 工具（kiro 使用硬链接，其他工具使用软链接；文件已存在时自动跳过）
-driving agent export <name> --tool kiro              # → .kiro/agents/<name>.md（硬链接，需含 tools 字段）
-driving agent export <name> --tool claude-code       # → .claude/agents/<name>.md（软链接）
-driving agent export <name> --tool cursor            # → .cursor/rules/<name>.mdc（软链接，需含 alwaysApply 字段）
-driving agent export <name> --tool windsurf          # → .windsurf/rules/<name>.md（软链接，需含 trigger 字段）
+# 导出到外部 AI 工具（kiro 每次都覆盖复制；其他工具 macOS/Linux 使用软链接，Windows 使用复制；文件已存在时自动跳过）
+driving agent export <name> --tool kiro              # → .kiro/agents/<name>.md（复制，需含 tools 字段）
+driving agent export <name> --tool claude-code       # → .claude/agents/<name>.md（软链接/复制）
+driving agent export <name> --tool cursor            # → .cursor/rules/<name>.mdc（软链接/复制，需含 alwaysApply 字段）
+driving agent export <name> --tool windsurf          # → .windsurf/rules/<name>.md（软链接/复制，需含 trigger 字段）
 driving agent export <name> --tool codex             # → .codex/agents/<name>.toml（TOML 文件，内容从 AGENTS.md 转换生成）
-driving agent export <name> --tool kiro --force      # 强制重建硬链接
+driving agent export <name> --tool kiro --force      # 强制重建
 
 # 上报子 agent 启动事件（由子 agent 在加载步骤第 0 步调用）
 driving agent report <name> --path <feature-dir> --source "<触发来源描述>"

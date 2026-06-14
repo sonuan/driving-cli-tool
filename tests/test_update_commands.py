@@ -522,3 +522,188 @@ class TestUpdateOpReporter:
             result = self._invoke_update_success(runner, version_info, tmp_path)
         assert result.exit_code == 0
         assert "更新成功" in result.output
+
+
+# ==================== Windows 平台测试 ====================
+
+class TestWindowsInstall:
+    """测试 Windows 平台（sys.platform == 'win32'）的安装行为"""
+
+    def _invoke_windows_update(self, runner, version_info, tmp_path,
+                                permission_error=False):
+        """在 Windows 平台模拟下模拟 update 安装流程"""
+        user_dir = tmp_path / ".driving-cli"
+        user_dir.mkdir(parents=True)
+        # Windows 可执行文件用 .exe 后缀
+        (user_dir / "driving.exe").write_bytes(b"old binary")
+        tmp_bin = str(user_dir / "driving.tmp")
+
+        where_result = MagicMock(returncode=0,
+                                 stdout=str(user_dir / "driving.exe") + "\r\n")
+
+        def subprocess_side_effect(args, **kwargs):
+            return where_result
+
+        with patch("sys.platform", "win32"), \
+             patch("driving_cli.commands.update.fetch_version_info",
+                   return_value=version_info), \
+             patch("driving_cli.commands.update.get_current_version",
+                   return_value="1.0.0"), \
+             patch("driving_cli.commands.update._get_update_version_url",
+                   return_value="http://x"), \
+             patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("subprocess.run", side_effect=subprocess_side_effect) as mock_sub, \
+             patch("urllib.request.urlopen", return_value=_make_urlopen_mock()), \
+             patch("tempfile.mkstemp", return_value=(3, tmp_bin)), \
+             patch("os.fdopen"), patch("os.fsync"), \
+             patch("os.path.getsize", return_value=2048), \
+             patch("os.makedirs"), \
+             patch("os.replace",
+                   side_effect=PermissionError("denied") if permission_error
+                   else None) as mock_replace, \
+             patch("os.path.exists", return_value=False):
+
+            result = runner.invoke(update, ["--yes"])
+            return result, mock_sub, mock_replace
+
+    def test_windows_exe_suffix_in_install_path(self, runner, version_info, tmp_path):
+        """Windows 上安装路径应包含 .exe 后缀"""
+        result, _, _ = self._invoke_windows_update(runner, version_info, tmp_path)
+        assert result.exit_code == 0
+        assert "更新成功" in result.output
+        # 安装位置日志应包含 .exe
+        assert ".exe" in result.output
+
+    def test_windows_uses_where_not_which(self, runner, version_info, tmp_path):
+        """Windows 上应使用 where 而非 which 查找命令路径"""
+        # 让 ~/.driving-cli/driving.exe 不存在，强制走 where 分支
+        user_dir = tmp_path / ".driving-cli"
+        user_dir.mkdir(parents=True)
+        tmp_bin = str(user_dir / "driving.tmp")
+
+        fake_exe = str(tmp_path / "driving.exe")
+        where_result = MagicMock(returncode=0, stdout=fake_exe + "\r\n")
+
+        with patch("sys.platform", "win32"), \
+             patch("driving_cli.commands.update.fetch_version_info",
+                   return_value=version_info), \
+             patch("driving_cli.commands.update.get_current_version",
+                   return_value="1.0.0"), \
+             patch("driving_cli.commands.update._get_update_version_url",
+                   return_value="http://x"), \
+             patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("subprocess.run", return_value=where_result) as mock_sub, \
+             patch("urllib.request.urlopen", return_value=_make_urlopen_mock()), \
+             patch("tempfile.mkstemp", return_value=(3, tmp_bin)), \
+             patch("os.fdopen"), patch("os.fsync"), \
+             patch("os.path.getsize", return_value=2048), \
+             patch("os.makedirs"), patch("os.replace"), \
+             patch("os.path.exists", return_value=False):
+
+            runner.invoke(update, ["--yes"])
+
+        find_calls = [c for c in mock_sub.call_args_list
+                      if c.args and c.args[0]]
+        cmd_names = [c.args[0][0] for c in find_calls if c.args[0]]
+        assert "where" in cmd_names, "Windows 应使用 where 查找路径"
+        assert "which" not in cmd_names, "Windows 不应调用 which"
+
+    def test_windows_no_sudo_on_permission_error(self, runner, version_info, tmp_path):
+        """Windows 权限错误时应报错，不尝试 sudo"""
+        result, mock_sub, _ = self._invoke_windows_update(
+            runner, version_info, tmp_path, permission_error=True
+        )
+        assert result.exit_code == 0
+        assert "管理员" in result.output or "安装失败" in result.output
+
+        sudo_calls = [c for c in mock_sub.call_args_list
+                      if c.args and c.args[0] and c.args[0][0] == "sudo"]
+        assert len(sudo_calls) == 0, "Windows 上不应调用 sudo"
+
+    def test_windows_no_symlink_migration(self, runner, version_info, tmp_path):
+        """Windows 上不应触发符号链接迁移逻辑"""
+        result, _, _ = self._invoke_windows_update(runner, version_info, tmp_path)
+        assert result.exit_code == 0
+        # 不应出现 Unix 专属的迁移提示
+        assert "/usr/local/bin" not in result.output
+        assert "sudo ln" not in result.output
+
+    def test_windows_download_url_appends_exe(self, runner, tmp_path):
+        """`version.json` 中 download_url 末尾为 /driving 时，Windows 应自动改为 /driving.exe"""
+        vi = {
+            "version": "9.9.9",
+            "download_url": "http://example.com/dist/driving",
+            "changelog": [],
+        }
+        captured_urls = []
+
+        def fake_urlopen(url, **kwargs):
+            captured_urls.append(url)
+            return _make_urlopen_mock()
+
+        user_dir = tmp_path / ".driving-cli"
+        user_dir.mkdir(parents=True)
+        (user_dir / "driving.exe").write_bytes(b"old")
+        tmp_bin = str(user_dir / "driving.tmp")
+
+        with patch("sys.platform", "win32"), \
+             patch("driving_cli.commands.update.fetch_version_info", return_value=vi), \
+             patch("driving_cli.commands.update.get_current_version",
+                   return_value="1.0.0"), \
+             patch("driving_cli.commands.update._get_update_version_url",
+                   return_value="http://x"), \
+             patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("urllib.request.urlopen", side_effect=fake_urlopen), \
+             patch("tempfile.mkstemp", return_value=(3, tmp_bin)), \
+             patch("os.fdopen"), patch("os.fsync"), \
+             patch("os.path.getsize", return_value=2048), \
+             patch("os.makedirs"), patch("os.replace"), \
+             patch("subprocess.run"), \
+             patch("os.path.exists", return_value=False):
+
+            runner.invoke(update, ["--yes"])
+
+        download_calls = [u for u in captured_urls if "dist" in u]
+        assert len(download_calls) == 1
+        assert download_calls[0].endswith(".exe"), \
+            f"Windows 下载 URL 应以 .exe 结尾，实际为: {download_calls[0]}"
+
+    def test_windows_prefers_download_url_windows_field(self, runner, tmp_path):
+        """`version.json` 包含 download_url_windows 时优先使用该字段"""
+        vi = {
+            "version": "9.9.9",
+            "download_url": "http://example.com/dist/driving",
+            "download_url_windows": "http://example.com/dist/driving.exe",
+            "changelog": [],
+        }
+        captured_urls = []
+
+        def fake_urlopen(url, **kwargs):
+            captured_urls.append(url)
+            return _make_urlopen_mock()
+
+        user_dir = tmp_path / ".driving-cli"
+        user_dir.mkdir(parents=True)
+        (user_dir / "driving.exe").write_bytes(b"old")
+        tmp_bin = str(user_dir / "driving.tmp")
+
+        with patch("sys.platform", "win32"), \
+             patch("driving_cli.commands.update.fetch_version_info", return_value=vi), \
+             patch("driving_cli.commands.update.get_current_version",
+                   return_value="1.0.0"), \
+             patch("driving_cli.commands.update._get_update_version_url",
+                   return_value="http://x"), \
+             patch("pathlib.Path.home", return_value=tmp_path), \
+             patch("urllib.request.urlopen", side_effect=fake_urlopen), \
+             patch("tempfile.mkstemp", return_value=(3, tmp_bin)), \
+             patch("os.fdopen"), patch("os.fsync"), \
+             patch("os.path.getsize", return_value=2048), \
+             patch("os.makedirs"), patch("os.replace"), \
+             patch("subprocess.run"), \
+             patch("os.path.exists", return_value=False):
+
+            runner.invoke(update, ["--yes"])
+
+        download_calls = [u for u in captured_urls if "dist" in u]
+        assert len(download_calls) == 1
+        assert download_calls[0] == "http://example.com/dist/driving.exe"

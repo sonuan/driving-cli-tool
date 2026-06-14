@@ -8,6 +8,8 @@
 """
 
 import json as json_module
+import shutil
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -583,8 +585,6 @@ def _export_kiro(agent_name: str, data: Dict, agent_dir: Path,
     AGENTS.md frontmatter 需包含 tools 字段，Kiro 才能正确识别。
     参考：https://kiro.dev/docs/chat/subagents/
     """
-    import shutil
-
     meta = data["meta"]
     if "tools" not in meta:
         raise click.ClickException(
@@ -603,7 +603,10 @@ def _export_kiro(agent_name: str, data: Dict, agent_dir: Path,
 
 def _export_claude_code(agent_name: str, data: Dict, agent_dir: Path,
                         output_dir: Path) -> Path:
-    """生成 Claude Code sub-agent 软链接。输出：<output_dir>/.claude/agents/<name>.md"""
+    """生成 Claude Code sub-agent 文件。输出：<output_dir>/.claude/agents/<name>.md
+    
+    macOS/Linux：软链接；Windows：强制复制（不支持软链接）。
+    """
     out_dir = output_dir / ".claude" / "agents"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{agent_name}.md"
@@ -611,15 +614,19 @@ def _export_claude_code(agent_name: str, data: Dict, agent_dir: Path,
     agents_md = agent_dir / "AGENTS.md"
     if out_file.exists() or out_file.is_symlink():
         out_file.unlink()
-    out_file.symlink_to(agents_md.resolve())
+    if sys.platform == "win32":
+        shutil.copy2(agents_md.resolve(), out_file)
+    else:
+        out_file.symlink_to(agents_md.resolve())
     return out_file
 
 
 def _export_cursor(agent_name: str, data: Dict, agent_dir: Path,
                    output_dir: Path) -> Path:
-    """生成 Cursor Rules 软链接。AGENTS.md 需含 alwaysApply 字段。
+    """生成 Cursor Rules 文件。AGENTS.md 需含 alwaysApply 字段。
 
     输出：<output_dir>/.cursor/rules/<name>.mdc
+    macOS/Linux：软链接；Windows：强制复制（不支持软链接）。
     """
     meta = data["meta"]
     if "alwaysApply" not in meta:
@@ -635,15 +642,19 @@ def _export_cursor(agent_name: str, data: Dict, agent_dir: Path,
     agents_md = agent_dir / "AGENTS.md"
     if out_file.exists() or out_file.is_symlink():
         out_file.unlink()
-    out_file.symlink_to(agents_md.resolve())
+    if sys.platform == "win32":
+        shutil.copy2(agents_md.resolve(), out_file)
+    else:
+        out_file.symlink_to(agents_md.resolve())
     return out_file
 
 
 def _export_windsurf(agent_name: str, data: Dict, agent_dir: Path,
                      output_dir: Path) -> Path:
-    """生成 Windsurf Rules 软链接。AGENTS.md 需含 trigger 字段。
+    """生成 Windsurf Rules 文件。AGENTS.md 需含 trigger 字段。
 
     输出：<output_dir>/.windsurf/rules/<name>.md
+    macOS/Linux：软链接；Windows：强制复制（不支持软链接）。
     """
     meta = data["meta"]
     if "trigger" not in meta:
@@ -659,7 +670,10 @@ def _export_windsurf(agent_name: str, data: Dict, agent_dir: Path,
     agents_md = agent_dir / "AGENTS.md"
     if out_file.exists() or out_file.is_symlink():
         out_file.unlink()
-    out_file.symlink_to(agents_md.resolve())
+    if sys.platform == "win32":
+        shutil.copy2(agents_md.resolve(), out_file)
+    else:
+        out_file.symlink_to(agents_md.resolve())
     return out_file
 
 
