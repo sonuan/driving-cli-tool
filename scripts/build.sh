@@ -198,25 +198,9 @@ print_step "4. 构建可执行文件..."
 print_info "这可能需要几分钟时间..."
 
 python3 -m PyInstaller \
-    --name driving \
-    --onefile \
-    --console \
-    --clean \
     --distpath ${DIST_DIR} \
-    --hidden-import driving_cli.commands.agent \
-    --hidden-import driving_cli.commands.check \
-    --hidden-import driving_cli.commands.feature \
-    --hidden-import driving_cli.commands.framework \
-    --hidden-import driving_cli.commands.gate \
-    --hidden-import driving_cli.commands.ide \
-    --hidden-import driving_cli.commands.load \
-    --hidden-import driving_cli.commands.power \
-    --hidden-import driving_cli.commands.refine \
-    --hidden-import driving_cli.commands.repo \
-    --hidden-import driving_cli.commands.rule \
-    --hidden-import driving_cli.commands.skill \
-    --hidden-import driving_cli.commands.update \
-    driving_cli/cli.py
+    --clean \
+    driving.spec
 
 BUILD_RESULT=$?
 
