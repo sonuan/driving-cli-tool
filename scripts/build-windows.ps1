@@ -44,7 +44,7 @@ if (-not $VersionUrl -and $DownloadUrl) {
     Write-Yellow "Auto-derived version.json URL: $VersionUrl"
 }
 
-$DistDir = "dist"
+$DistDir = "dist-windows"
 
 Write-Green "========================================"
 Write-Green " Driving CLI Windows Build"
@@ -157,7 +157,7 @@ except Exception:
 arch = os.environ.get('DRIVING_ARCH', 'unknown')
 download_url = os.environ.get('DRIVING_DOWNLOAD_URL', '')
 
-# 生成 JSON
+# 生成 JSON（复用 download_url 字段，Windows CLI 会自动拼接 .exe 后缀）
 data = {
     'version': version,
     'build_date': build_date,
