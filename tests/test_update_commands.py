@@ -306,9 +306,6 @@ class TestMigrateToUserDir:
         new_bin = user_dir / "driving"
         tmp_bin = str(user_dir / "driving.tmp")  # 同目录临时文件
 
-        # symlink_path 需要与 update.py 中的硬编码路径一致
-        symlink_path = old_bin_dir / "driving"
-
         which_result = MagicMock(returncode=0, stdout=str(old_bin) + "\n")
         sudo_result = MagicMock(returncode=sudo_returncode)
 
@@ -316,6 +313,12 @@ class TestMigrateToUserDir:
             if args[0] == "which":
                 return which_result
             return sudo_result
+
+        # 自定义 exists 侧效应：/usr/local/bin/driving 返回 True，其他使用真实值
+        def exists_side_effect(self):
+            if str(self) == "/usr/local/bin/driving":
+                return True
+            return os.path.exists(str(self))
 
         with patch("driving_cli.commands.update.fetch_version_info", return_value=version_info), \
              patch("driving_cli.commands.update.get_current_version", return_value="1.0.0"), \
@@ -328,6 +331,7 @@ class TestMigrateToUserDir:
              patch("os.makedirs"), \
              patch("os.replace"), patch("os.chmod"), \
              patch("subprocess.run", side_effect=subprocess_side_effect) as mock_sub, \
+             patch("pathlib.Path.exists", exists_side_effect), \
              patch("pathlib.Path.is_symlink", return_value=False), \
              patch("pathlib.Path.symlink_to",
                    side_effect=None if symlink_ok else PermissionError("denied")), \
@@ -428,8 +432,8 @@ class TestSudoUserHome:
         )
         assert result.exit_code == 0
         assert "更新成功" in result.output
-        # 安装位置应包含真实用户目录
-        assert "home/alice/.driving-cli" in result.output
+        # 安装位置应包含真实用户目录（路径可能因终端宽度被换行，使用 alice 检查）
+        assert "alice" in result.output and ".driving-cli" in result.output
 
     def test_sudo_user时安装完成后执行chown(self, runner, version_info, tmp_path):
         """sudo 安装完成后应执行 chown 归还所有权"""

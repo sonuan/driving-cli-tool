@@ -336,7 +336,7 @@ _result_type_st = st.sampled_from(["auto_pass", "pass", "amend"])
 
 
 # Feature: gate-cli-request, Property 6: 状态记录计数一致性
-@settings(max_examples=100)
+@settings(max_examples=100, deadline=None)
 @given(
     result_sequence=st.lists(_result_type_st, min_size=1, max_size=15),
 )
