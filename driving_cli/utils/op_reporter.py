@@ -28,8 +28,8 @@ operation 类型：
 import sys
 from typing import Any, Dict, Optional
 
-from driving_cli.utils.git_helper import get_git_user
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
+from driving_cli.utils.git_helper import get_git_user
 from driving_cli.utils.reporter_utils import now_timestamp, report_async
 
 
@@ -46,8 +46,9 @@ def _get_webhook_url() -> str:
 def _get_git_branch() -> str:
     """读取当前 git 分支名，失败时返回空字符串"""
     try:
-        import git as _git
         from pathlib import Path
+
+        import git as _git
 
         repo = _git.Repo(Path.cwd(), search_parent_directories=True)
         if repo.head.is_detached:

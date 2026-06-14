@@ -9,16 +9,16 @@ from typing import Optional
 
 import click
 
+from driving_cli.commands.repo import _checkout_branch_after_install, _set_submodule_ignore
 from driving_cli.models.power_config import PowerEntry
 from driving_cli.utils.config_manager import PowerManager, find_project_root
+from driving_cli.utils.git_helper import ensure_submodule_initialized
 from driving_cli.utils.logger import log_error, log_info, log_success, log_warning
 from driving_cli.utils.validators import (
     infer_repo_name_from_url,
     validate_git_url,
     validate_repo_name,
 )
-from driving_cli.commands.repo import _checkout_branch_after_install, _set_submodule_ignore
-from driving_cli.utils.git_helper import ensure_submodule_initialized
 
 
 @click.group(name="power")

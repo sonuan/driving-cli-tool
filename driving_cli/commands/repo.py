@@ -4,8 +4,8 @@
 以及对远程仓库执行 git pull/commit/push 操作。
 """
 
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Optional
 
 import click
@@ -15,6 +15,8 @@ from driving_cli.models.config import RepoConfig
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.git_helper import (
     checkout_branch_after_install as _checkout_branch_after_install_impl,
+)
+from driving_cli.utils.git_helper import (
     ensure_submodule_initialized,
     find_git_root,
     push_with_upstream,
@@ -1126,6 +1128,7 @@ def load(keywords: tuple):
         driving repo load repo-a repo-b
     """
     import json as _json
+
     from driving_cli.utils.match import normalize_keywords
 
     keywords = normalize_keywords(keywords)

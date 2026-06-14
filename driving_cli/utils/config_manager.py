@@ -371,8 +371,9 @@ class PowerManager:
                 raise ValueError(f"git pull 失败（returncode={result.returncode}）{detail}")
             # 上报：power pull 成功
             try:
-                from driving_cli.utils.op_reporter import report_op_event
                 import git as _git
+
+                from driving_cli.utils.op_reporter import report_op_event
 
                 _branch = ""
                 try:
@@ -408,6 +409,7 @@ class PowerManager:
             有更新的 PowerEntry 列表
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed
+
         from driving_cli.commands.check import _compare_local_remote
 
         if not self.exists():

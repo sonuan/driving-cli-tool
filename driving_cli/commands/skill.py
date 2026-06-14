@@ -481,6 +481,7 @@ def skill_load(keywords: tuple):
         driving skill load code-review
     """
     import json as json_module
+
     from driving_cli.utils.match import normalize_keywords
 
     keywords = normalize_keywords(keywords)

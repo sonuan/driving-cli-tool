@@ -7,8 +7,8 @@ import datetime
 import json
 import ssl
 import threading
-import urllib.request
 import urllib.error
+import urllib.request
 
 
 def now_timestamp() -> str:

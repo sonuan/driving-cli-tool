@@ -6,8 +6,8 @@
 
 from typing import Any, Dict, Optional
 
-from driving_cli.utils.git_helper import get_git_user
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
+from driving_cli.utils.git_helper import get_git_user
 from driving_cli.utils.reporter_utils import now_timestamp, report_async
 
 

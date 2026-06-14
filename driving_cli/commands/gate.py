@@ -25,8 +25,8 @@ from driving_cli.gate import (
     build_self_refine,
 )
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
-from driving_cli.utils.logger import log_warning
 from driving_cli.utils.gate_reporter import report_gate_event
+from driving_cli.utils.logger import log_warning
 
 # Rich console（输出到 stdout）
 _console = Console()

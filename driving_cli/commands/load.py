@@ -26,15 +26,15 @@ def _dbg(msg: str) -> None:
 
 
 from driving_cli.commands.agent import collect_agents
+from driving_cli.commands.check import _collect_updatable
 from driving_cli.commands.framework import collect_frameworks
 from driving_cli.commands.repo import collect_repos
-from driving_cli.commands.check import _collect_updatable
 from driving_cli.commands.rule import collect_rules
 from driving_cli.commands.skill import collect_skills
 from driving_cli.commands.update import (
+    _get_update_version_url,
     compare_versions,
     fetch_version_info,
-    _get_update_version_url,
 )
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.logger import set_silent
@@ -104,9 +104,8 @@ def _try_auto_update(original_cmd: str = "driving load") -> Optional[str]:
         None: 无需更新、不满足条件、或更新失败时返回 None（降级，不阻断正常流程）
     """
     import subprocess as _sp
-    from pathlib import Path as _Path
-
     import sys as _sys
+    from pathlib import Path as _Path
 
     _exe_name = "driving.exe" if _sys.platform == "win32" else "driving"
     user_binary = _Path.home() / ".driving-cli" / _exe_name
@@ -191,8 +190,8 @@ def _init_unloaded_submodules() -> None:
 
     仅在 --debug 模式下输出日志，非 debug 模式静默执行。
     """
+    from driving_cli.utils.git_helper import checkout_branch_after_install as _checkout_branch
     from driving_cli.utils.git_helper import (
-        checkout_branch_after_install as _checkout_branch,
         ensure_submodule_initialized,
         find_git_root,
     )
@@ -229,8 +228,9 @@ def _init_unloaded_submodules() -> None:
 
         切换分支失败时报错（error），不中断其他 power 的处理。
         """
-        from driving_cli.utils.config_manager import CONFIG_FILE_NAME
         import git as _git
+
+        from driving_cli.utils.config_manager import CONFIG_FILE_NAME
 
         config_path = power_dir / CONFIG_FILE_NAME
         label = f"power '{entry.name}'"
@@ -375,7 +375,7 @@ def _init_unloaded_submodules() -> None:
                     )
 
     # ---- 1. Power 模式检测 ----
-    from driving_cli.utils.config_manager import PowerManager, POWER_FILE_NAME, CONFIG_FILE_NAME
+    from driving_cli.utils.config_manager import CONFIG_FILE_NAME, POWER_FILE_NAME, PowerManager
 
     power_file = project_root / POWER_FILE_NAME
 
