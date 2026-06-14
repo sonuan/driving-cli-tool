@@ -179,13 +179,10 @@ def update(check: bool, force: bool, yes: bool, url: str = None):
         log_error("版本信息中缺少下载地址")
         return
 
-    # Windows 上自动将 download_url 中的 /driving 替换为 /driving.exe
+    # Windows 上自动在 download_url 后拼接 ".exe"
     import sys as _sys
     if _sys.platform == "win32":
-        win_url = version_info.get("download_url_windows", "")
-        if win_url:
-            download_url = win_url
-        elif download_url.endswith("/driving"):
+        if not download_url.endswith(".exe"):
             download_url = download_url + ".exe"
 
     # 检查是否需要更新

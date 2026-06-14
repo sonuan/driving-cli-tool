@@ -684,12 +684,11 @@ class TestWindowsInstall:
         assert download_calls[0].endswith(".exe"), \
             f"Windows 下载 URL 应以 .exe 结尾，实际为: {download_calls[0]}"
 
-    def test_windows_prefers_download_url_windows_field(self, runner, tmp_path):
-        """`version.json` 包含 download_url_windows 时优先使用该字段"""
+    def test_windows_download_url_already_exe_unchanged(self, runner, tmp_path):
+        """`version.json` 中 download_url 已以 .exe 结尾时，Windows 不再额外拼接"""
         vi = {
             "version": "9.9.9",
-            "download_url": "http://example.com/dist/driving",
-            "download_url_windows": "http://example.com/dist/driving.exe",
+            "download_url": "http://example.com/dist/driving.exe",
             "changelog": [],
         }
         captured_urls = []

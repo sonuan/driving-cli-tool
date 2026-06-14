@@ -44,7 +44,7 @@ if (-not $VersionUrl -and $DownloadUrl) {
     Write-Yellow "Auto-derived version.json URL: $VersionUrl"
 }
 
-$DistDir = "dist-windows"
+$DistDir = "dist"
 
 Write-Green "========================================"
 Write-Green " Driving CLI Windows Build"
@@ -63,10 +63,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "  PyInstaller ready"
 
-# 2. 清理旧构建产物
+# 2. 清理旧构建产物（只删除 Windows 产物，保留 Mac/Linux 的 driving）
 Write-Blue "[STEP 2] Cleaning old build artifacts..."
-if (Test-Path $DistDir)  { Remove-Item -Recurse -Force $DistDir }
+if (Test-Path "$DistDir\driving.exe") { Remove-Item -Force "$DistDir\driving.exe" }
+if (Test-Path "$DistDir\version.json") { Remove-Item -Force "$DistDir\version.json" }
 if (Test-Path "build")   { Remove-Item -Recurse -Force "build" }
+# 确保 dist 目录存在
+if (-not (Test-Path $DistDir)) { New-Item -ItemType Directory -Force -Path $DistDir | Out-Null }
 
 # 3. 设置默认更新地址（写入 update.py，构建后还原）
 if ($VersionUrl) {
@@ -122,36 +125,75 @@ if ($LASTEXITCODE -ne 0) { Write-Red "Executable test failed"; exit 1 }
 # 6. 生成 version.json
 Write-Blue "[STEP 6] Generating version.json..."
 
-# 用独立 Python 脚本提取版本号，避免内联引号转义问题
-$version = python -c "
-import re, sys
+# 创建临时 Python 脚本文件（使用无 BOM 的 UTF-8）
+$tempPyScript = Join-Path $env:TEMP "gen_version_json.py"
+$pyScriptContent = @'
+import json
+import os
+import re
+import subprocess
+from datetime import datetime
+
+# 提取版本号
 try:
-    c = open('driving_cli/__init__.py').read()
-    m = re.search(r\"__version__\s*=\s*['\\\"]([^'\\\"]+)['\\\"]\", c)
-    print(m.group(1) if m else 'unknown')
-except Exception as e:
-    print('unknown')
-"
+    with open('driving_cli/__init__.py', 'r', encoding='utf-8') as f:
+        content = f.read()
+    m = re.search(r"__version__\s*=\s*['\"]([^'\"]+)['\"]", content)
+    version = m.group(1) if m else 'unknown'
+except Exception:
+    version = 'unknown'
 
-$buildDate = Get-Date -Format "yyyy-MM-ddTHH:mm:ss+08:00"
+# 构建时间
+build_date = datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')
 
-# 读取最近 10 条 git log
-$changelog = git log --pretty=format:"%s" -10 2>&1
-if ($LASTEXITCODE -ne 0) { $changelog = @("No changelog available") }
-$changelogJson = $changelog | ConvertTo-Json
+# 获取 git changelog
+try:
+    result = subprocess.run(['git', 'log', '--pretty=format:%s', '-10'], capture_output=True, text=True, encoding='utf-8')
+    changelog = result.stdout.strip().split('\n') if result.returncode == 0 else ['No changelog available']
+except Exception:
+    changelog = ['No changelog available']
 
-# 构建 JSON 内容（避免 here-string 编码问题）
-$versionObj = [ordered]@{
-    version              = $version
-    build_date           = $buildDate
-    platform             = "Windows"
-    arch                 = $env:PROCESSOR_ARCHITECTURE
-    download_url         = $DownloadUrl
-    download_url_windows = $DownloadUrl
-    changelog            = $changelog
+# 从环境变量获取参数
+arch = os.environ.get('DRIVING_ARCH', 'unknown')
+download_url = os.environ.get('DRIVING_DOWNLOAD_URL', '')
+
+# 生成 JSON
+data = {
+    'version': version,
+    'build_date': build_date,
+    'platform': 'Windows',
+    'arch': arch,
+    'download_url': download_url,
+    'changelog': changelog
 }
-$versionJson = $versionObj | ConvertTo-Json -Depth 3
-Set-Content "$DistDir\version.json" $versionJson -Encoding UTF8
+
+print(json.dumps(data, indent=2, ensure_ascii=False))
+'@
+# 使用 .NET 方法写入无 BOM 的 UTF-8 文件
+[System.IO.File]::WriteAllText($tempPyScript, $pyScriptContent, [System.Text.UTF8Encoding]::new($false))
+
+# 通过环境变量传递参数给 Python
+$env:DRIVING_ARCH = $env:PROCESSOR_ARCHITECTURE
+$env:DRIVING_DOWNLOAD_URL = $DownloadUrl
+
+# 执行 Python 脚本
+$versionJson = python $tempPyScript | Out-String
+
+# 清理临时文件和环境变量
+Remove-Item $tempPyScript -ErrorAction SilentlyContinue
+Remove-Item Env:DRIVING_ARCH -ErrorAction SilentlyContinue
+Remove-Item Env:DRIVING_DOWNLOAD_URL -ErrorAction SilentlyContinue
+
+if (-not $versionJson) {
+    Write-Red "Failed to generate version.json"
+    exit 1
+}
+
+# 使用无 BOM 的 UTF-8 写入 version.json
+[System.IO.File]::WriteAllText("$DistDir\version.json", $versionJson, [System.Text.UTF8Encoding]::new($false))
+
+# 从生成的 JSON 中提取版本号用于日志
+$version = python -c "import json; print(json.loads(open('$DistDir/version.json', encoding='utf-8').read())['version'])"
 Write-Host "  version.json generated (version: $version)"
 
 # 7. 上传（可选）
