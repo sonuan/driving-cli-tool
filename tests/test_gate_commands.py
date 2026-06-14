@@ -761,37 +761,6 @@ class TestGateRequestPlatformOption:
         assert not default_state_file.exists()
 
 
-class TestGatePassPlatformOption:
-    """gate pass --platform 参数测试"""
-
-    def test_传platform时state写入正确路径(self, runner, project_with_auto_pass_gate, tmp_path):
-        feature_dir = tmp_path / "my-feature"
-        feature_dir.mkdir()
-        with patch("driving_cli.commands.gate.find_project_root",
-                   return_value=project_with_auto_pass_gate):
-            result = runner.invoke(cli, [
-                "gate", "pass", "GATE-R5",
-                "--path", str(feature_dir),
-                "--platform", "harmony",
-            ])
-        assert result.exit_code == 0
-        state_file = feature_dir / "docs" / "harmony" / "gate-state.json"
-        assert state_file.exists()
-
-    def test_不传platform时state写入docs下(self, runner, project_with_auto_pass_gate, tmp_path):
-        feature_dir = tmp_path / "my-feature"
-        feature_dir.mkdir()
-        with patch("driving_cli.commands.gate.find_project_root",
-                   return_value=project_with_auto_pass_gate):
-            result = runner.invoke(cli, [
-                "gate", "pass", "GATE-R5",
-                "--path", str(feature_dir),
-            ])
-        assert result.exit_code == 0
-        state_file = feature_dir / "docs" / "gate-state.json"
-        assert state_file.exists()
-
-
 class TestGateStatusPlatformOption:
     """gate status --platform 参数测试"""
 

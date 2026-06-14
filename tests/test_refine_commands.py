@@ -662,20 +662,19 @@ class TestRefineLog:
         assert result.exit_code != 0
 
 
-# ==================== _report_to_webhook ====================
+# ==================== _report_refine_event ====================
 
 
 class TestReportToWebhook:
-    """_report_to_webhook 单元测试
+    """_report_refine_event 单元测试（原 _report_to_webhook，已重构为通过 op_reporter 上报）
 
     覆盖场景：
-    - 正常上报：payload 字段完整，at 为北京时间格式，含 actor / trigger_source / trigger_reason
-    - trigger 存在时 trigger_source / trigger_reason 正确展开到顶层
-    - trigger 缺省时 trigger_source / trigger_reason 为空字符串
-    - trigger 部分字段缺失时缺省为空字符串
-    - actor 取自 git user.name，无法获取时为空字符串
-    - event 参数正确传递（committed / merged）
-    - 网络异常时静默失败，不抛出异常
+    - 正常上报：operation/extra 字段完整，含 repo_name / target_type / target_name / trigger
+    - trigger 存在时 trigger 文本正确生成
+    - trigger 缺省时 trigger 文本为空
+    - trigger 部分字段缺失时正常处理
+    - event 参数（operation）正确传递（refine_committed / refine_merged）
+    - op_reporter 异常时静默失败，不抛出异常
     """
 
     def _make_meta(self, trigger=None):
@@ -692,187 +691,170 @@ class TestReportToWebhook:
 
     def test_正常上报payload字段完整(self, tmp_path):
         from unittest.mock import patch
-        from driving_cli.commands.refine import _report_to_webhook
+        from driving_cli.commands.refine import _report_refine_event
 
         captured = {}
 
-        def fake_do_post(webhook_url, payload):
-            captured["url"] = webhook_url
-            captured["payload"] = payload
+        def fake_report_op_event(operation, description, extra=None, silent=False, **kwargs):
+            captured["operation"] = operation
+            captured["description"] = description
+            captured["extra"] = extra or {}
 
-        with patch("driving_cli.commands.refine.do_post", side_effect=fake_do_post):
-            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "李四", "email": "lisi@example.com"}):
-                with patch("driving_cli.commands.refine.now_timestamp", return_value="2026/06/01 10:00"):
-                    _report_to_webhook(
-                        "https://example.com/webhook",
-                        "driving-base",
-                        tmp_path / "2026-06-01-rule-gate-spec.md",
-                        self._make_meta(),
-                        event="refine.committed",
-                    )
+        with patch("driving_cli.utils.op_reporter.report_op_event", side_effect=fake_report_op_event):
+            _report_refine_event(
+                "driving-base",
+                tmp_path / "2026-06-01-rule-gate-spec.md",
+                self._make_meta(),
+                operation="refine_committed",
+            )
 
-        p = captured["payload"]
-        assert p["event"] == "refine.committed"
-        assert p["repo"] == "driving-base"
-        assert p["target_type"] == "rule"
-        assert p["target_name"] == "gate-spec"
-        assert p["description"] == "补充 trigger 字段说明"
-        assert p["operator"] == "张三"
-        # at 为北京时间格式
-        assert p["at"] == "2026/06/01 10:00"
-        # actor 取自 git user.name
-        assert p["actor"] == "李四"
-        # trigger 展开为顶层字段
-        assert "trigger_source" in p
-        assert "trigger_reason" in p
-        assert captured["url"] == "https://example.com/webhook"
+        assert captured["operation"] == "refine_committed"
+        assert "rule" in captured["description"]
+        assert "gate-spec" in captured["description"]
+        extra = captured["extra"]
+        assert extra["repo_name"] == "driving-base"
+        assert extra["target_type"] == "rule"
+        assert extra["target_name"] == "gate-spec"
 
     def test_trigger存在时source和reason展开到顶层(self, tmp_path):
         from unittest.mock import patch
-        from driving_cli.commands.refine import _report_to_webhook
+        from driving_cli.commands.refine import _report_refine_event
 
         captured = {}
 
-        def fake_do_post(webhook_url, payload):
-            captured["payload"] = payload
+        def fake_report_op_event(operation, description, extra=None, silent=False, **kwargs):
+            captured["extra"] = extra or {}
 
         trigger = {"source": "gate", "reason": "GATE-D1 返工 3 次，高频原因：页面类型判断有误"}
-        with patch("driving_cli.commands.refine.do_post", side_effect=fake_do_post):
-            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "", "email": ""}):
-                _report_to_webhook(
-                    "https://example.com/webhook",
-                    "driving-base",
-                    tmp_path / "refine.md",
-                    self._make_meta(trigger=trigger),
-                )
+        with patch("driving_cli.utils.op_reporter.report_op_event", side_effect=fake_report_op_event):
+            _report_refine_event(
+                "driving-base",
+                tmp_path / "refine.md",
+                self._make_meta(trigger=trigger),
+                operation="refine_committed",
+                trigger_source="gate",
+                trigger_reason="GATE-D1 返工 3 次，高频原因：页面类型判断有误",
+            )
 
-        p = captured["payload"]
-        assert p["trigger_source"] == "gate"
-        assert p["trigger_reason"] == "GATE-D1 返工 3 次，高频原因：页面类型判断有误"
-        # 不再有嵌套的 trigger 对象
-        assert "trigger" not in p
+        # trigger 文本生成到 extra["trigger"]
+        assert captured["extra"].get("trigger") is not None
+        assert "gate" in captured["extra"]["trigger"]
 
     def test_trigger缺省时source和reason为空字符串(self, tmp_path):
         from unittest.mock import patch
-        from driving_cli.commands.refine import _report_to_webhook
+        from driving_cli.commands.refine import _report_refine_event
 
         captured = {}
 
-        def fake_do_post(webhook_url, payload):
-            captured["payload"] = payload
+        def fake_report_op_event(operation, description, extra=None, silent=False, **kwargs):
+            captured["extra"] = extra or {}
 
-        with patch("driving_cli.commands.refine.do_post", side_effect=fake_do_post):
-            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "", "email": ""}):
-                _report_to_webhook(
-                    "https://example.com/webhook",
-                    "driving-base",
-                    tmp_path / "refine.md",
-                    self._make_meta(trigger=None),
-                )
+        with patch("driving_cli.utils.op_reporter.report_op_event", side_effect=fake_report_op_event):
+            _report_refine_event(
+                "driving-base",
+                tmp_path / "refine.md",
+                self._make_meta(trigger=None),
+                operation="refine_committed",
+            )
 
-        p = captured["payload"]
-        assert p["trigger_source"] == ""
-        assert p["trigger_reason"] == ""
-        assert "trigger" not in p
+        # trigger 为空时 extra["trigger"] 为 None
+        assert captured["extra"].get("trigger") is None
 
     def test_trigger部分字段缺失时缺省为空字符串(self, tmp_path):
         from unittest.mock import patch
-        from driving_cli.commands.refine import _report_to_webhook
+        from driving_cli.commands.refine import _report_refine_event
 
         captured = {}
 
-        def fake_do_post(webhook_url, payload):
-            captured["payload"] = payload
+        def fake_report_op_event(operation, description, extra=None, silent=False, **kwargs):
+            captured["extra"] = extra or {}
 
         # 只有 source，没有 reason
         trigger = {"source": "self-discover"}
-        with patch("driving_cli.commands.refine.do_post", side_effect=fake_do_post):
-            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "", "email": ""}):
-                _report_to_webhook(
-                    "https://example.com/webhook",
-                    "driving-base",
-                    tmp_path / "refine.md",
-                    self._make_meta(trigger=trigger),
-                )
+        with patch("driving_cli.utils.op_reporter.report_op_event", side_effect=fake_report_op_event):
+            _report_refine_event(
+                "driving-base",
+                tmp_path / "refine.md",
+                self._make_meta(trigger=trigger),
+                operation="refine_committed",
+                trigger_source="self-discover",
+            )
 
-        p = captured["payload"]
-        assert p["trigger_source"] == "self-discover"
-        assert p["trigger_reason"] == ""
+        # 有 trigger_source 时 extra["trigger"] 非空
+        assert captured["extra"].get("trigger") is not None
 
     def test_actor取自git_user_name(self, tmp_path):
+        """新实现中 actor 由 op_reporter 负责，_report_refine_event 本身不再处理 actor"""
         from unittest.mock import patch
-        from driving_cli.commands.refine import _report_to_webhook
+        from driving_cli.commands.refine import _report_refine_event
 
-        captured = {}
+        called = []
 
-        def fake_do_post(webhook_url, payload):
-            captured["payload"] = payload
+        def fake_report_op_event(operation, description, extra=None, silent=False, **kwargs):
+            called.append(True)
 
-        with patch("driving_cli.commands.refine.do_post", side_effect=fake_do_post):
-            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "王五", "email": "wangwu@example.com"}):
-                _report_to_webhook(
-                    "https://example.com/webhook",
-                    "driving-base",
-                    tmp_path / "refine.md",
-                    self._make_meta(),
-                )
+        with patch("driving_cli.utils.op_reporter.report_op_event", side_effect=fake_report_op_event):
+            _report_refine_event(
+                "driving-base",
+                tmp_path / "refine.md",
+                self._make_meta(),
+                operation="refine_committed",
+            )
 
-        assert captured["payload"]["actor"] == "王五"
+        # 确认 report_op_event 被调用
+        assert len(called) == 1
 
     def test_actor无法获取时为空字符串(self, tmp_path):
+        """actor 处理由 op_reporter 负责，_report_refine_event 正常调用即可"""
         from unittest.mock import patch
-        from driving_cli.commands.refine import _report_to_webhook
+        from driving_cli.commands.refine import _report_refine_event
 
-        captured = {}
+        called = []
 
-        def fake_do_post(webhook_url, payload):
-            captured["payload"] = payload
+        def fake_report_op_event(operation, description, extra=None, silent=False, **kwargs):
+            called.append(True)
 
-        with patch("driving_cli.commands.refine.do_post", side_effect=fake_do_post):
-            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "", "email": ""}):
-                _report_to_webhook(
-                    "https://example.com/webhook",
-                    "driving-base",
-                    tmp_path / "refine.md",
-                    self._make_meta(),
-                )
+        with patch("driving_cli.utils.op_reporter.report_op_event", side_effect=fake_report_op_event):
+            _report_refine_event(
+                "driving-base",
+                tmp_path / "refine.md",
+                self._make_meta(),
+                operation="refine_committed",
+            )
 
-        assert captured["payload"]["actor"] == ""
+        assert len(called) == 1
 
     def test_event参数正确传递为merged(self, tmp_path):
         from unittest.mock import patch
-        from driving_cli.commands.refine import _report_to_webhook
+        from driving_cli.commands.refine import _report_refine_event
 
         captured = {}
 
-        def fake_do_post(webhook_url, payload):
-            captured["payload"] = payload
+        def fake_report_op_event(operation, description, extra=None, silent=False, **kwargs):
+            captured["operation"] = operation
 
-        with patch("driving_cli.commands.refine.do_post", side_effect=fake_do_post):
-            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "", "email": ""}):
-                _report_to_webhook(
-                    "https://example.com/webhook",
-                    "driving-base",
-                    tmp_path / "refine.md",
-                    self._make_meta(),
-                    event="refine.merged",
-                )
+        with patch("driving_cli.utils.op_reporter.report_op_event", side_effect=fake_report_op_event):
+            _report_refine_event(
+                "driving-base",
+                tmp_path / "refine.md",
+                self._make_meta(),
+                operation="refine_merged",
+            )
 
-        assert captured["payload"]["event"] == "refine.merged"
+        assert captured["operation"] == "refine_merged"
 
     def test_网络异常时静默失败(self, tmp_path):
         from unittest.mock import patch
-        from driving_cli.commands.refine import _report_to_webhook
+        from driving_cli.commands.refine import _report_refine_event
 
-        with patch("driving_cli.commands.refine.do_post", side_effect=Exception("network error")):
-            with patch("driving_cli.commands.refine.get_git_user", return_value={"name": "", "email": ""}):
-                # 不应抛出异常
-                _report_to_webhook(
-                    "https://example.com/webhook",
-                    "driving-base",
-                    tmp_path / "refine.md",
-                    self._make_meta(),
-                )
+        with patch("driving_cli.utils.op_reporter.report_op_event", side_effect=Exception("network error")):
+            # 不应抛出异常
+            _report_refine_event(
+                "driving-base",
+                tmp_path / "refine.md",
+                self._make_meta(),
+                operation="refine_committed",
+            )
 
 
 # ==================== driving refine merge ====================
@@ -1138,14 +1120,14 @@ class TestRefineMerge:
         mock_repo = self._make_mock_repo()
         reported_files = []
 
-        def fake_report(webhook_url, repo_name, file_path, meta, event="refine.committed"):
-            reported_files.append((str(file_path), file_path.exists(), event))
+        def fake_report(repo_name, file_path, meta, operation, trigger_source="", trigger_reason=""):
+            reported_files.append((str(file_path), file_path.exists(), operation))
 
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
             with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
-                self._mock_cm(mock_cm_cls, tmp_path, refine_webhook="https://example.com/hook")
+                self._mock_cm(mock_cm_cls, tmp_path)
                 with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
-                    with patch("driving_cli.commands.refine._report_to_webhook", side_effect=fake_report):
+                    with patch("driving_cli.commands.refine._report_refine_event", side_effect=fake_report):
                         runner.invoke(
                             cli,
                             ["refine", "merge", "driving-base",
@@ -1154,42 +1136,49 @@ class TestRefineMerge:
                         )
 
         assert len(reported_files) == 1
-        _path, file_existed_at_report_time, event = reported_files[0]
+        _path, file_existed_at_report_time, operation = reported_files[0]
         assert file_existed_at_report_time, "上报时文件应仍存在"
-        assert event == "refine.merged"
+        assert operation == "refine_merged"
 
     def test_refine_webhook未配置时跳过上报(self, tmp_path):
+        """上报逻辑现在由 op_reporter 负责，_report_refine_event 无条件被调用；
+        此测试验证 _report_refine_event 函数本身被调用（上报是否实际发出由 op_reporter 决定）"""
         self._setup(tmp_path)
         runner = CliRunner()
         mock_repo = self._make_mock_repo()
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
             with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
-                self._mock_cm(mock_cm_cls, tmp_path, refine_webhook="")  # 未配置
+                self._mock_cm(mock_cm_cls, tmp_path)
                 with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
-                    with patch("driving_cli.commands.refine._report_to_webhook") as mock_report:
+                    with patch("driving_cli.commands.refine._report_refine_event") as mock_report:
                         runner.invoke(
                             cli,
                             ["refine", "merge", "driving-base",
                              "--file", "refines/2026-06-01-rule-gate-spec.md"],
-                            input="y\ny\n",  # 确认合并 + 确认跳过正式文件
+                            input="y\ny\ny\n",  # 确认合并 + 确认跳过正式文件 + 确认 push
                         )
-        mock_report.assert_not_called()
+        # _report_refine_event 现在无条件被调用（由 op_reporter 内部决定是否发出请求）
+        mock_report.assert_called_once()
 
     def test_trigger_source和reason传入时覆盖meta中的trigger(self, tmp_path):
-        """--trigger-source / --trigger-reason 传入时，webhook 上报使用合并操作的触发信息"""
+        """--trigger-source / --trigger-reason 传入时，上报使用合并操作的触发信息"""
         self._setup(tmp_path)
         runner = CliRunner()
         mock_repo = self._make_mock_repo()
-        reported_metas = []
+        reported_calls = []
 
-        def fake_report(webhook_url, repo_name, file_path, meta, event="refine.committed"):
-            reported_metas.append(dict(meta))
+        def fake_report(repo_name, file_path, meta, operation, trigger_source="", trigger_reason=""):
+            reported_calls.append({
+                "meta": dict(meta),
+                "trigger_source": trigger_source,
+                "trigger_reason": trigger_reason,
+            })
 
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
             with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
-                self._mock_cm(mock_cm_cls, tmp_path, refine_webhook="https://example.com/hook")
+                self._mock_cm(mock_cm_cls, tmp_path)
                 with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
-                    with patch("driving_cli.commands.refine._report_to_webhook", side_effect=fake_report):
+                    with patch("driving_cli.commands.refine._report_refine_event", side_effect=fake_report):
                         result = runner.invoke(
                             cli,
                             ["refine", "merge", "driving-base",
@@ -1200,26 +1189,28 @@ class TestRefineMerge:
                         )
 
         assert result.exit_code == 0
-        assert len(reported_metas) == 1
-        trigger = reported_metas[0]["trigger"]
-        assert trigger["source"] == "manual"
-        assert trigger["reason"] == "用户主动合并"
+        assert len(reported_calls) == 1
+        assert reported_calls[0]["trigger_source"] == "manual"
+        assert reported_calls[0]["trigger_reason"] == "用户主动合并"
 
     def test_trigger_source和reason未传时沿用meta中的trigger(self, tmp_path):
-        """未传 --trigger-source / --trigger-reason 时，webhook 上报沿用 refine 文件的 trigger"""
+        """未传 --trigger-source / --trigger-reason 时，trigger_source/reason 为空字符串（默认值）"""
         self._setup(tmp_path)
         runner = CliRunner()
         mock_repo = self._make_mock_repo()
-        reported_metas = []
+        reported_calls = []
 
-        def fake_report(webhook_url, repo_name, file_path, meta, event="refine.committed"):
-            reported_metas.append(dict(meta))
+        def fake_report(repo_name, file_path, meta, operation, trigger_source="", trigger_reason=""):
+            reported_calls.append({
+                "trigger_source": trigger_source,
+                "trigger_reason": trigger_reason,
+            })
 
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
             with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
-                self._mock_cm(mock_cm_cls, tmp_path, refine_webhook="https://example.com/hook")
+                self._mock_cm(mock_cm_cls, tmp_path)
                 with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
-                    with patch("driving_cli.commands.refine._report_to_webhook", side_effect=fake_report):
+                    with patch("driving_cli.commands.refine._report_refine_event", side_effect=fake_report):
                         result = runner.invoke(
                             cli,
                             ["refine", "merge", "driving-base",
@@ -1228,9 +1219,10 @@ class TestRefineMerge:
                         )
 
         assert result.exit_code == 0
-        assert len(reported_metas) == 1
-        # 未传参数时 trigger 沿用 meta 原始值（测试 fixture 中 trigger 为 None）
-        assert reported_metas[0].get("trigger") is None
+        assert len(reported_calls) == 1
+        # 未传参数时 trigger_source / trigger_reason 使用默认空字符串
+        assert reported_calls[0]["trigger_source"] == ""
+        assert reported_calls[0]["trigger_reason"] == ""
 
     def test_local仓库跳过git操作(self, tmp_path):
         self._setup(tmp_path, repo_type="local")
@@ -1238,13 +1230,15 @@ class TestRefineMerge:
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
             with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
                 self._mock_cm(mock_cm_cls, tmp_path, repo_type="local")
-                with patch("driving_cli.commands.refine.git.Repo") as mock_git:
-                    result = runner.invoke(
-                        cli,
-                        ["refine", "merge", "driving-base",
-                         "--file", "refines/2026-06-01-rule-gate-spec.md"],
-                        input="y\ny\n",  # 确认合并 + 确认跳过正式文件（local 仓库不需要 push 确认）
-                    )
+                # 同时 patch _report_refine_event 避免 op_reporter 内部调用 git.Repo
+                with patch("driving_cli.commands.refine._report_refine_event"):
+                    with patch("driving_cli.commands.refine.git.Repo") as mock_git:
+                        result = runner.invoke(
+                            cli,
+                            ["refine", "merge", "driving-base",
+                             "--file", "refines/2026-06-01-rule-gate-spec.md"],
+                            input="y\ny\n",  # 确认合并 + 确认跳过正式文件（local 仓库不需要 push 确认）
+                        )
         assert result.exit_code == 0
         assert "本地仓库" in result.output
         mock_git.assert_not_called()

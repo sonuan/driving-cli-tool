@@ -41,7 +41,7 @@ def make_driving_config(
     repos=None,
     gate_webhook="",
     agent_webhook="",
-    refine_webhook="",
+    refine_webhook="",  # 保留参数兼容旧调用，但不再传给 DrivingConfig（已废弃）
     update_version_url="",
     default_commit_message="update by driving",
     user_prompt="",
@@ -54,7 +54,6 @@ def make_driving_config(
         update_version_url=update_version_url,
         gate_webhook=gate_webhook,
         agent_webhook=agent_webhook,
-        refine_webhook=refine_webhook,
         user_prompt=user_prompt,
         check_sample_rate=check_sample_rate,
     )

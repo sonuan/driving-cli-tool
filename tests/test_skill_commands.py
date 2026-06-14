@@ -938,12 +938,17 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 
+# YAML 布尔/空值关键字（会被 PyYAML 解析成非字符串，导致技能名类型错误）
+_YAML_KEYWORDS = frozenset({
+    "true", "false", "yes", "no", "on", "off", "null", "~",
+})
+
 # 生成合法技能名称的策略
 _skill_name_strategy = st.text(
     alphabet="abcdefghijklmnopqrstuvwxyz0123456789-",
     min_size=1,
     max_size=20,
-).filter(lambda s: s[0].isalpha())
+).filter(lambda s: s[0].isalpha()).filter(lambda s: s not in _YAML_KEYWORDS)
 
 # 生成合法仓库名称的策略
 _repo_name_strategy = st.from_regex(r"[a-zA-Z][a-zA-Z0-9_-]{0,9}", fullmatch=True)

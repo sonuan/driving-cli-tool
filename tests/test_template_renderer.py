@@ -283,49 +283,46 @@ class TestBuildGateVars:
         vars_ = _build_gate_vars("/features/login", "android")
         assert vars_["$vars.platform_dir"] == "/features/login/docs/android"
 
-    def test_有platform时review_dir在platform_dir下(self):
+    def test_有platform时platform_dir正确拼接(self):
         from driving_cli.commands.gate import _build_gate_vars
         vars_ = _build_gate_vars("/features/login", "android")
-        assert vars_["$vars.review_dir"] == "/features/login/docs/android/review"
+        assert vars_["$vars.platform_dir"] == "/features/login/docs/android"
 
-    def test_有platform时state_file在platform_dir下(self):
+    def test_有platform时owner_dir默认等于platform_dir(self):
         from driving_cli.commands.gate import _build_gate_vars
         vars_ = _build_gate_vars("/features/login", "android")
-        assert vars_["$vars.state_file"] == "/features/login/docs/android/state.json"
+        assert vars_["$vars.owner_dir"] == vars_["$vars.platform_dir"]
 
     def test_无platform时platform_dir为docs(self):
         from driving_cli.commands.gate import _build_gate_vars
         vars_ = _build_gate_vars("/features/login", "")
         assert vars_["$vars.platform_dir"] == "/features/login/docs"
 
-    def test_无platform时review_dir在docs下(self):
+    def test_无platform时owner_dir等于platform_dir(self):
         from driving_cli.commands.gate import _build_gate_vars
         vars_ = _build_gate_vars("/features/login", "")
-        assert vars_["$vars.review_dir"] == "/features/login/docs/review"
+        assert vars_["$vars.owner_dir"] == "/features/login/docs"
 
-    def test_无platform时state_file在docs下(self):
+    def test_无platform时owner_dir在docs下(self):
         from driving_cli.commands.gate import _build_gate_vars
         vars_ = _build_gate_vars("/features/login", "")
-        assert vars_["$vars.state_file"] == "/features/login/docs/state.json"
+        assert vars_["$vars.owner_dir"] == "/features/login/docs"
 
     def test_不同platform产生不同paths(self):
         from driving_cli.commands.gate import _build_gate_vars
         android = _build_gate_vars("/p", "android")
         ios = _build_gate_vars("/p", "iOS")
         assert android["$vars.platform_dir"] != ios["$vars.platform_dir"]
-        assert android["$vars.review_dir"] != ios["$vars.review_dir"]
-        assert android["$vars.state_file"] != ios["$vars.state_file"]
+        assert android["$vars.owner_dir"] != ios["$vars.owner_dir"]
 
     def test_三个常量key全部存在(self):
         from driving_cli.commands.gate import _build_gate_vars
         vars_ = _build_gate_vars("/p", "android")
         assert "$vars.platform_dir" in vars_
-        assert "$vars.review_dir" in vars_
-        assert "$vars.state_file" in vars_
+        assert "$vars.owner_dir" in vars_
 
     def test_path和platform组合正确拼接(self):
         from driving_cli.commands.gate import _build_gate_vars
         vars_ = _build_gate_vars("/workspace/feature-x", "harmony")
         assert vars_["$vars.platform_dir"] == "/workspace/feature-x/docs/harmony"
-        assert vars_["$vars.state_file"].startswith("/workspace/feature-x/docs/harmony/")
-        assert vars_["$vars.review_dir"].startswith("/workspace/feature-x/docs/harmony/")
+        assert vars_["$vars.owner_dir"].startswith("/workspace/feature-x/docs/harmony")

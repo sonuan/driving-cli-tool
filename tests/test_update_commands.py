@@ -13,6 +13,7 @@
 import os
 import stat
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -90,7 +91,9 @@ class TestInstallPermission:
         # 模拟已通过新方式安装
         user_dir = tmp_path / ".driving-cli"
         user_dir.mkdir(parents=True)
-        (user_dir / "driving").write_bytes(b"old")
+        # Windows 用 .exe 后缀，Unix 不用
+        exe_name = "driving.exe" if sys.platform == "win32" else "driving"
+        (user_dir / exe_name).write_bytes(b"old")
 
         # 临时文件也放在同目录（与生产代码逻辑一致）
         tmp_bin = str(user_dir / "driving.tmp")
@@ -136,6 +139,8 @@ class TestInstallPermission:
 
     def test_install_fallback_to_sudo_on_permission_error(self, runner, version_info, tmp_path):
         """无写权限时自动 fallback 到 sudo，且 sudo 成功"""
+        if sys.platform == "win32":
+            pytest.skip("Windows 不支持 sudo，权限错误时走不同分支")
         result, mock_sub, _ = self._invoke_update(
             runner, version_info, tmp_path,
             permission_error=True, sudo_returncode=0
@@ -150,6 +155,8 @@ class TestInstallPermission:
 
     def test_install_sudo_fails(self, runner, version_info, tmp_path):
         """sudo 执行失败时报错"""
+        if sys.platform == "win32":
+            pytest.skip("Windows 不支持 sudo，权限错误时走不同分支")
         result, _, _ = self._invoke_update(
             runner, version_info, tmp_path,
             permission_error=True, sudo_returncode=1
@@ -221,10 +228,12 @@ class TestInstallPathSelection:
         ]
 
     def test_prefers_user_install_dir_when_exists(self, runner, version_info, tmp_path):
-        """~/.driving-cli/driving 存在时，直接用该路径更新，不调用 which"""
+        """~/.driving-cli/driving 存在时，直接用该路径更新，不调用 which/where"""
+        # Windows 用 .exe 后缀，Unix 不用
+        exe_name = "driving.exe" if sys.platform == "win32" else "driving"
         user_dir = tmp_path / ".driving-cli"
         user_dir.mkdir(parents=True)
-        (user_dir / "driving").write_bytes(b"old binary")
+        (user_dir / exe_name).write_bytes(b"old binary")
         tmp_bin = str(user_dir / "driving.tmp")
 
         patches = self._base_patches(version_info, tmp_path, tmp_bin) + [
@@ -240,12 +249,16 @@ class TestInstallPathSelection:
         assert result.exit_code == 0
         assert "更新成功" in result.output
 
-        which_calls = [c for c in mock_sub.call_args_list
-                       if c.args and c.args[0] and c.args[0][0] == "which"]
-        assert len(which_calls) == 0, "~/.driving-cli/driving 存在时不应调用 which"
+        # Windows 用 where，Unix 用 which；安装目录存在时均不应调用
+        find_cmd = "where" if sys.platform == "win32" else "which"
+        find_calls = [c for c in mock_sub.call_args_list
+                      if c.args and c.args[0] and c.args[0][0] == find_cmd]
+        assert len(find_calls) == 0, f"~/.driving-cli/{exe_name} 存在时不应调用 {find_cmd}"
 
     def test_falls_back_to_which_when_user_dir_absent(self, runner, version_info, tmp_path):
-        """~/.driving-cli/driving 不存在时，回退到 which driving"""
+        """~/.driving-cli/driving 不存在时，回退到 which/where driving"""
+        if sys.platform == "win32":
+            pytest.skip("Windows 回退行为由 TestWindowsInstall.test_windows_uses_where_not_which 覆盖")
         fake_exe = str(tmp_path / "driving")
         Path(fake_exe).write_bytes(b"old")
         tmp_bin = str(tmp_path / "driving.tmp")
@@ -272,6 +285,7 @@ class TestInstallPathSelection:
 
 # ==================== 旧安装方式迁移测试 ====================
 
+@pytest.mark.skipif(sys.platform == "win32", reason="迁移逻辑依赖 Unix 符号链接和 /usr/local/bin，Windows 不适用")
 class TestMigrateToUserDir:
     """测试旧安装方式（/usr/local/bin/driving 真实文件）迁移到 ~/.driving-cli/driving"""
 
@@ -374,6 +388,7 @@ class TestMigrateToUserDir:
 
 # ==================== sudo 用户 home 还原测试 ====================
 
+@pytest.mark.skipif(sys.platform == "win32", reason="pwd 模块仅 Unix 可用，sudo 逻辑在 Windows 无意义")
 class TestSudoUserHome:
     """测试 sudo 执行时通过 SUDO_USER 还原真实用户 home"""
 
@@ -386,7 +401,6 @@ class TestSudoUserHome:
         (user_dir / "driving").write_bytes(b"old binary")
         tmp_bin = str(user_dir / "driving.tmp")
 
-        import pwd as _pwd_mod
         pw_entry = MagicMock()
         pw_entry.pw_dir = str(user_home)
 
@@ -465,7 +479,9 @@ class TestUpdateOpReporter:
         """辅助：模拟 update 安装成功的最小场景"""
         user_dir = tmp_path / ".driving-cli"
         user_dir.mkdir(parents=True)
-        (user_dir / "driving").write_bytes(b"old")
+        # Windows 用 .exe 后缀，Unix 不用
+        exe_name = "driving.exe" if sys.platform == "win32" else "driving"
+        (user_dir / exe_name).write_bytes(b"old")
         tmp_bin = str(user_dir / "driving.tmp")
 
         which_result = MagicMock(returncode=0, stdout=str(user_dir / "driving") + "\n")

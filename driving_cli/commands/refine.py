@@ -164,18 +164,21 @@ def _report_refine_event(
 
     trigger_text = _build_refine_trigger(trigger, trigger_source, trigger_reason)
 
-    report_op_event(
-        operation=operation,
-        description=desc,
-        extra={
-            "repo_name": repo_name,
-            "file": file_path.name,
-            "target_type": target_type or None,
-            "target_name": target_name or None,
-            "trigger": trigger_text or None,
-        },
-        silent=True,
-    )
+    try:
+        report_op_event(
+            operation=operation,
+            description=desc,
+            extra={
+                "repo_name": repo_name,
+                "file": file_path.name,
+                "target_type": target_type or None,
+                "target_name": target_name or None,
+                "trigger": trigger_text or None,
+            },
+            silent=True,
+        )
+    except Exception:
+        pass  # 上报失败不影响主流程
 
 
 def _build_refine_trigger(trigger: dict, trigger_source: str = "", trigger_reason: str = "") -> str:
