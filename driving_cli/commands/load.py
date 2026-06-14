@@ -25,6 +25,17 @@ def _dbg(msg: str) -> None:
     click.echo(f"[DEBUG {ts}] (+{elapsed*1000:.1f}ms) {msg}", file=sys.stderr)
 
 
+from driving_cli.commands.agent import collect_agents
+from driving_cli.commands.framework import collect_frameworks
+from driving_cli.commands.repo import collect_repos
+from driving_cli.commands.check import _collect_updatable
+from driving_cli.commands.rule import collect_rules
+from driving_cli.commands.skill import collect_skills
+from driving_cli.commands.update import (
+    compare_versions,
+    fetch_version_info,
+    _get_update_version_url,
+)
 from driving_cli.utils.config_manager import ConfigManager, find_project_root
 from driving_cli.utils.logger import set_silent
 from driving_cli.utils.op_reporter import report_op_event
@@ -39,7 +50,6 @@ class UpdatePrompt:
 
 def _check_min_cli_version() -> str:
     """扫描所有仓库的 manifest.json，取 min_cli_version 最大值，与当前版本对比"""
-    from driving_cli.commands.update import compare_versions
     try:
         project_root = find_project_root()
         ai_driving_dir = project_root / "ai-driving"
@@ -67,7 +77,6 @@ def _check_min_cli_version() -> str:
 
 def _check_cli_update() -> str:
     """检查 CLI 是否有新版本，有则返回提示文本，否则返回空字符串"""
-    from driving_cli.commands.update import compare_versions, fetch_version_info, _get_update_version_url
     try:
         version_info = fetch_version_info(_get_update_version_url())
         if not version_info:
@@ -96,7 +105,6 @@ def _try_auto_update(original_cmd: str = "driving load") -> Optional[str]:
     """
     import subprocess as _sp
     from pathlib import Path as _Path
-    from driving_cli.commands.update import compare_versions, fetch_version_info, _get_update_version_url
 
     import sys as _sys
     _exe_name = "driving.exe" if _sys.platform == "win32" else "driving"
@@ -450,7 +458,6 @@ def _check_and_pull_powers() -> None:
 
 def _check_and_pull_repos() -> str:
     """检查仓库更新，自动拉取 check_sample_rate=-1 的仓库，返回需通知的提示文本"""
-    from driving_cli.commands.check import _collect_updatable
     _dbg("检查仓库更新 ...")
     t = time.perf_counter()
     try:
@@ -603,11 +610,6 @@ def load(keywords: tuple, debug: bool, with_modules: str, platform: str):
             _dbg(f"仓库更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
 
         t = time.perf_counter()
-        from driving_cli.commands.skill import collect_skills
-        from driving_cli.commands.rule import collect_rules
-        from driving_cli.commands.repo import collect_repos
-        from driving_cli.commands.framework import collect_frameworks
-        from driving_cli.commands.agent import collect_agents
         skills = collect_skills(keywords)
         _dbg(f"collect_skills 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms，数量={len(skills)}")
 
