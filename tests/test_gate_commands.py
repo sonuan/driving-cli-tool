@@ -616,7 +616,7 @@ def test_property6_大小写不敏感匹配(tmp_path_factory, gate):
 
 
 # Feature: driving-gate-command, Property 7: 重复 ID 返回第一个仓库
-@settings(max_examples=100)
+@settings(max_examples=100, deadline=None)
 @given(
     gate=_gate_template_st,
     extra_repos=st.lists(

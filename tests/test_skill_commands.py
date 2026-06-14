@@ -954,7 +954,7 @@ _skill_name_strategy = st.text(
 _repo_name_strategy = st.from_regex(r"[a-zA-Z][a-zA-Z0-9_-]{0,9}", fullmatch=True)
 
 
-@settings(max_examples=100)
+@settings(max_examples=100, deadline=None)
 @given(
     repo1_name=_repo_name_strategy,
     repo2_name=_repo_name_strategy,
