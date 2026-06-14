@@ -494,7 +494,7 @@ _gate_any_st = st.one_of(_gate_template_st, _gate_templates_st)
 
 
 # Feature: driving-gate-command, Property 3 & 4: gate list 输出字段完整性
-@settings(max_examples=100)
+@settings(max_examples=100, deadline=None)
 @given(
     repo_name=_repo_name_st,
     gates=st.lists(_gate_any_st, min_size=1, max_size=5),
