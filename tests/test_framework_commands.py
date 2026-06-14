@@ -345,7 +345,7 @@ class TestFrameworkInstall:
         """本地项目框架（__local__）应跳过安装"""
         # 在 main 仓库添加一个本地框架
         main_fw_dir = project_with_two_repos / "ai-driving" / "main" / "frameworks"
-        gitlist = json.loads((main_fw_dir / "gitlist.json").read_text())
+        gitlist = json.loads((main_fw_dir / "gitlist.json").read_text(encoding="utf-8"))
         gitlist.append({
             "name": "local-fw",
             "project_name": "__local__",

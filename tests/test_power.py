@@ -1157,6 +1157,8 @@ class TestEnsurePowerConfigNewBehavior:
 
     def test_checkout_called_even_when_config_exists(self, runner, tmp_path):
         """有 branch 且 driving.config.json 已存在时，仍应尝试切换分支"""
+        import subprocess as _sp
+        _sp.run(["git", "init"], cwd=tmp_path, capture_output=True)
         power_dir = tmp_path / "ai-driving" / "p1"
         power_dir.mkdir(parents=True)
         # config 已存在
@@ -1205,6 +1207,8 @@ class TestEnsurePowerConfigNewBehavior:
 
     def test_warning_when_no_branch_and_config_missing(self, tmp_path):
         """无 branch 且 config 缺失时，应输出警告提示配置 branch"""
+        import subprocess as _sp
+        _sp.run(["git", "init"], cwd=tmp_path, capture_output=True)
         power_dir = tmp_path / "ai-driving" / "p1"
         power_dir.mkdir(parents=True)
         # 不创建 driving.config.json
