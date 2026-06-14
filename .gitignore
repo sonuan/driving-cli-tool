@@ -31,6 +31,8 @@ MANIFEST
 # PyInstaller
 *.manifest
 *.spec
+# 但保留项目级 spec 文件
+!driving.spec
 
 # Unit test / coverage reports
 htmlcov/
