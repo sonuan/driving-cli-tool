@@ -432,8 +432,9 @@ class TestSudoUserHome:
         )
         assert result.exit_code == 0
         assert "更新成功" in result.output
-        # 安装位置应包含真实用户目录（路径可能因终端宽度被换行，使用 alice 检查）
-        assert "alice" in result.output and ".driving-cli" in result.output
+        # 安装位置应包含真实用户目录（路径可能被换行截断）
+        output = result.output.replace('\n', '')  # 移除换行符后检查
+        assert "alice" in output and ".driving-cli" in output
 
     def test_sudo_user时安装完成后执行chown(self, runner, version_info, tmp_path):
         """sudo 安装完成后应执行 chown 归还所有权"""
