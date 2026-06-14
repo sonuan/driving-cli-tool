@@ -1,7 +1,8 @@
 ﻿# Driving CLI Windows 版本构建脚本
 # 用法：在 Windows 机器（PowerShell）中运行
-#   .\scripts\build-windows.ps1
-#   .\scripts\build-windows.ps1 -Upload -DownloadUrl "http://your-server/driving.exe"
+#   .\scripts\build-windows.ps1                    # 构建 GitHub 版本（默认）
+#   .\scripts\build-windows.ps1 -Upload            # 构建并上传 GitHub 版本
+#   .\scripts\build-windows-internal.ps1           # 构建内网版本
 #
 # 前提：Python 3.8+（python.org）、pip
 
@@ -203,12 +204,51 @@ if ($Upload) {
         exit 1
     }
     Write-Blue "[STEP 7] Uploading to server: $Server"
-    # 根据服务器类型选择上传方式（rsync / scp / robocopy）
-    # 示例：rsync（需安装 cwRsync 或使用 WSL）
-    # rsync -av $DistDir/driving.exe $DistDir/version.json $Server
-    Write-Yellow "Please run the upload command manually based on your server type"
-    Write-Host "  File: $DistDir\driving.exe"
-    Write-Host "  File: $DistDir\version.json"
+
+    # 处理服务器地址格式
+    # 支持 rsync 格式 "user@host::module" 和普通 UNC 路径 "\\server\share"
+    if ($Server -match "::") {
+        # rsync 格式，使用 cwRsync/WSL rsync
+        Write-Host "  使用 rsync 上传..."
+        $rsyncCmd = "rsync -av `"$DistDir\driving.exe`" `"$DistDir\version.json`" `"$Server`""
+        Write-Host "  Command: $rsyncCmd"
+        Write-Yellow "  请确保已安装 cwRsync 或使用 WSL"
+        # 尝试执行 rsync（如果可用）
+        try {
+            $result = Invoke-Expression $rsyncCmd 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Green "  ✓ 上传成功"
+            } else {
+                Write-Yellow "  上传命令执行失败，请手动执行上述命令"
+            }
+        } catch {
+            Write-Yellow "  上传命令执行失败，请手动执行上述命令"
+        }
+    } else {
+        # UNC 路径格式，使用 robocopy
+        Write-Host "  使用 robocopy 上传..."
+        $uncPath = $Server.TrimEnd('/')
+        try {
+            # 提取服务器和共享部分
+            if ($Server -match "^\\\\([^\\]+)\\(.+)") {
+                $remotePath = $Server.TrimEnd('\') + "\"
+                Write-Host "  Remote: $remotePath"
+                robocopy $DistDir $remotePath "driving.exe" "version.json" /NP /NFL /NDL /NC /NJH /NJS
+                if ($LASTEXITCODE -lt 8) {
+                    Write-Green "  ✓ 上传成功"
+                } else {
+                    Write-Yellow "  上传可能失败，请检查网络连接"
+                }
+            } else {
+                Write-Yellow "  服务器地址格式不支持，请手动上传"
+            }
+        } catch {
+            Write-Yellow "  上传失败，请手动上传文件："
+            Write-Host "    Source: $DistDir\driving.exe"
+            Write-Host "    Source: $DistDir\version.json"
+            Write-Host "    Dest: $Server"
+        }
+    }
 } else {
     Write-Blue "[STEP 7] Skipping upload (use -Upload flag to enable)"
 }
