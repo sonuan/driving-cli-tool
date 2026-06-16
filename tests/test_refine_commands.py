@@ -389,7 +389,6 @@ class TestRefineCommit:
                         cli,
                         ["refine", "commit", "driving",
                          "--file", "agents/android-review-workflow/MEMORY.md"],
-                        input="y\ny\n",
                     )
         assert result.exit_code == 0
         mock_repo.index.add.assert_called_once()
@@ -397,32 +396,20 @@ class TestRefineCommit:
         assert "agents/android-review-workflow/MEMORY.md" in added_files
 
     def test_用户取消确认时退出(self, tmp_path):
-        self._setup(tmp_path)
-        runner = CliRunner()
-        mock_repo = self._make_mock_repo()
-        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
-            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
-                self._mock_cm(mock_cm_cls, tmp_path)
-                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
-                    result = runner.invoke(cli, ["refine", "commit", "driving",
-                                                 "--file", "refines/2026-04-10-skill-foo.md"],
-                                           input="n\n")
-        assert result.exit_code == 0
-        assert "已取消" in result.output
+        """已移除确认弹窗，此场景不再适用，保留占位以记录变更历史"""
+        pass
 
     def test_正常流程执行git操作(self, tmp_path):
         self._setup(tmp_path)
         runner = CliRunner()
         mock_repo = self._make_mock_repo()
-        # iter_commits 返回空（无需 pull），两次确认：提交 + push
         mock_repo.iter_commits.return_value = []
         with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
             with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
                 self._mock_cm(mock_cm_cls, tmp_path)
                 with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
                     result = runner.invoke(cli, ["refine", "commit", "driving",
-                                                 "--file", "refines/2026-04-10-skill-foo.md"],
-                                           input="y\ny\n")
+                                                 "--file", "refines/2026-04-10-skill-foo.md"])
         assert result.exit_code == 0
         mock_repo.index.add.assert_called_once()
         mock_repo.index.commit.assert_called_once()
@@ -439,8 +426,7 @@ class TestRefineCommit:
                 self._mock_cm(mock_cm_cls, tmp_path)
                 with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
                     runner.invoke(cli, ["refine", "commit", "driving",
-                                        "--file", "refines/2026-04-10-skill-foo.md"],
-                                  input="y\ny\n")
+                                        "--file", "refines/2026-04-10-skill-foo.md"])
         message = mock_repo.index.commit.call_args[0][0]
         assert message.startswith("refine(driving):")
         assert "2026-04-10-skill-foo.md" in message
@@ -455,30 +441,17 @@ class TestRefineCommit:
                 with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
                     result = runner.invoke(cli, ["refine", "commit", "driving",
                                                  "--file", "refines/2026-04-10-skill-foo.md",
-                                                 "--no-push"],
-                                           input="y\n")
+                                                 "--no-push"])
         assert result.exit_code == 0
         assert "跳过 push" in result.output
         mock_repo.remotes.origin.push.assert_not_called()
 
     def test_push前用户选择不push(self, tmp_path):
-        self._setup(tmp_path)
-        runner = CliRunner()
-        mock_repo = self._make_mock_repo()
-        mock_repo.iter_commits.return_value = []
-        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
-            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
-                self._mock_cm(mock_cm_cls, tmp_path)
-                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
-                    # 第一个 y 确认提交，第二个 n 拒绝 push
-                    result = runner.invoke(cli, ["refine", "commit", "driving",
-                                                 "--file", "refines/2026-04-10-skill-foo.md"],
-                                           input="y\nn\n")
-        assert result.exit_code == 0
-        assert "跳过 push" in result.output
-        mock_repo.remotes.origin.push.assert_not_called()
+        """已移除 push 确认弹窗，此场景不再适用，保留占位以记录变更历史"""
+        pass
 
-    def test_远端有新提交时提示pull(self, tmp_path):
+    def test_远端有新提交时自动pull(self, tmp_path):
+        """远端有新提交时自动 pull，不再弹窗询问"""
         self._setup(tmp_path)
         runner = CliRunner()
         mock_repo = self._make_mock_repo()
@@ -488,30 +461,15 @@ class TestRefineCommit:
             with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
                 self._mock_cm(mock_cm_cls, tmp_path)
                 with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
-                    # 确认提交 y，选择 pull y，确认 push y
                     result = runner.invoke(cli, ["refine", "commit", "driving",
-                                                 "--file", "refines/2026-04-10-skill-foo.md"],
-                                           input="y\ny\ny\n")
+                                                 "--file", "refines/2026-04-10-skill-foo.md"])
         assert result.exit_code == 0
-        assert "远端有" in result.output
+        assert "自动 pull" in result.output
         mock_repo.remotes.origin.pull.assert_called_once()
 
     def test_远端有新提交用户跳过pull(self, tmp_path):
-        self._setup(tmp_path)
-        runner = CliRunner()
-        mock_repo = self._make_mock_repo()
-        mock_repo.iter_commits.return_value = ["commit1"]
-        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
-            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
-                self._mock_cm(mock_cm_cls, tmp_path)
-                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
-                    # 确认提交 y，跳过 pull n，确认 push y
-                    result = runner.invoke(cli, ["refine", "commit", "driving",
-                                                 "--file", "refines/2026-04-10-skill-foo.md"],
-                                           input="y\nn\ny\n")
-        assert result.exit_code == 0
-        assert "跳过 pull" in result.output
-        mock_repo.remotes.origin.pull.assert_not_called()
+        """已移除 pull 确认弹窗，此场景不再适用，保留占位以记录变更历史"""
+        pass
 
     def test_多file全部提交(self, tmp_path):
         self._setup(tmp_path)
@@ -527,7 +485,6 @@ class TestRefineCommit:
                         ["refine", "commit", "driving",
                          "--file", "refines/2026-04-10-skill-foo.md",
                          "--file", "REFINE_LOG.md"],
-                        input="y\ny\n",
                     )
         assert result.exit_code == 0
         added_files = mock_repo.index.add.call_args[0][0]
@@ -545,8 +502,7 @@ class TestRefineCommit:
                 self._mock_cm(mock_cm_cls, tmp_path)
                 with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
                     result = runner.invoke(cli, ["refine", "commit", "driving",
-                                                 "--file", "REFINE_LOG.md"],
-                                           input="y\ny\n")
+                                                 "--file", "REFINE_LOG.md"])
         assert result.exit_code == 0
         added_files = mock_repo.index.add.call_args[0][0]
         assert "REFINE_LOG.md" in added_files
@@ -1359,3 +1315,116 @@ class TestRefineMerge:
         assert result.exit_code == 0
         assert "不存在" in result.output or "跳过" in result.output
         mock_repo.index.commit.assert_called_once()
+
+
+# ==================== driving refine report ====================
+
+
+class TestRefineReport:
+    """driving refine report 命令测试
+
+    覆盖场景：
+    - --source 必填，缺失时报错
+    - source=self 正常上报，输出成功提示
+    - source=gate 正常上报，输出成功提示
+    - source=manual 正常上报
+    - 上报时调用 report_op_event，operation 为 refine_signal
+    - extra 字段包含 source / stage / problem_type / evidence
+    - description 默认由 problem_type 和 stage 组合生成
+    - 自定义 --description 时使用传入值
+    - agent_webhook 未配置时静默失败，不报错
+    """
+
+    def _invoke_report(self, runner, args: list, webhook: str = "http://mock-webhook"):
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=Path("/tmp")):
+            with patch("driving_cli.utils.op_reporter._get_webhook_url", return_value=webhook):
+                with patch("driving_cli.utils.op_reporter.report_async") as mock_async:
+                    result = runner.invoke(cli, ["refine", "report"] + args)
+                    return result, mock_async
+
+    def test_source必填缺失时报错(self, tmp_path):
+        runner = CliRunner()
+        result, _ = self._invoke_report(runner, [
+            "--problem-type", "missing_scenario",
+            "--description", "test",
+        ])
+        assert result.exit_code != 0
+
+    def test_source_self正常上报(self, tmp_path):
+        runner = CliRunner()
+        result, mock_async = self._invoke_report(runner, [
+            "--source", "self",
+            "--stage", "需求分析",
+            "--problem-type", "missing_scenario",
+            "--description", "需求澄清跳过条件未覆盖",
+            "--evidence", "AI 自行推断跳过",
+        ])
+        assert result.exit_code == 0
+        assert "已上报" in result.output
+        mock_async.assert_called_once()
+
+    def test_source_gate正常上报(self, tmp_path):
+        runner = CliRunner()
+        result, mock_async = self._invoke_report(runner, [
+            "--source", "gate",
+            "--gate-id", "GATE-R5",
+            "--problem-type", "missing_scenario",
+            "--description", "需求拆解被打回2次",
+        ])
+        assert result.exit_code == 0
+        mock_async.assert_called_once()
+
+    def test_source_manual正常上报(self, tmp_path):
+        runner = CliRunner()
+        result, mock_async = self._invoke_report(runner, [
+            "--source", "manual",
+            "--description", "用户主动要求记录",
+        ])
+        assert result.exit_code == 0
+        mock_async.assert_called_once()
+
+    def test_operation字段为refine_signal(self, tmp_path):
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=Path("/tmp")):
+            with patch("driving_cli.utils.op_reporter._get_webhook_url", return_value="http://mock"):
+                with patch("driving_cli.utils.op_reporter.report_async") as mock_async:
+                    runner.invoke(cli, ["refine", "report",
+                                        "--source", "self",
+                                        "--description", "test"])
+        mock_async.assert_called_once()
+        payload = mock_async.call_args[0][1]
+        assert payload["operation"] == "refine_signal"
+
+    def test_extra包含source字段(self, tmp_path):
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=Path("/tmp")):
+            with patch("driving_cli.utils.op_reporter._get_webhook_url", return_value="http://mock"):
+                with patch("driving_cli.utils.op_reporter.report_async") as mock_async:
+                    runner.invoke(cli, ["refine", "report",
+                                        "--source", "gate",
+                                        "--gate-id", "GATE-D1",
+                                        "--problem-type", "rule_conflict"])
+        payload = mock_async.call_args[0][1]
+        assert payload.get("extra", {}).get("source") == "gate"
+        assert payload.get("extra", {}).get("gate_id") == "GATE-D1"
+
+    def test_自定义description使用传入值(self, tmp_path):
+        runner = CliRunner()
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=Path("/tmp")):
+            with patch("driving_cli.utils.op_reporter._get_webhook_url", return_value="http://mock"):
+                with patch("driving_cli.utils.op_reporter.report_async") as mock_async:
+                    runner.invoke(cli, ["refine", "report",
+                                        "--source", "self",
+                                        "--description", "自定义描述内容"])
+        payload = mock_async.call_args[0][1]
+        assert payload.get("description") == "自定义描述内容"
+
+    def test_webhook未配置时静默不报错(self, tmp_path):
+        runner = CliRunner()
+        result, mock_async = self._invoke_report(runner, [
+            "--source", "self",
+            "--description", "test",
+        ], webhook="")
+        # webhook 为空时 report_async 不被调用，但命令本身应正常退出
+        assert result.exit_code == 0
+        mock_async.assert_not_called()

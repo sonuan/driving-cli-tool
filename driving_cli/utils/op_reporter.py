@@ -23,6 +23,7 @@ operation 类型：
   agent_started       — 子 agent 启动（来自 driving agent report）
   refine_committed    — refine 提案提交（来自 driving refine commit）
   refine_merged       — refine 提案合并（来自 driving refine merge）
+  refine_signal       — 规范缺陷信号上报（来自 self-refine 技能的 driving refine report）
 """
 
 import sys

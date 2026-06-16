@@ -353,6 +353,7 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
 
     --file 为必填项，接受相对于仓库根目录的路径，可多次指定。
     只提交未被 git 追踪的文件（新增未提交），已追踪文件自动跳过。
+    自动执行 commit 和 push，无需二次确认。
 
     示例：
         driving refine commit driving --file refines/2026-05-xx-rule-foo.md
@@ -405,16 +406,10 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
             log_info("没有需要提交的新增文件，退出")
             return
 
-        # 展示待提交清单
+        # 展示待提交清单（仅展示，不需确认）
         click.echo(f"\n待提交文件（共 {len(valid_files)} 个）：")
         for fp in valid_files:
             click.echo(f"  {fp}")
-
-        click.echo("")
-        confirmed = click.confirm("确认提交以上文件？", default=True)
-        if not confirmed:
-            log_info("已取消")
-            return
 
         # 自动生成 commit message
         file_names = [Path(fp).name for fp in valid_files]
@@ -455,36 +450,22 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
             log_warning(f"仓库 '{repo_name}' 未配置远程仓库，跳过 push")
             return
 
-        # push 前检查远端是否有新提交，提示用户选择是否先 pull
+        # push 前自动 fetch + pull（远端有新提交时自动合并）
         try:
             repo.remotes.origin.fetch()
             current_branch = repo.active_branch.name if not repo.head.is_detached else None
             if current_branch:
-                local_commit = repo.head.commit
                 remote_ref = f"origin/{current_branch}"
                 try:
-                    remote_commit = repo.commit(remote_ref)
-                    # 检查远端是否有本地没有的提交
-                    behind_commits = list(repo.iter_commits(f"{local_commit}..{remote_ref}"))
+                    behind_commits = list(repo.iter_commits(f"HEAD..{remote_ref}"))
                     if behind_commits:
-                        click.echo(
-                            f"\n远端有 {len(behind_commits)} 个新提交，建议先 pull 再 push。"
-                        )
-                        do_pull = click.confirm("是否先执行 pull？", default=True)
-                        if do_pull:
-                            repo.remotes.origin.pull(current_branch)
-                            log_success(f"pull 成功")
-                        else:
-                            log_info("跳过 pull，继续 push（可能产生冲突）")
+                        log_info(f"远端有 {len(behind_commits)} 个新提交，自动 pull...")
+                        repo.remotes.origin.pull(current_branch)
+                        log_success("pull 成功")
                 except Exception:
                     pass  # 无法获取远端引用（如首次推送），忽略
         except git.exc.GitCommandError:
             log_warning("fetch 失败，跳过远端检查，直接 push")
-
-        do_push = click.confirm("\n确认 push 到远端？", default=True)
-        if not do_push:
-            log_info("已跳过 push")
-            return
 
         try:
             log_info(f"正在推送仓库 '{repo_name}'...")
@@ -796,6 +777,68 @@ def refine_merge(
         raise
     except Exception as e:
         log_error(f"refine merge 失败: {e}")
+        raise click.Abort()
+
+
+@refine_group.command(name="report")
+@click.option(
+    "--source",
+    required=True,
+    type=click.Choice(["gate", "self", "manual"]),
+    help="信号来源：gate=门禁返工触发 / self=AI执行中发现 / manual=用户主动要求",
+)
+@click.option("--gate-id", default="", help="关联的门禁 ID（source=gate 时填写）")
+@click.option("--stage", default="", help="触发信号的阶段名称，如「需求分析」")
+@click.option(
+    "--problem-type",
+    default="",
+    type=click.Choice(["missing_scenario", "rule_conflict", "doc_mismatch", ""]),
+    help="问题类型：missing_scenario=文档缺失场景 / rule_conflict=规则冲突 / doc_mismatch=文档与实际不符",
+)
+@click.option("--description", "desc", default="", help="一句话描述问题")
+@click.option("--evidence", default="", help="证据：执行了什么、期望什么、实际什么")
+def refine_report(
+    source: str,
+    gate_id: str,
+    stage: str,
+    problem_type: str,
+    desc: str,
+    evidence: str,
+):
+    """上报规范缺陷信号，进入每日审核队列。
+
+    由 self-refine 技能在发现问题后调用，走 agent_webhook 静默上报，无需用户确认。
+
+    示例：
+        driving refine report --source self --stage 需求分析 \\
+            --problem-type missing_scenario \\
+            --description "需求澄清跳过条件未覆盖" \\
+            --evidence "用户提供完整PRD，文档无指导，AI自行推断跳过澄清"
+
+        driving refine report --source gate --gate-id GATE-R5 \\
+            --problem-type missing_scenario \\
+            --description "需求拆解文档被打回2次"
+    """
+    try:
+        from driving_cli.utils.op_reporter import report_op_event
+
+        description_text = desc or f"{problem_type or 'signal'} @ {stage or gate_id or 'unknown'}"
+
+        report_op_event(
+            operation="refine_signal",
+            description=description_text,
+            extra={
+                "source": source or None,
+                "gate_id": gate_id or None,
+                "stage": stage or None,
+                "problem_type": problem_type or None,
+                "evidence": evidence or None,
+            },
+            silent=True,
+        )
+        log_success("信号已上报，进入审核队列")
+    except Exception as e:
+        log_error(f"上报失败: {e}")
         raise click.Abort()
 
 

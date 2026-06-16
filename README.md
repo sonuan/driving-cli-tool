@@ -266,6 +266,7 @@ driving gate status --path <dir> --platform <platform> --owner <owner>          
 driving gate status <gate-id> --path <dir> --platform <platform>                  # 查看指定平台的指定 gate 状态
 driving gate history <gate-id> --path <dir> --platform <platform>                 # 查看指定 gate 历史记录
 driving gate history <gate-id> --path <dir> --platform <platform> --owner <owner> # 同时指定负责人
+driving gate check <gate-id>                                                       # 执行门禁前置自检，输出自检问卷供 AI 回顾本阶段执行情况
 ```
 
 `gate load` 输出格式：
@@ -431,6 +432,11 @@ driving refine merge <repo> --file <path> --trigger-source manual  # 指定本�
 driving refine merge <repo> --file <path> --trigger-reason "..."   # 指定本次合并操作的触发原因，用于 webhook 上报
 driving refine merge <repo> --file <path> --no-push                # 只 commit，不 push
 
+# 上报规范缺陷信号（由 self-refine 技能在 gate check 自检后调用，走 agent_webhook 静默上报）
+driving refine report --source <gate|self|manual> --description "<描述>"               # 上报信号（必填 --source）
+driving refine report --source self --stage <阶段名> --problem-type <类型> --description "<描述>" --evidence "<证据>"
+driving refine report --source gate --gate-id <gate-id> --problem-type <类型> --description "<描述>"
+
 # REFINE_LOG.md 变更记录管理
 driving refine log append <repo> "<entry>"   # 追加一条已生效的变更记录（文件不存在时自动创建）
 driving refine log get <repo>                # 读取当前变更记录内容
@@ -559,6 +565,7 @@ trigger: manual                 # Windsurf 所需
   - `agent_started`：子 agent 启动（`driving agent report`）
   - `refine_committed`：refine 提案提交（`driving refine commit`）
   - `refine_merged`：refine 提案合并（`driving refine merge`）
+  - `refine_signal`：规范缺陷信号上报（`driving refine report`，来自 self-refine 技能的 gate check 自检）
 
   payload 结构：`operation`、`description`（一句话）、`triggered_at`（北京时间）、`cli_version`、`actor`（git user.name）、`branch`（当前 git 分支），以及各操作专属扩展字段收入 `extra` 嵌套对象。
 
