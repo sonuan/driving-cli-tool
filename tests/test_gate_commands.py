@@ -1160,3 +1160,112 @@ class TestGateHistoryOwnerOption:
             ])
         assert result.exit_code == 0
         assert "暂无历史记录" in result.output
+
+
+# ==================== gate check 命令 ====================
+
+
+class TestGateCheckCommand:
+    """driving gate check <gate-id> 命令测试
+
+    覆盖场景：
+    - gate-id 存在且有 self_checks 字段：返回配置中的 self_checks
+    - gate-id 存在但无 self_checks 字段：返回默认三问
+    - gate-id 不存在：输出 error 字段，退出码非零
+    - 返回结构包含 gate_id / gate_name / user_prompt / self_checks
+    - self_checks 包含三个必需字段
+    """
+
+    def _make_project(self, tmp_path, gates: list) -> Path:
+        _make_config(tmp_path, [
+            {"name": "driving", "type": "local", "path": "ai-driving/driving", "local_path": None},
+        ])
+        repo_dir = tmp_path / "ai-driving" / "driving"
+        _make_manifest(repo_dir)
+        _make_gates_json(repo_dir, gates)
+        return tmp_path
+
+    def test_gate存在有self_checks时返回配置的问题(self, runner, tmp_path):
+        custom_checks = {
+            "inferred_steps": "需求分析阶段有没有靠推断执行的步骤？",
+            "rule_conflicts": "需求分析阶段有没有规则冲突？",
+            "doc_mismatch": "需求分析阶段有没有文档不符？",
+        }
+        gate = {**_sample_gate("GATE-R5"), "self_checks": custom_checks}
+        project = self._make_project(tmp_path, [gate])
+        with patch("driving_cli.commands.gate.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["gate", "check", "GATE-R5"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["self_checks"] == custom_checks
+
+    def test_gate存在无self_checks时返回无需自检提示(self, runner, tmp_path):
+        gate = _sample_gate("GATE-D1")  # 无 self_checks 字段
+        project = self._make_project(tmp_path, [gate])
+        with patch("driving_cli.commands.gate.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["gate", "check", "GATE-D1"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["gate_id"] == "GATE-D1"
+        assert "无需自检" in data["user_prompt"]
+        assert "self_checks" not in data
+
+    def test_gate不存在时输出error且退出码非零(self, runner, tmp_path):
+        project = self._make_project(tmp_path, [_sample_gate("GATE-R1")])
+        with patch("driving_cli.commands.gate.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["gate", "check", "GATE-NONEXISTENT"])
+        assert result.exit_code != 0
+        data = json.loads(result.output)
+        assert "error" in data
+
+    def _make_gate_with_checks(self, gate_id: str) -> dict:
+        """创建带有 self_checks 的门禁，供需要完整 result 的用例使用。"""
+        return {
+            **_sample_gate(gate_id),
+            "self_checks": {
+                "inferred_steps": "有没有靠推断执行的步骤？",
+                "rule_conflicts": "有没有规则冲突？",
+                "doc_mismatch": "有没有文档不符？",
+            },
+        }
+
+    def test_返回结构包含必需字段(self, runner, tmp_path):
+        gate = self._make_gate_with_checks("GATE-P1")
+        project = self._make_project(tmp_path, [gate])
+        with patch("driving_cli.commands.gate.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["gate", "check", "GATE-P1"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "gate_id" in data
+        assert "gate_name" in data
+        assert "user_prompt" in data
+        assert "self_checks" in data
+        assert data["gate_id"] == "GATE-P1"
+
+    def test_gate_name包含固定前缀门禁前置自检(self, runner, tmp_path):
+        gate = self._make_gate_with_checks("GATE-P1")
+        project = self._make_project(tmp_path, [gate])
+        with patch("driving_cli.commands.gate.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["gate", "check", "GATE-P1"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["gate_name"].startswith("门禁前置自检-")
+        assert data["gate_name"] == f"门禁前置自检-{gate['name']}"
+
+    def test_user_prompt包含self_refine引导文字(self, runner, tmp_path):
+        gate = self._make_gate_with_checks("GATE-E1")
+        project = self._make_project(tmp_path, [gate])
+        with patch("driving_cli.commands.gate.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["gate", "check", "GATE-E1"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "self-refine" in data["user_prompt"]
+
+    def test_大小写不敏感匹配(self, runner, tmp_path):
+        gate = self._make_gate_with_checks("GATE-B1")
+        project = self._make_project(tmp_path, [gate])
+        with patch("driving_cli.commands.gate.find_project_root", return_value=project):
+            result = runner.invoke(cli, ["gate", "check", "gate-b1"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["gate_id"] == "GATE-B1"

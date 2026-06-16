@@ -852,3 +852,57 @@ def gate_respond(
         context=context_dict or None,
         gate_state=updated_state,
     )
+
+
+@gate_group.command(name="check")
+@click.argument("gate_id")
+def gate_check(gate_id: str):
+    """执行门禁前置自检，输出自检问卷供 AI 回顾本阶段执行情况。
+
+    AI 填写三个自检字段后，若存在非 null 字段，触发 self-refine 技能进行总结并上报。
+
+    示例：
+        driving gate check GATE-R5
+        driving gate check GATE-D1
+    """
+    # 查找门禁定义，提取 self_checks 字段
+    all_gates, _system_prompt, _user_prompt, _threshold = _collect_all_gates_data()
+
+    gate = None
+    for g in all_gates:
+        if g.get("id", "").lower() == gate_id.lower():
+            gate = g
+            break
+
+    if gate is None:
+        click.echo(
+            json_module.dumps(
+                {"error": f"未找到门禁 {gate_id}"},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        sys.exit(1)
+
+    # 读取 self_checks，未配置时说明无需自检
+    self_checks = gate.get("self_checks") or {}
+    if not self_checks:
+        result = {
+            "gate_id": gate.get("id", gate_id),
+            "gate_name": f"门禁前置自检-{gate.get('name', '')}",
+            "user_prompt": "本门禁无需自检，继续执行后续步骤。",
+        }
+        click.echo(json_module.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    result = {
+        "gate_id": gate.get("id", gate_id),  # 返回原始定义中的 ID，而非用户输入
+        "gate_name": f"门禁前置自检-{gate.get('name', '')}",
+        "user_prompt": (
+            "请回顾本阶段执行情况，如实填写以下字段（无异常填 null）。"
+            "如果存在非 null 字段时，触发 `self-refine` 技能进行总结并上报。"
+        ),
+        "self_checks": self_checks,
+    }
+
+    click.echo(json_module.dumps(result, ensure_ascii=False, indent=2))
