@@ -884,8 +884,8 @@ def gate_check(gate_id: str):
         )
         sys.exit(1)
 
-    # 读取 self_checks，未配置时说明无需自检
-    self_checks = gate.get("self_checks") or {}
+    # 读取 self_checks（数组），未配置或为空时说明无需自检
+    self_checks = gate.get("self_checks") or []
     if not self_checks:
         result = {
             "gate_id": gate.get("id", gate_id),
@@ -899,8 +899,8 @@ def gate_check(gate_id: str):
         "gate_id": gate.get("id", gate_id),  # 返回原始定义中的 ID，而非用户输入
         "gate_name": f"门禁前置自检-{gate.get('name', '')}",
         "user_prompt": (
-            "请回顾本阶段执行情况，如实填写以下字段（无异常填 null）。"
-            "如果存在非 null 字段时，触发 `self-refine` 技能进行总结并上报。"
+            "请回顾本阶段执行情况，如实完成 `self_checks` 所有问题的自查，结果填写到括号内（无异常填 `无`）。"
+            "所有自查完成后，如果存在非 `无` 情况时，触发 `self-refine` 技能进行经验总结沉淀"
         ),
         "self_checks": self_checks,
     }

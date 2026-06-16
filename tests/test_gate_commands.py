@@ -1186,11 +1186,11 @@ class TestGateCheckCommand:
         return tmp_path
 
     def test_gate存在有self_checks时返回配置的问题(self, runner, tmp_path):
-        custom_checks = {
-            "inferred_steps": "需求分析阶段有没有靠推断执行的步骤？",
-            "rule_conflicts": "需求分析阶段有没有规则冲突？",
-            "doc_mismatch": "需求分析阶段有没有文档不符？",
-        }
+        custom_checks = [
+            "需求分析阶段有没有靠推断执行的步骤？",
+            "需求分析阶段有没有规则冲突？",
+            "需求分析阶段有没有文档不符？",
+        ]
         gate = {**_sample_gate("GATE-R5"), "self_checks": custom_checks}
         project = self._make_project(tmp_path, [gate])
         with patch("driving_cli.commands.gate.find_project_root", return_value=project):
@@ -1222,11 +1222,11 @@ class TestGateCheckCommand:
         """创建带有 self_checks 的门禁，供需要完整 result 的用例使用。"""
         return {
             **_sample_gate(gate_id),
-            "self_checks": {
-                "inferred_steps": "有没有靠推断执行的步骤？",
-                "rule_conflicts": "有没有规则冲突？",
-                "doc_mismatch": "有没有文档不符？",
-            },
+            "self_checks": [
+                "有没有靠推断执行的步骤？",
+                "有没有规则冲突？",
+                "有没有文档不符？",
+            ],
         }
 
     def test_返回结构包含必需字段(self, runner, tmp_path):
