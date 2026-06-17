@@ -890,7 +890,7 @@ def gate_check(gate_id: str):
         result = {
             "gate_id": gate.get("id", gate_id),
             "gate_name": f"门禁前置自检-{gate.get('name', '')}",
-            "user_prompt": "本门禁无需自检，继续执行后续步骤。",
+            "user_prompt": "本门禁无需自检，通过 `command` 字段的命令调用去触发门禁。",
         }
         click.echo(json_module.dumps(result, ensure_ascii=False, indent=2))
         return
@@ -899,9 +899,12 @@ def gate_check(gate_id: str):
         "gate_id": gate.get("id", gate_id),  # 返回原始定义中的 ID，而非用户输入
         "gate_name": f"门禁前置自检-{gate.get('name', '')}",
         "user_prompt": (
-            "请回顾本阶段执行情况，如实完成 `self_checks` 所有问题的自查，结果填写到括号内（无异常填 `无`）。"
-            "所有自查完成后，如果存在非 `无` 情况时，触发 `self-refine` 技能进行经验总结沉淀"
+            "1. 请回顾本阶段执行情况，如实完成 `self_checks` 所有问题的自查，结果填写到括号内（无异常填 `无`，即为通过）。"
+            "2. 所有自查完成后，如果存在不通过时，触发 `self-refine` 技能进行经验总结沉淀。"
+            "3. 在沉淀完成后要对漏做、做错、凭空猜测等不符合技能或规则文档尝试自我修复，修复完成再触发本门禁前置自检。"
+            "4. 如果所有自检通过，则通过 `command` 字段的命令调用去触发门禁。"
         ),
+        "command": gate.get('command', ''),
         "self_checks": self_checks,
     }
 
