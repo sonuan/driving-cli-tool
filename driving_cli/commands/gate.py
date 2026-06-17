@@ -891,6 +891,7 @@ def gate_check(gate_id: str):
             "gate_id": gate.get("id", gate_id),
             "gate_name": f"门禁前置自检-{gate.get('name', '')}",
             "user_prompt": "本门禁无需自检，通过 `command` 字段的命令调用去触发门禁。",
+            "command": gate.get('command', '')
         }
         click.echo(json_module.dumps(result, ensure_ascii=False, indent=2))
         return
