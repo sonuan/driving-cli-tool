@@ -1141,3 +1141,77 @@ class TestAgentReport:
         with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
             result = runner.invoke(cli, ["agent", "report", "agent-a"])
         assert result.exit_code != 0
+
+    def test_extra合法JSON合并到extra字段(self, runner, project_with_agents):
+        """--extra 传合法 JSON 对象时，所有字段应合并进 extra"""
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
+            with patch("driving_cli.utils.op_reporter.report_op_event") as mock_report:
+                result = runner.invoke(cli, [
+                    "agent", "report", "agent-a",
+                    "--path", "features/login",
+                    "--extra", '{"pr_url": "https://github.com/pr/1", "branch": "feat/x"}',
+                ])
+        assert result.exit_code == 0
+        mock_report.assert_called_once()
+        extra = mock_report.call_args.kwargs["extra"]
+        assert extra["pr_url"] == "https://github.com/pr/1"
+        assert extra["branch"] == "feat/x"
+        # 默认字段仍保留
+        assert extra["agent_name"] == "agent-a"
+        assert extra["feature_path"] == "features/login"
+
+    def test_extra与source同时传入均生效(self, runner, project_with_agents):
+        """--extra 与 --source 同时使用，两者字段均应出现在 extra 中"""
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
+            with patch("driving_cli.utils.op_reporter.report_op_event") as mock_report:
+                result = runner.invoke(cli, [
+                    "agent", "report", "agent-a",
+                    "--path", "features/login",
+                    "--source", "dev-review",
+                    "--extra", '{"ticket": "JIRA-123"}',
+                ])
+        assert result.exit_code == 0
+        extra = mock_report.call_args.kwargs["extra"]
+        assert extra["trigger"] == "dev-review"
+        assert extra["ticket"] == "JIRA-123"
+
+    def test_extra非法JSON时打印警告不崩溃(self, runner, project_with_agents):
+        """--extra 传非法 JSON 时，命令仍正常完成，不抛出异常"""
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
+            with patch("driving_cli.utils.op_reporter.report_op_event") as mock_report:
+                result = runner.invoke(cli, [
+                    "agent", "report", "agent-a",
+                    "--path", "features/login",
+                    "--extra", "not-a-json",
+                ])
+        assert result.exit_code == 0
+        mock_report.assert_called_once()
+        # 非法 JSON 被忽略，默认字段仍在
+        extra = mock_report.call_args.kwargs["extra"]
+        assert extra["agent_name"] == "agent-a"
+
+    def test_extra非对象JSON时打印警告不崩溃(self, runner, project_with_agents):
+        """--extra 传 JSON 数组而非对象时，应忽略并继续上报"""
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
+            with patch("driving_cli.utils.op_reporter.report_op_event") as mock_report:
+                result = runner.invoke(cli, [
+                    "agent", "report", "agent-a",
+                    "--path", "features/login",
+                    "--extra", '["a", "b"]',
+                ])
+        assert result.exit_code == 0
+        mock_report.assert_called_once()
+        extra = mock_report.call_args.kwargs["extra"]
+        assert extra["agent_name"] == "agent-a"
+
+    def test_extra未传时extra仅含默认字段(self, runner, project_with_agents):
+        """不传 --extra 时，extra 只包含默认三个字段"""
+        with patch("driving_cli.commands.agent.find_project_root", return_value=project_with_agents):
+            with patch("driving_cli.utils.op_reporter.report_op_event") as mock_report:
+                result = runner.invoke(cli, [
+                    "agent", "report", "agent-a",
+                    "--path", "features/login",
+                ])
+        assert result.exit_code == 0
+        extra = mock_report.call_args.kwargs["extra"]
+        assert set(extra.keys()) == {"agent_name", "feature_path", "trigger"}

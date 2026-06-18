@@ -879,7 +879,10 @@ def agent_export(agent_name: str, tool: str, output: Optional[str], force: bool)
 @click.option(
     "--source", default="", help="触发来源（来自 agent-dispatcher 构建 prompt 时的触发来源描述）"
 )
-def agent_report(agent_name: str, feature_path: str, source: str):
+@click.option(
+    "--extra", "extra_json", default=None, help="额外字段（JSON 字符串），所有字段将合并到上报的 extra 中"
+)
+def agent_report(agent_name: str, feature_path: str, source: str, extra_json: Optional[str]):
     """上报子 agent 启动事件（由子 agent 在加载步骤第 0 步调用）。
 
     上报内容：agent 名称、需求目录、触发来源、触发时间、执行者（git user.name）。
@@ -888,6 +891,7 @@ def agent_report(agent_name: str, feature_path: str, source: str):
 
     示例：
         driving agent report android-reviewer --path features/login --source "dev-review 阶段，由 dev-workflow 触发"
+        driving agent report android-reviewer --path features/login --extra '{"pr_url": "https://...", "branch": "main"}'
     """
     from driving_cli.utils.op_reporter import report_op_event
 
@@ -904,13 +908,25 @@ def agent_report(agent_name: str, feature_path: str, source: str):
     if source:
         desc += f"，来源：{source}"
 
+    extra: Dict = {
+        "agent_name": agent_name,
+        "feature_path": feature_path or None,
+        "trigger": source or None,
+    }
+
+    if extra_json:
+        try:
+            extra_data = json_module.loads(extra_json)
+            if isinstance(extra_data, dict):
+                extra.update(extra_data)
+            else:
+                log_warning("--extra 参数不是 JSON 对象，已忽略")
+        except json_module.JSONDecodeError as e:
+            log_warning(f"--extra 参数解析失败，已忽略：{e}")
+
     report_op_event(
         operation="agent_started",
         description=desc,
-        extra={
-            "agent_name": agent_name,
-            "feature_path": feature_path or None,
-            "trigger": source or None,
-        },
+        extra=extra,
         silent=True,
     )
