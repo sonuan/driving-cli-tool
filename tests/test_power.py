@@ -1274,3 +1274,209 @@ class TestGitCheckoutBranchSkipWhenAlreadyOnBranch:
             _checkout_branch_after_install(power_dir, "p1", "develop")
 
         mock_repo.git.checkout.assert_called_once_with("develop")
+
+
+# ==================== power install 完成后的 repo 初始化测试 ====================
+
+
+class TestPowerInstallInitRepos:
+    """验证 driving power install 完成后，会调用 _init_power_repos 检查并初始化该 power 下的 repos"""
+
+    @pytest.fixture
+    def runner(self):
+        return CliRunner()
+
+    def _write_driving_config(self, power_dir: Path, repos: list = None):
+        """在 power_dir 写入 driving.config.json"""
+        power_dir.mkdir(parents=True, exist_ok=True)
+        data = {
+            "version": "2",
+            "repos": repos or [],
+            "default_commit_message": "update by driving",
+            "update_version_url": "",
+        }
+        (power_dir / CONFIG_FILE_NAME).write_text(
+            json.dumps(data, ensure_ascii=False), encoding="utf-8"
+        )
+
+    def _write_power_json(self, project_root: Path, powers: list):
+        (project_root / POWER_FILE_NAME).write_text(
+            json.dumps({"powers": powers}, ensure_ascii=False), encoding="utf-8"
+        )
+
+    # ---- 无参数模式 ----
+
+    def test_no_args_calls_init_power_repos_after_success(self, runner, tmp_path):
+        """无参数 power install：power 初始化成功后，应调用 _init_power_repos"""
+        from driving_cli.commands.power import power_group
+
+        self._write_power_json(tmp_path, powers=[{
+            "name": "my-power", "type": "remote",
+            "url": "https://github.com/org/power.git",
+            "path": "ai-driving/my-power",
+        }])
+        # power 目录为空，触发初始化分支
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        power_dir.mkdir(parents=True)
+
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
+             patch("driving_cli.commands.power.ensure_submodule_initialized", return_value=True), \
+             patch("driving_cli.commands.power._set_submodule_ignore"), \
+             patch("driving_cli.commands.power._init_power_repos") as mock_init_repos:
+            result = runner.invoke(power_group, ["install"])
+
+        assert result.exit_code == 0
+        mock_init_repos.assert_called_once()
+        # 确认传入了正确的 power_dir
+        call_kwargs = mock_init_repos.call_args
+        assert call_kwargs[0][0] == power_dir  # 第一个位置参数是 power_dir
+
+    def test_no_args_skips_init_power_repos_when_already_initialized(self, runner, tmp_path):
+        """无参数 power install：power 已初始化时跳过，不调用 _init_power_repos"""
+        from driving_cli.commands.power import power_group
+
+        self._write_power_json(tmp_path, powers=[{
+            "name": "my-power", "type": "remote",
+            "url": "https://github.com/org/power.git",
+            "path": "ai-driving/my-power",
+        }])
+        # 目录非空，视为已初始化
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        power_dir.mkdir(parents=True)
+        (power_dir / "some_file.txt").write_text("content")
+
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.commands.power._init_power_repos") as mock_init_repos:
+            runner.invoke(power_group, ["install"])
+
+        mock_init_repos.assert_not_called()
+
+    # ---- 有参数模式（--url，新 clone）----
+
+    def test_url_new_clone_calls_init_power_repos(self, runner, tmp_path):
+        """--url 新 clone 完成且有 driving.config.json 时，应调用 _init_power_repos"""
+        from driving_cli.commands.power import power_group
+
+        power_dir = tmp_path / "ai-driving" / "my-power"
+
+        def fake_add_remote(entry, git_root):
+            # 模拟 clone：创建目录 + driving.config.json
+            self._write_driving_config(power_dir)
+
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
+             patch("driving_cli.commands.power.PowerManager.add_power_remote", side_effect=fake_add_remote), \
+             patch("driving_cli.commands.power._init_power_repos") as mock_init_repos:
+            result = runner.invoke(power_group, [
+                "install", "--url", "https://github.com/org/power.git", "--name", "my-power"
+            ])
+
+        assert result.exit_code == 0, result.output
+        mock_init_repos.assert_called_once()
+
+    def test_url_new_clone_no_config_skips_init_power_repos(self, runner, tmp_path):
+        """--url clone 完成但无 driving.config.json 时，不调用 _init_power_repos（仅给出提示）"""
+        from driving_cli.commands.power import power_group
+
+        power_dir = tmp_path / "ai-driving" / "my-power"
+
+        def fake_add_remote(entry, git_root):
+            # 模拟 clone：创建目录但无 driving.config.json
+            power_dir.mkdir(parents=True, exist_ok=True)
+
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
+             patch("driving_cli.commands.power.PowerManager.add_power_remote", side_effect=fake_add_remote), \
+             patch("driving_cli.commands.power._init_power_repos") as mock_init_repos:
+            result = runner.invoke(power_group, [
+                "install", "--url", "https://github.com/org/power.git", "--name", "my-power"
+            ])
+
+        mock_init_repos.assert_not_called()
+        assert "driving.config.json" in result.output or "repo install" in result.output
+
+    # ---- 有参数模式（--url，目录已存在但未注册）----
+
+    def test_url_existing_dir_registers_and_calls_init_power_repos(self, runner, tmp_path):
+        """--url 目录已存在但未注册：注册后有 config 时应调用 _init_power_repos"""
+        from driving_cli.commands.power import power_group
+
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        self._write_driving_config(power_dir)
+        # 不写 driving.power.json（未注册）
+
+        with patch("driving_cli.commands.power.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
+             patch("driving_cli.commands.power._init_power_repos") as mock_init_repos:
+            result = runner.invoke(power_group, [
+                "install", "--url", "https://github.com/org/power.git", "--name", "my-power"
+            ])
+
+        assert result.exit_code == 0, result.output
+        mock_init_repos.assert_called_once()
+
+    # ---- _init_power_repos 自身行为 ----
+
+    def test_init_power_repos_calls_init_repos_from_config(self, tmp_path):
+        """_init_power_repos：有 driving.config.json 时调用 init_repos_from_config"""
+        from driving_cli.commands.power import _init_power_repos
+
+        power_dir = tmp_path / "ai-driving" / "p1"
+        self._write_driving_config(power_dir, repos=[{
+            "name": "base", "type": "remote",
+            "url": "https://github.com/org/base.git",
+            "path": "ai-driving/base",
+        }])
+
+        entry = PowerEntry(name="p1", path="ai-driving/p1", url="https://github.com/org/p1.git")
+
+        with patch("driving_cli.utils.submodule_init.init_repos_from_config", return_value=1) as mock_init:
+            _init_power_repos(power_dir, entry, tmp_path, tmp_path)
+
+        mock_init.assert_called_once()
+        call_kwargs = mock_init.call_args
+        assert call_kwargs[0][0] == power_dir / CONFIG_FILE_NAME
+        assert call_kwargs.kwargs.get("power_entry") == entry
+
+    def test_init_power_repos_skips_when_no_config(self, tmp_path):
+        """_init_power_repos：无 driving.config.json 时不调用 init_repos_from_config"""
+        from driving_cli.commands.power import _init_power_repos
+
+        power_dir = tmp_path / "ai-driving" / "p1"
+        power_dir.mkdir(parents=True)
+        # 不写 driving.config.json
+
+        entry = PowerEntry(name="p1", path="ai-driving/p1", url="https://github.com/org/p1.git")
+
+        with patch("driving_cli.utils.submodule_init.init_repos_from_config") as mock_init:
+            _init_power_repos(power_dir, entry, tmp_path, tmp_path)
+
+        mock_init.assert_not_called()
+
+    def test_init_power_repos_logs_success_when_repos_initialized(self, tmp_path, capsys):
+        """_init_power_repos：init_repos_from_config 返回 >0 时打印成功日志"""
+        from driving_cli.commands.power import _init_power_repos
+
+        power_dir = tmp_path / "ai-driving" / "p1"
+        self._write_driving_config(power_dir)
+        entry = PowerEntry(name="p1", path="ai-driving/p1", url="https://github.com/org/p1.git")
+
+        with patch("driving_cli.utils.submodule_init.init_repos_from_config", return_value=2):
+            _init_power_repos(power_dir, entry, tmp_path, tmp_path)
+
+        captured = capsys.readouterr()
+        assert "2" in captured.out and ("初始化" in captured.out or "repo" in captured.out.lower())
+
+    def test_init_power_repos_exception_does_not_raise(self, tmp_path):
+        """_init_power_repos：内部异常时打印警告但不向上抛出"""
+        from driving_cli.commands.power import _init_power_repos
+
+        power_dir = tmp_path / "ai-driving" / "p1"
+        self._write_driving_config(power_dir)
+        entry = PowerEntry(name="p1", path="ai-driving/p1", url="https://github.com/org/p1.git")
+
+        with patch("driving_cli.utils.submodule_init.init_repos_from_config",
+                   side_effect=Exception("测试异常")):
+            # 不应抛出异常
+            _init_power_repos(power_dir, entry, tmp_path, tmp_path)

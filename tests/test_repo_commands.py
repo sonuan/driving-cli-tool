@@ -1475,3 +1475,96 @@ class TestCheckoutBranchSkipWhenAlreadyOnBranch:
             _checkout_branch_after_install(repo_dir, "main", "develop")
 
         mock_repo.git.checkout.assert_called_once_with("develop")
+
+
+# ==================== repo install 无参数模式前的 power 初始化测试 ====================
+
+
+class TestRepoInstallNoArgsPowerInit:
+    """验证 driving repo install（无参数）在 Power 模式下，会先调用 init_powers 确保 power 就绪"""
+
+    def _write_power_json(self, project_root: Path, powers: list):
+        (project_root / "driving.power.json").write_text(
+            json.dumps({"powers": powers}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    def test_power_mode_calls_init_powers_before_install(self, runner, tmp_project):
+        """Power 模式下，无参数 install 应先调用 init_powers"""
+        self._write_power_json(tmp_project, powers=[{
+            "name": "my-power", "type": "remote",
+            "url": "https://github.com/org/power.git",
+            "path": "ai-driving/my-power",
+        }])
+
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.utils.submodule_init.init_powers") as mock_init_powers, \
+             patch("driving_cli.commands.repo._install_all_uninitialized") as mock_install_all:
+            mock_init_powers.return_value = 0
+            result = runner.invoke(repo_group, ["install"])
+
+        assert result.exit_code == 0
+        mock_init_powers.assert_called_once()
+        mock_install_all.assert_called_once()
+
+        # init_powers 应早于 _install_all_uninitialized 被调用
+        init_powers_call_idx = list(mock_init_powers.call_args_list)
+        install_all_call_idx = list(mock_install_all.call_args_list)
+        assert len(init_powers_call_idx) == 1
+        assert len(install_all_call_idx) == 1
+
+    def test_non_power_mode_does_not_call_init_powers(self, runner, tmp_project):
+        """传统模式（无 driving.power.json）下，不调用 init_powers"""
+        # tmp_project 只有 driving.config.json，无 driving.power.json
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.utils.submodule_init.init_powers") as mock_init_powers, \
+             patch("driving_cli.commands.repo._install_all_uninitialized"):
+            runner.invoke(repo_group, ["install"])
+
+        mock_init_powers.assert_not_called()
+
+    def test_init_powers_failure_does_not_block_install(self, runner, tmp_project, config_mgr):
+        """init_powers 抛异常时，不应阻断后续 repo install 流程"""
+        self._write_power_json(tmp_project, powers=[{
+            "name": "my-power", "type": "remote",
+            "url": "https://github.com/org/power.git",
+            "path": "ai-driving/my-power",
+        }])
+        config_mgr.add_repo(RepoConfig(
+            name="main", type="remote",
+            url="https://github.com/org/repo.git",
+            path="ai-driving/main",
+        ))
+
+        mock_git_repo = MagicMock()
+
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.git.Repo", return_value=mock_git_repo), \
+             patch("driving_cli.utils.submodule_init.init_powers", side_effect=Exception("网络超时")):
+            result = runner.invoke(repo_group, ["install"])
+
+        # init_powers 失败后，install 流程仍应继续（不 crash）
+        assert result.exit_code == 0
+
+    def test_install_with_url_does_not_call_init_powers(self, runner, tmp_project):
+        """有参数（--url）模式下，不调用 init_powers（只在无参数时需要）"""
+        self._write_power_json(tmp_project, powers=[{
+            "name": "my-power", "type": "remote",
+            "url": "https://github.com/org/power.git",
+            "path": "ai-driving/my-power",
+        }])
+
+        mock_git_repo = MagicMock()
+        with patch("driving_cli.commands.repo.find_project_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.find_git_root", return_value=tmp_project), \
+             patch("driving_cli.commands.repo.git.Repo", return_value=mock_git_repo), \
+             patch("driving_cli.commands.repo._cleanup_stale_git_modules"), \
+             patch("driving_cli.commands.repo._set_submodule_ignore"), \
+             patch("driving_cli.utils.submodule_init.init_powers") as mock_init_powers:
+            runner.invoke(repo_group, [
+                "install", "--url", "https://github.com/org/new-repo.git", "--name", "new-repo"
+            ])
+
+        mock_init_powers.assert_not_called()

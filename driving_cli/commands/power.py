@@ -5,6 +5,7 @@ Power 模式允许将多个目录下的 driving.config.json 合并使用，解�
 """
 
 import json as _json
+from pathlib import Path
 from typing import Optional
 
 import click
@@ -185,6 +186,7 @@ def power_install(
             # 检查 driving.config.json
             if config_json_path.exists():
                 log_success("driving.config.json 已就绪，power 配置完整 ✓")
+                _init_power_repos(abs_install_path, entry, project_root, git_root)
                 return
             # 没有 driving.config.json，fall through 到情况 3 提示
 
@@ -206,6 +208,7 @@ def power_install(
             log_success(f"Power '{power_name}' 已注册到 driving.power.json")
             if config_json_path.exists():
                 log_success("driving.config.json 已就绪，power 配置完整 ✓")
+                _init_power_repos(abs_install_path, entry, project_root, git_root)
                 return
             # 没有 driving.config.json，fall through 到情况 3 提示
 
@@ -234,6 +237,36 @@ def power_install(
         raise click.Abort()
 
     log_success(f"本地 power '{power_name}' 已安装（路径：{power_path}）")
+
+
+def _init_power_repos(
+    power_dir: Path,
+    entry: PowerEntry,
+    project_root: Path,
+    git_root: Path,
+) -> None:
+    """power install 完成后，检查该 power 下的 repos 是否需要初始化。
+
+    仅在 driving.config.json 存在时执行，失败时打印警告但不中断主流程。
+    """
+    from driving_cli.utils.config_manager import CONFIG_FILE_NAME
+    from driving_cli.utils.submodule_init import init_repos_from_config
+
+    config_path = power_dir / CONFIG_FILE_NAME
+    if not config_path.exists():
+        return
+    try:
+        count = init_repos_from_config(
+            config_path,
+            project_root,
+            git_root,
+            power_entry=entry,
+            verbose=True,
+        )
+        if count > 0:
+            log_success(f"已自动初始化 {count} 个 repo")
+    except Exception as e:
+        log_warning(f"检查 power '{entry.name}' 下的 repo 时出错：{e}")
 
 
 def _install_all_uninitialized(pm: PowerManager, project_root):
@@ -306,8 +339,11 @@ def _install_all_uninitialized(pm: PowerManager, project_root):
         if ok:
             _set_submodule_ignore(git_root, submodule_path)
             initialized_count += 1
+            # 初始化完成后，检查该 power 下的 repos
+            power_dir = project_root / entry.path
+            _init_power_repos(power_dir, entry, project_root, git_root)
 
-    log_info(f"完成：初始化 {initialized_count} 个，跳过 {skipped_count} 个")
+    log_info(f"完成：power 初始化 {initialized_count} 个，跳过 {skipped_count} 个")
 
 
 # ==================== power pull ====================

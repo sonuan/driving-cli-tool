@@ -158,7 +158,7 @@ def ensure_submodule_initialized(
         git_repo.git.submodule("update", "--init", rel_path)
         log_success(f"{label} 初始化成功")
         if branch:
-            checkout_branch_after_install(project_root / rel_path, label, branch)
+            checkout_branch_after_install(git_root / rel_path, label, branch)
         return True
     except git.exc.GitCommandError as update_err:
         stderr_msg = update_err.stderr.strip() if update_err.stderr else str(update_err)
@@ -188,7 +188,7 @@ def ensure_submodule_initialized(
         git_repo.git.submodule("add", "--force", url, rel_path)
         log_success(f"{label} 添加并初始化成功")
         if branch:
-            checkout_branch_after_install(project_root / rel_path, label, branch)
+            checkout_branch_after_install(git_root / rel_path, label, branch)
         return True
     except git.exc.GitCommandError as add_err:
         stderr_msg = add_err.stderr.strip() if add_err.stderr else str(add_err)

@@ -1747,3 +1747,110 @@ class TestLoadOpReporter:
         assert result.exit_code == 0
         call_kwargs = mock_report.call_args.kwargs
         assert call_kwargs.get("extra", {}).get("platform") == "android"
+
+
+# ==================== _out 静默行为测试 ====================
+
+
+class TestSubmoduleInitOut:
+    """验证 submodule_init._out 在 verbose=False（load 静默模式）下的输出行为：
+    - info 级别：完全静默，不写任何输出
+    - warning 级别：写 stderr
+    - error 级别：写 stderr
+    """
+
+    def _collect_echo_calls(self, fn):
+        """执行 fn，收集所有 click.echo 的调用参数，返回 (messages, file_args)"""
+        messages = []
+        file_args = []
+
+        def fake_echo(msg, **kw):
+            messages.append(str(msg))
+            file_args.append(kw.get("file"))
+
+        with patch("click.echo", side_effect=fake_echo):
+            fn()
+        return messages, file_args
+
+    def test_info_silent_mode_produces_no_output(self):
+        """verbose=False 时 info 级别不写任何输出（包括 stderr）"""
+        from driving_cli.utils.submodule_init import _out
+
+        messages, _ = self._collect_echo_calls(
+            lambda: _out("正在初始化 power 'xxx'...", verbose=False, level="info")
+        )
+        assert messages == [], f"info 在静默模式下不应有任何输出，实际：{messages}"
+
+    def test_warning_silent_mode_writes_stderr(self):
+        """verbose=False 时 warning 级别写 stderr，前缀包含'警告'"""
+        import sys
+        from driving_cli.utils.submodule_init import _out
+
+        messages, file_args = self._collect_echo_calls(
+            lambda: _out("power 缺少 driving.config.json", verbose=False, level="warning")
+        )
+        assert len(messages) == 1
+        assert "警告" in messages[0]
+        assert file_args[0] is sys.stderr
+
+    def test_error_silent_mode_writes_stderr(self):
+        """verbose=False 时 error 级别写 stderr，前缀包含'错误'"""
+        import sys
+        from driving_cli.utils.submodule_init import _out
+
+        messages, file_args = self._collect_echo_calls(
+            lambda: _out("切换分支失败", verbose=False, level="error")
+        )
+        assert len(messages) == 1
+        assert "错误" in messages[0]
+        assert file_args[0] is sys.stderr
+
+    def test_info_verbose_mode_calls_log_info(self):
+        """verbose=True 时 info 级别调用 log_info（交互式命令正常输出）"""
+        from driving_cli.utils.submodule_init import _out
+
+        with patch("driving_cli.utils.submodule_init._out.__module__"):
+            pass  # 仅确保不抛异常，下面用 log_info mock 验证
+
+        with patch("driving_cli.utils.logger.log_info") as mock_log_info, \
+             patch("driving_cli.utils.logger._silent", False):
+            _out("正在初始化", verbose=True, level="info")
+
+        mock_log_info.assert_called_once_with("正在初始化")
+
+    def test_init_powers_silent_mode_no_info_output(self, tmp_path):
+        """_init_unloaded_submodules 调用 init_powers(verbose=False) 时，
+        info 消息不打印到任何输出流（模拟 driving load 场景）"""
+        from driving_cli.commands.load import _init_unloaded_submodules
+        from driving_cli.utils.config_manager import POWER_FILE_NAME
+
+        # 写 driving.power.json，包含一个已就绪的 remote power（非空目录，走 _ensure_power_config）
+        power_dir = tmp_path / "ai-driving" / "my-power"
+        power_dir.mkdir(parents=True)
+        (power_dir / "driving.config.json").write_text(
+            json.dumps({"version": "2", "repos": [], "default_commit_message": "u",
+                        "update_version_url": ""}),
+            encoding="utf-8",
+        )
+        (tmp_path / POWER_FILE_NAME).write_text(
+            json.dumps({"powers": [{"name": "my-power", "type": "remote",
+                                    "url": "https://github.com/org/p.git",
+                                    "path": "ai-driving/my-power"}]}),
+            encoding="utf-8",
+        )
+
+        mock_repo = MagicMock()
+        mock_repo.head.is_detached = False
+        mock_repo.active_branch.name = "main"
+        mock_repo.remotes.__bool__ = lambda self: False
+
+        echo_calls = []
+        with patch("driving_cli.commands.load.find_project_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.find_git_root", return_value=tmp_path), \
+             patch("driving_cli.utils.git_helper.git.Repo", return_value=mock_repo), \
+             patch("click.echo", side_effect=lambda msg, **kw: echo_calls.append(str(msg))):
+            _init_unloaded_submodules()
+
+        # 不应有 "[driving] 正在初始化..." 这类 info 消息混入输出
+        info_msgs = [m for m in echo_calls if "正在初始化" in m and "[DEBUG" not in m]
+        assert info_msgs == [], f"不应有 info 消息输出到 echo，实际：{info_msgs}"

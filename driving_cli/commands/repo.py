@@ -151,8 +151,16 @@ def install(
         # 传统模式
         config_mgr = ConfigManager(project_root)
 
-    # 无参数模式：初始化所有未初始化的远程仓库
+    # 无参数模式：先确保 power 层就绪，再初始化 repos
     if url is None and local_path is None:
+        if pm.exists():
+            try:
+                git_root = find_git_root(project_root)
+                from driving_cli.utils.submodule_init import init_powers
+
+                init_powers(project_root, git_root, verbose=True)
+            except Exception:
+                pass  # power 初始化失败不阻断 repo install
         _install_all_uninitialized(config_mgr, project_root)
         return
 
@@ -337,7 +345,7 @@ def _install_all_uninitialized(config_mgr: ConfigManager, project_root: Path):
             _set_submodule_ignore(git_root, submodule_path)
             initialized_count += 1
 
-    log_info(f"完成：初始化 {initialized_count} 个，跳过 {skipped_count} 个")
+    log_info(f"完成：repo 初始化 {initialized_count} 个，跳过 {skipped_count} 个")
 
 
 def _migrate_local_to_remote(

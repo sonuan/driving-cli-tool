@@ -189,12 +189,11 @@ def _init_unloaded_submodules() -> None:
     3. 检查传统模式下的 repos（driving.config.json）
 
     仅在 --debug 模式下输出日志，非 debug 模式静默执行。
+    逻辑实现委托给 driving_cli.utils.submodule_init。
     """
-    from driving_cli.utils.git_helper import checkout_branch_after_install as _checkout_branch
-    from driving_cli.utils.git_helper import (
-        ensure_submodule_initialized,
-        find_git_root,
-    )
+    from driving_cli.utils.config_manager import CONFIG_FILE_NAME, POWER_FILE_NAME
+    from driving_cli.utils.git_helper import find_git_root
+    from driving_cli.utils.submodule_init import init_powers, init_repos_from_config
 
     _dbg("开始检测未初始化的 submodule ...")
     t = time.perf_counter()
@@ -205,183 +204,19 @@ def _init_unloaded_submodules() -> None:
         _dbg(f"find_project_root 失败：{e}")
         return
 
-    # load 场景下 project_root 即 git 根目录（常见部署方式）
     try:
         git_root = find_git_root(project_root)
     except Exception as e:
         _dbg(f"find_git_root 失败：{e}")
         return
 
-    def _needs_init(path: Path) -> bool:
-        """目录不存在，或存在但为空——两种情况都需要初始化"""
-        if not path.exists():
-            return True
-        return path.is_dir() and not any(path.iterdir())
-
-    def _ensure_power_config(power_dir: Path, entry) -> None:
-        """确保 power 处于正确的分支并检查 driving.config.json。
-
-        分支解析优先级（通过 entry.get_load_branch() 处理）：
-        1. entry.repo_config[entry.name].branch
-        2. entry.branch
-        3. 无配置 → 仅在 config 缺失时打印警告
-
-        切换分支失败时报错（error），不中断其他 power 的处理。
-        """
-        import git as _git
-
-        from driving_cli.utils.config_manager import CONFIG_FILE_NAME
-
-        config_path = power_dir / CONFIG_FILE_NAME
-        label = f"power '{entry.name}'"
-
-        effective_branch = entry.get_load_branch()
-
-        if effective_branch:
-            _dbg(f"  {label} 目标分支 '{effective_branch}'，检查并切换...")
-            try:
-                repo = _git.Repo(power_dir)
-                # 已在目标分支则跳过
-                try:
-                    if not repo.head.is_detached and repo.active_branch.name == effective_branch:
-                        _dbg(f"  {label} 已在分支 '{effective_branch}'，跳过切换")
-                        if not config_path.exists():
-                            click.echo(
-                                f"[driving load] 警告：{label} 缺少 driving.config.json",
-                                file=sys.stderr,
-                            )
-                        return
-                except Exception:
-                    pass
-                if repo.remotes:
-                    try:
-                        repo.remotes.origin.fetch()
-                    except _git.exc.GitCommandError:
-                        pass
-                repo.git.checkout(effective_branch)
-                _dbg(f"  {label} 已切换到分支 '{effective_branch}'")
-            except _git.exc.GitCommandError as e:
-                err_msg = e.stderr.strip() if e.stderr else str(e)
-                click.echo(
-                    f"[driving load] 错误：{label} 切换到分支 '{effective_branch}' 失败：{err_msg}",
-                    file=sys.stderr,
-                )
-                return
-            except Exception as e:
-                click.echo(
-                    f"[driving load] 错误：{label} 切换到分支 '{effective_branch}' 失败：{e}",
-                    file=sys.stderr,
-                )
-                return
-            if not config_path.exists():
-                click.echo(
-                    f"[driving load] 警告：{label} 切换到分支 '{effective_branch}' 后仍缺少 driving.config.json",
-                    file=sys.stderr,
-                )
-        else:
-            if not config_path.exists():
-                hint = "建议在 driving.power.json 中为该 power 配置 branch 字段以自动切换。"
-                _dbg(f"  {label} 缺少 driving.config.json，{hint}")
-                click.echo(
-                    f"[driving load] 警告：{label} 缺少 driving.config.json，"
-                    f"可能位于错误的分支。{hint}",
-                    file=sys.stderr,
-                )
-
-    def _init_repos_from_config(config_path: Path, context_label: str, power_entry=None) -> None:
-        """从指定的 driving.config.json 检测并初始化未加载的 repos，
-        并对所有 remote repo 执行 repo_config 指定的分支切换。
-
-        power_entry: 对应的 PowerEntry，用于查询 repo_config 分支覆盖配置。
-                     为 None 时（传统模式）不执行分支切换。
-        """
-        import git as _git
-
-        if not config_path.exists():
-            return
-        try:
-            data = json.loads(config_path.read_text(encoding="utf-8"))
-            repos = data.get("repos", [])
-        except Exception as e:
-            _dbg(f"  读取 {context_label} driving.config.json 失败：{e}")
-            return
-
-        for repo in repos:
-            repo_path_str = repo.get("path", "")
-            repo_name = repo.get("name", repo_path_str)
-            repo_type = repo.get("type", "remote")
-            repo_url = repo.get("url", "")
-            repo_branch = repo.get("branch", "")
-            if repo_type != "remote" or not repo_path_str:
-                continue
-
-            # 计算相对于 git_root 的路径
-            try:
-                rel_path = str((project_root / repo_path_str).relative_to(git_root))
-            except ValueError:
-                rel_path = repo_path_str
-
-            repo_dir = project_root / repo_path_str
-            label = f"repo '{repo_name}'"
-
-            if _needs_init(repo_dir):
-                _dbg(f"  检测到未初始化的 repo '{repo_name}'（{repo_path_str}），正在初始化...")
-                ensure_submodule_initialized(
-                    project_root=project_root,
-                    git_root=git_root,
-                    rel_path=rel_path,
-                    url=repo_url,
-                    branch=repo_branch,
-                    label=label,
-                )
-            else:
-                # 目录已就绪：检查分支是否需要切换
-                # Power 模式：优先取 repo_config[repo_name].branch，fallback 到 driving.config.json 里的 repo.branch
-                # 传统模式：直接取 driving.config.json 里的 repo.branch
-                target_branch = (
-                    power_entry.get_repo_load_branch(repo_name) if power_entry is not None else None
-                ) or repo_branch
-                if not target_branch:
-                    continue
-                _dbg(f"  {label} 目标分支 '{target_branch}'，检查并切换...")
-                try:
-                    repo_git = _git.Repo(repo_dir)
-                    try:
-                        if (
-                            not repo_git.head.is_detached
-                            and repo_git.active_branch.name == target_branch
-                        ):
-                            _dbg(f"  {label} 已在分支 '{target_branch}'，跳过切换")
-                            continue
-                    except Exception:
-                        pass
-                    if repo_git.remotes:
-                        try:
-                            repo_git.remotes.origin.fetch()
-                        except _git.exc.GitCommandError:
-                            pass
-                    repo_git.git.checkout(target_branch)
-                    _dbg(f"  {label} 已切换到分支 '{target_branch}'")
-                except _git.exc.GitCommandError as e:
-                    err_msg = e.stderr.strip() if e.stderr else str(e)
-                    click.echo(
-                        f"[driving load] 错误：{label} 切换到分支 '{target_branch}' 失败：{err_msg}",
-                        file=sys.stderr,
-                    )
-                except Exception as e:
-                    click.echo(
-                        f"[driving load] 错误：{label} 切换到分支 '{target_branch}' 失败：{e}",
-                        file=sys.stderr,
-                    )
-
     # ---- 1. Power 模式检测 ----
-    from driving_cli.utils.config_manager import CONFIG_FILE_NAME, POWER_FILE_NAME, PowerManager
-
     power_file = project_root / POWER_FILE_NAME
-
     if power_file.exists():
         _dbg("检测到 Power 模式，开始检测 power submodule ...")
         try:
+            from driving_cli.utils.config_manager import PowerManager
+
             pm = PowerManager(project_root)
             power_cfg = pm.load_power_config()
         except Exception as e:
@@ -389,49 +224,27 @@ def _init_unloaded_submodules() -> None:
             power_cfg = None
 
         if power_cfg:
+            n = init_powers(project_root, git_root, verbose=False)
+            _dbg(f"  power 初始化完成，新增 {n} 个")
             for entry in power_cfg.powers:
                 if entry.type != "remote":
                     continue
                 power_dir = project_root / entry.path
-
-                # 计算相对于 git_root 的路径
-                try:
-                    rel_path = str((project_root / entry.path).relative_to(git_root))
-                except ValueError:
-                    rel_path = entry.path
-
-                if _needs_init(power_dir):
-                    _dbg(f"检测到未初始化的 power '{entry.name}'（{entry.path}），正在初始化...")
-                    ok = ensure_submodule_initialized(
-                        project_root=project_root,
-                        git_root=git_root,
-                        rel_path=rel_path,
-                        url=entry.url or "",
-                        branch=entry.branch or "",
-                        label=f"power '{entry.name}'",
-                    )
-                    if ok:
-                        _ensure_power_config(power_dir, entry)
-                        _init_repos_from_config(
-                            power_dir / CONFIG_FILE_NAME,
-                            f"power '{entry.name}'",
-                            power_entry=entry,
-                        )
-                else:
-                    _ensure_power_config(power_dir, entry)
-                    _init_repos_from_config(
-                        power_dir / CONFIG_FILE_NAME,
-                        f"power '{entry.name}'",
-                        power_entry=entry,
-                    )
+                n_repo = init_repos_from_config(
+                    power_dir / CONFIG_FILE_NAME,
+                    project_root,
+                    git_root,
+                    power_entry=entry,
+                    verbose=False,
+                )
+                _dbg(f"  power '{entry.name}' 下 repo 初始化完成，新增 {n_repo} 个")
 
     # ---- 2. 传统模式：检测根目录 driving.config.json 下的 repos ----
-    from driving_cli.utils.config_manager import CONFIG_FILE_NAME as _CFG
-
-    root_config = project_root / _CFG
+    root_config = project_root / CONFIG_FILE_NAME
     if root_config.exists():
         _dbg("检测传统模式 repos ...")
-        _init_repos_from_config(root_config, "传统模式")
+        n = init_repos_from_config(root_config, project_root, git_root, verbose=False)
+        _dbg(f"  传统模式 repo 初始化完成，新增 {n} 个")
 
     _dbg(f"submodule 初始化检测完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
 
