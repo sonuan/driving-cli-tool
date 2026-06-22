@@ -101,15 +101,27 @@ class TestConfigManagerLoad:
     """ConfigManager.load() 方法测试"""
 
     def test_creates_default_config_when_file_missing(self, tmp_path):
-        """配置文件不存在时自动创建默认配置"""
+        """配置文件不存在时返回默认配置，但不写磁盘"""
         mgr = ConfigManager(tmp_path)
         config = mgr.load()
 
         assert config.version == "2"
         assert config.repos == []
         assert config.default_commit_message == "update by driving"
-        # 配置文件应已被创建
+        # load() 不应创建文件，文件应在首次写操作时才落盘
+        assert not (tmp_path / CONFIG_FILE_NAME).exists()
+
+    def test_config_file_created_on_first_write(self, tmp_path):
+        """配置文件不存在时，首次写操作（add_repo）才创建文件"""
+        mgr = ConfigManager(tmp_path)
+        mgr.load()
+        assert not (tmp_path / CONFIG_FILE_NAME).exists()
+
+        mgr.add_repo(make_repo("first"))
         assert (tmp_path / CONFIG_FILE_NAME).exists()
+        reloaded = ConfigManager(tmp_path).load()
+        assert len(reloaded.repos) == 1
+        assert reloaded.repos[0].name == "first"
 
     def test_loads_existing_config(self, tmp_path):
         """正常加载已存在的配置文件"""

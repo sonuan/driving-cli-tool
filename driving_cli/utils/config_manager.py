@@ -570,14 +570,14 @@ class ConfigManager:
 
         # 传统模式
         if not self._config_file.exists():
-            # 配置文件不存在，创建默认配置
+            # 配置文件不存在，返回默认配置对象，不写磁盘
+            # 文件将在首次写操作（save/add_repo 等）时由 save() 创建
             default_config = DrivingConfig(
                 version=DEFAULT_VERSION,
                 repos=[],
                 default_commit_message=DEFAULT_COMMIT_MESSAGE,
                 update_version_url=DEFAULT_UPDATE_VERSION_URL,
             )
-            self.save(default_config)
             self._config = default_config
             return default_config
 
