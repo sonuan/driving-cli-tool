@@ -1,10 +1,12 @@
 {
-  "version": "1.3.9",
-  "build_date": "2026-06-23T16:15:23+08:00",
+  "version": "1.4.0",
+  "build_date": "2026-06-23T16:53:57+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
+      "v1.4.0",
+      "feat：修复driving refine commit对其他暂存区的代码也提交的问题",
       "v1.3.8",
       "feat：1. 在 driving repo install 前，执行一下和driving load里面相似的逻辑，即对power执行初始化检查； 2. 在 driving power install 之后，执行一下当前power下的repo的检查；",
       "feat：在driving load时，git失败的情况下，不要保存.json",
@@ -12,8 +14,6 @@
       "feat：driving gate check 没有self_checks也要显示command",
       "feat：driving gate check 返回值新增 command 字段，优化user_prompt文案",
       "feat：driving gate check 门禁自查调整为字符串数组",
-      "feat：driving refine commit修改直接commit和push；新增driving refine report命令（待使用）",
-      "feat：添加门禁前置自检能力",
-      "refactor: move CI build logic to script"
+      "feat：driving refine commit修改直接commit和push；新增driving refine report命令（待使用）"
   ]
 }
