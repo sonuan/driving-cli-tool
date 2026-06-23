@@ -352,6 +352,26 @@ class TestRefineCommit:
         assert result.exit_code == 0
         assert "没有需要提交" in result.output
 
+    def test_绝对路径自动规范化为相对路径(self, tmp_path):
+        """传入绝对路径时应自动转换为相对路径，不会被误判为无变更。"""
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        mock_repo.iter_commits.return_value = []
+        abs_path = str(tmp_path / "ai-driving" / "driving" / "refines" / "2026-04-10-skill-foo.md")
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    result = runner.invoke(cli, ["refine", "commit", "driving",
+                                                 "--file", abs_path])
+        assert result.exit_code == 0
+        # 应正常执行 add 和 commit，而不是跳过
+        mock_repo.git.add.assert_called_once()
+        mock_repo.git.commit.assert_called_once()
+        added_files = mock_repo.git.add.call_args[0][0]
+        assert "refines/2026-04-10-skill-foo.md" in added_files
+
     def test_文件已追踪时跳过(self, tmp_path):
         self._setup(tmp_path)
         runner = CliRunner()
@@ -391,8 +411,8 @@ class TestRefineCommit:
                          "--file", "agents/android-review-workflow/MEMORY.md"],
                     )
         assert result.exit_code == 0
-        mock_repo.index.add.assert_called_once()
-        added_files = mock_repo.index.add.call_args[0][0]
+        mock_repo.git.add.assert_called_once()
+        added_files = mock_repo.git.add.call_args[0][0]
         assert "agents/android-review-workflow/MEMORY.md" in added_files
 
     def test_用户取消确认时退出(self, tmp_path):
@@ -411,10 +431,10 @@ class TestRefineCommit:
                     result = runner.invoke(cli, ["refine", "commit", "driving",
                                                  "--file", "refines/2026-04-10-skill-foo.md"])
         assert result.exit_code == 0
-        mock_repo.index.add.assert_called_once()
-        mock_repo.index.commit.assert_called_once()
-        added_files = mock_repo.index.add.call_args[0][0]
-        assert added_files == ["refines/2026-04-10-skill-foo.md"]
+        mock_repo.git.add.assert_called_once()
+        mock_repo.git.commit.assert_called_once()
+        added_files = mock_repo.git.add.call_args[0][0]
+        assert "refines/2026-04-10-skill-foo.md" in added_files
 
     def test_commit_message使用文件名(self, tmp_path):
         self._setup(tmp_path)
@@ -427,7 +447,9 @@ class TestRefineCommit:
                 with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
                     runner.invoke(cli, ["refine", "commit", "driving",
                                         "--file", "refines/2026-04-10-skill-foo.md"])
-        message = mock_repo.index.commit.call_args[0][0]
+        # git.commit("-m", message, "--", *files)
+        commit_args = mock_repo.git.commit.call_args[0]
+        message = commit_args[1]  # 第二个位置参数是 message
         assert message.startswith("refine(driving):")
         assert "2026-04-10-skill-foo.md" in message
 
@@ -487,7 +509,7 @@ class TestRefineCommit:
                          "--file", "REFINE_LOG.md"],
                     )
         assert result.exit_code == 0
-        added_files = mock_repo.index.add.call_args[0][0]
+        added_files = mock_repo.git.add.call_args[0][0]
         assert len(added_files) == 2
         assert "refines/2026-04-10-skill-foo.md" in added_files
         assert "REFINE_LOG.md" in added_files
@@ -504,8 +526,37 @@ class TestRefineCommit:
                     result = runner.invoke(cli, ["refine", "commit", "driving",
                                                  "--file", "REFINE_LOG.md"])
         assert result.exit_code == 0
-        added_files = mock_repo.index.add.call_args[0][0]
+        added_files = mock_repo.git.add.call_args[0][0]
         assert "REFINE_LOG.md" in added_files
+
+    def test_暂存区无关文件不参与commit(self, tmp_path):
+        """使用 git commit -- <files> 方式，暂存区其他文件不会被提交，也不会被 reset。"""
+        self._setup(tmp_path)
+        runner = CliRunner()
+        mock_repo = self._make_mock_repo()
+        mock_repo.iter_commits.return_value = []
+
+        # 暂存区中已有额外文件（模拟用户手动 git add 过）
+        target_item = type("D", (), {"a_path": "refines/2026-04-10-skill-foo.md"})()
+        extra_item = type("D", (), {"a_path": "some/other/file.md"})()
+        mock_repo.index.diff.side_effect = lambda ref: (
+            [] if ref is None else [target_item, extra_item]
+        )
+
+        with patch("driving_cli.utils.config_manager.find_project_root", return_value=tmp_path):
+            with patch("driving_cli.commands.refine.ConfigManager") as mock_cm_cls:
+                self._mock_cm(mock_cm_cls, tmp_path)
+                with patch("driving_cli.commands.refine.git.Repo", return_value=mock_repo):
+                    result = runner.invoke(cli, ["refine", "commit", "driving",
+                                                 "--file", "refines/2026-04-10-skill-foo.md"])
+
+        assert result.exit_code == 0
+        # 不应调用 index.reset（不修改暂存区）
+        mock_repo.index.reset.assert_not_called()
+        # git commit 应带上 -- <file> 路径参数，确保只提交指定文件
+        commit_args = mock_repo.git.commit.call_args[0]
+        assert "refines/2026-04-10-skill-foo.md" in commit_args
+        assert "some/other/file.md" not in commit_args
 
 
 # ==================== driving refine log ====================

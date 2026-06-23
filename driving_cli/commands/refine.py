@@ -393,6 +393,8 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
 
         valid_files = []
         for fp in file_paths:
+            # 规范化为相对于仓库根目录的路径（兼容绝对路径、含前缀路径、纯文件名）
+            fp = _normalize_refine_path(fp, repo_dir)
             abs_path = repo_dir / fp
             if not abs_path.exists():
                 log_warning(f"文件不存在，跳过：{fp}")
@@ -418,17 +420,17 @@ def refine_commit(repo_name: str, no_push: bool, file_paths: tuple):
             summary += f" 等 {len(file_names)} 个文件"
         commit_message = f"refine({repo_name}): {summary}"
 
-        # git add
+        # git add + commit，只提交 valid_files 指定的文件，不触碰暂存区其他内容
         try:
-            repo.index.add(valid_files)
+            repo.git.add(valid_files)
             log_info(f"已暂存 {len(valid_files)} 个文件")
         except Exception as e:
             log_error(f"git add 失败: {e}")
             raise click.Abort()
 
-        # git commit
+        # git commit -- <files>：只提交指定路径，忽略暂存区中的其他文件
         try:
-            repo.index.commit(commit_message)
+            repo.git.commit("-m", commit_message, "--", *valid_files)
             log_success(f"已提交：{commit_message}")
         except Exception as e:
             log_error(f"git commit 失败: {e}")
@@ -526,8 +528,10 @@ def _normalize_refine_path(fp: str, repo_dir: Path) -> str:
     except StopIteration:
         pass
 
-    # 如果只传了文件名（无目录），自动补充 refines/ 前缀
+    # 如果只传了文件名（无目录），先检查仓库根目录是否存在，存在则不加前缀
     if len(p.parts) == 1 and p.suffix == ".md":
+        if (repo_dir / fp).exists():
+            return fp
         return f"refines/{fp}"
 
     return fp
