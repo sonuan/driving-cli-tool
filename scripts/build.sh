@@ -153,7 +153,7 @@ fi
 
 # 2. 清理旧的构建文件
 print_step "2. 清理旧的构建文件..."
-rm -rf build ${DIST_DIR} *.spec
+rm -rf build ${DIST_DIR}
 print_info "清理完成 (输出目录: ${DIST_DIR})"
 
 # 3. 设置默认更新地址（如果指定了 --version-url）
