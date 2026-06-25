@@ -3,6 +3,8 @@
 覆盖：
 - _build_notifications：无可更新仓库时返回空字符串
 - _check_cli_update：有新版本时返回提示、无新版本/异常时返回空字符串
+- _has_local_changes：检测本地变更逻辑
+- _check_and_pull_repos：脏仓库跳过拉取并生成 dirty_msg
 - load 命令：输出结构、必需字段、repos 始终全量、keywords 透传
 """
 
@@ -14,7 +16,12 @@ import pytest
 from click.testing import CliRunner
 
 from driving_cli.cli import cli
-from driving_cli.commands.load import _build_notifications, _check_cli_update
+from driving_cli.commands.load import (
+    _build_notifications,
+    _check_and_pull_repos,
+    _check_cli_update,
+    _has_local_changes,
+)
 from driving_cli.models.config import DrivingConfig, RepoConfig
 from driving_cli.utils.config_manager import ConfigManager
 
@@ -63,19 +70,33 @@ class TestBuildNotifications:
         repo = mgr.get_repo("driving")
         with patch("driving_cli.commands.load._collect_updatable", return_value=(tmp_project, [repo], [], [], [])), \
              patch("driving_cli.commands.load.fetch_version_info", return_value=None):
-            from driving_cli.commands.load import _check_and_pull_repos
-            repo_msg = _check_and_pull_repos()
-            result = _build_notifications(repo_msg)
+            repo_msg, dirty_msg = _check_and_pull_repos()
+            result = _build_notifications(repo_msg, dirty_msg)
         assert "driving" in result
         assert "driving repo pull" in result
 
     def test_异常时返回空字符串(self):
         with patch("driving_cli.commands.load._collect_updatable", side_effect=Exception("网络错误")), \
              patch("driving_cli.commands.load.fetch_version_info", return_value=None):
-            from driving_cli.commands.load import _check_and_pull_repos
-            repo_msg = _check_and_pull_repos()
-            result = _build_notifications(repo_msg)
+            repo_msg, dirty_msg = _check_and_pull_repos()
+            result = _build_notifications(repo_msg, dirty_msg)
         assert result == ""
+
+    def test_脏仓库通知出现在notifications中(self, tmp_project):
+        """auto_pull 仓库有本地变更时，dirty_msg 应出现在 notifications"""
+        mgr = ConfigManager(tmp_project)
+        repo = mgr.get_repo("driving")
+        # 设置为 auto_pull 仓库（check_sample_rate=-1）
+        repo.check_sample_rate = -1
+        with patch("driving_cli.commands.load._collect_updatable",
+                   return_value=(tmp_project, [repo], [], [repo], [(repo.name, -1, True, None)])), \
+             patch("driving_cli.commands.load._has_local_changes", return_value=True), \
+             patch("driving_cli.commands.load.fetch_version_info", return_value=None):
+            repo_msg, dirty_msg = _check_and_pull_repos()
+            result = _build_notifications(repo_msg, dirty_msg)
+        assert "本地变更" in result
+        assert "driving" in result
+        assert "driving repo pull" in result
 
 
 # ==================== _check_cli_update ====================
@@ -115,13 +136,94 @@ class TestCheckCliUpdate:
              patch("driving_cli.commands.load.fetch_version_info", return_value={"version": "99.0.0"}), \
              patch("driving_cli.commands.load._get_update_version_url", return_value="http://x"), \
              patch("driving_cli.commands.load.__version__", "1.0.0"):
-            from driving_cli.commands.load import _check_and_pull_repos
-            repo_msg = _check_and_pull_repos()
-            result = _build_notifications(repo_msg)
+            repo_msg, dirty_msg = _check_and_pull_repos()
+            result = _build_notifications(repo_msg, dirty_msg)
         assert "driving repo pull" in result
         assert "driving update" in result
         # CLI 更新优先级更高，应在仓库更新提示之前
         assert result.index("driving update") < result.index("driving repo pull")
+
+
+# ==================== _has_local_changes ====================
+
+class TestHasLocalChanges:
+    def test_无变更时返回False(self, tmp_path):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout=b"", returncode=0)
+            assert _has_local_changes(tmp_path) is False
+
+    def test_有未提交变更时返回True(self, tmp_path):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout=b" M some/file.py\n", returncode=0)
+            assert _has_local_changes(tmp_path) is True
+
+    def test_有未跟踪文件时返回True(self, tmp_path):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout=b"?? new_file.py\n", returncode=0)
+            assert _has_local_changes(tmp_path) is True
+
+    def test_git命令异常时保守返回False(self, tmp_path):
+        with patch("subprocess.run", side_effect=Exception("git not found")):
+            assert _has_local_changes(tmp_path) is False
+
+    def test_git超时时保守返回False(self, tmp_path):
+        import subprocess
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="git", timeout=10)):
+            assert _has_local_changes(tmp_path) is False
+
+
+# ==================== _check_and_pull_repos ====================
+
+class TestCheckAndPullRepos:
+    def test_无可更新仓库时返回空元组(self, tmp_project):
+        with patch("driving_cli.commands.load._collect_updatable",
+                   return_value=(tmp_project, [], [], [], [])):
+            update_msg, dirty_msg = _check_and_pull_repos()
+        assert update_msg == ""
+        assert dirty_msg == ""
+
+    def test_auto_pull仓库无本地变更时正常拉取(self, tmp_project):
+        mgr = ConfigManager(tmp_project)
+        repo = mgr.get_repo("driving")
+        repo.check_sample_rate = -1
+        with patch("driving_cli.commands.load._collect_updatable",
+                   return_value=(tmp_project, [repo], [], [repo], [(repo.name, -1, True, None)])), \
+             patch("driving_cli.commands.load._has_local_changes", return_value=False), \
+             patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            update_msg, dirty_msg = _check_and_pull_repos()
+        # 干净仓库：拉取后无需通知
+        assert update_msg == ""
+        assert dirty_msg == ""
+        # 确认 pull 命令被调用
+        pull_calls = [c for c in mock_run.call_args_list
+                      if "repo" in str(c) and "pull" in str(c)]
+        assert len(pull_calls) == 1
+
+    def test_auto_pull仓库有本地变更时跳过拉取并返回dirty_msg(self, tmp_project):
+        mgr = ConfigManager(tmp_project)
+        repo = mgr.get_repo("driving")
+        repo.check_sample_rate = -1
+        with patch("driving_cli.commands.load._collect_updatable",
+                   return_value=(tmp_project, [repo], [], [repo], [(repo.name, -1, True, None)])), \
+             patch("driving_cli.commands.load._has_local_changes", return_value=True), \
+             patch("subprocess.run") as mock_run:
+            update_msg, dirty_msg = _check_and_pull_repos()
+        # 脏仓库：跳过 pull，返回 dirty_msg
+        assert dirty_msg != ""
+        assert "本地变更" in dirty_msg
+        assert "driving" in dirty_msg
+        # 确认 pull 命令未被调用
+        pull_calls = [c for c in mock_run.call_args_list
+                      if "repo" in str(c) and "pull" in str(c)]
+        assert len(pull_calls) == 0
+
+    def test_异常时返回空元组(self):
+        with patch("driving_cli.commands.load._collect_updatable",
+                   side_effect=Exception("网络错误")):
+            update_msg, dirty_msg = _check_and_pull_repos()
+        assert update_msg == ""
+        assert dirty_msg == ""
 
 
 # ==================== load 命令集成测试 ====================

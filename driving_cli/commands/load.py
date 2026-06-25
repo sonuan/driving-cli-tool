@@ -45,6 +45,7 @@ class UpdatePrompt:
     HAS_UPDATE = "⬆️ 【仓库更新】以下仓库存在新版本：{repos}。仅在主 Agent 询问用户是否更新，确认后逐个执行 `driving repo pull <repo-name>` 更新，确认前不得继续任何操作（子 Agent 忽略该提醒）。"
     HAS_CLI_UPDATE = "⬆️ 【CLI更新】driving CLI 有新版本可用（当前 {current}，最新 {latest}），请询问用户是否执行 `sudo driving update` 升级。"
     CLI_VERSION_REQUIRED = "🚨 【版本不满足】当前 driving CLI 版本 {current} 不满足要求（需要 >= {required}），必须先执行 `sudo driving update` 升级后才能继续，请询问用户是否执行升级。"
+    HAS_DIRTY_REPO = "⚠️ 【本地变更阻塞更新】以下仓库存在未提交的本地变更，无法自动拉取最新代码：{repos}。请及时处理（提交、暂存或丢弃未提交的改动），处理完成后可执行 `driving load [--with] [--platform]` 或 `driving repo pull <repo-name>` 手动更新。"
     DEFAULT = ""
 
 
@@ -278,12 +279,41 @@ def _check_and_pull_powers() -> None:
         _dbg(f"power 更新检查异常，耗时 {(time.perf_counter()-t)*1000:.1f}ms：{e}")
 
 
-def _check_and_pull_repos() -> str:
-    """检查仓库更新，自动拉取 check_sample_rate=-1 的仓库，返回需通知的提示文本"""
+def _has_local_changes(repo_path: "Path") -> bool:
+    """检测指定目录是否有未提交的本地变更（含未跟踪文件）。
+
+    Returns:
+        True  → 有本地变更，不应自动 pull
+        False → 干净工作区，或检测失败时保守返回 False（不阻塞 pull）
+    """
+    import subprocess as _sp
+
+    try:
+        result = _sp.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(repo_path),
+            stdout=_sp.PIPE,
+            stderr=_sp.DEVNULL,
+            timeout=10,
+        )
+        return bool(result.stdout.strip())
+    except Exception as e:
+        _dbg(f"  检测本地变更失败（{repo_path}）：{e}，保守返回 False")
+        return False
+
+
+def _check_and_pull_repos() -> tuple:
+    """检查仓库更新，自动拉取 check_sample_rate=-1 的仓库。
+
+    Returns:
+        (update_msg, dirty_msg) 两段通知文本，无需通知时为空字符串。
+        - update_msg: 有更新但未自动拉取的仓库提醒
+        - dirty_msg:  因本地变更跳过自动拉取的仓库提醒
+    """
     _dbg("检查仓库更新 ...")
     t = time.perf_counter()
     try:
-        _, updatable, _, auto_pull, sample_log = _collect_updatable(fetch=False)
+        project_root, updatable, _, auto_pull, sample_log = _collect_updatable(fetch=False)
 
         # 打印采样结果
         for repo_name, rate, hit, roll in sample_log:
@@ -301,11 +331,18 @@ def _check_and_pull_repos() -> str:
         )
 
         # 自动拉取 check_sample_rate=-1 的仓库
+        dirty_repo_names = []
         if auto_pull:
             import subprocess as _sp
 
             auto_pull_names = {r.name for r in auto_pull}
             for repo in auto_pull:
+                repo_path = project_root / repo.path
+                _dbg(f"检测仓库 '{repo.name}' 本地变更（{repo_path}）...")
+                if _has_local_changes(repo_path):
+                    _dbg(f"  仓库 '{repo.name}' 有本地变更，跳过自动拉取")
+                    dirty_repo_names.append(repo.name)
+                    continue
                 _dbg(f"自动拉取仓库 '{repo.name}' ...")
                 try:
                     _sp.run(
@@ -316,23 +353,33 @@ def _check_and_pull_repos() -> str:
                     )
                 except Exception as e:
                     _dbg(f"自动拉取 '{repo.name}' 失败：{e}")
-            # 需要通知的仓库 = 有更新但不在自动拉取列表中的
-            notify_repos = [r for r in updatable if r.name not in auto_pull_names]
+            # 需要通知的仓库 = 有更新但不在自动拉取列表中的（排除脏仓库，脏仓库走单独通知）
+            pulled_or_dirty = auto_pull_names
+            notify_repos = [r for r in updatable if r.name not in pulled_or_dirty]
         else:
             notify_repos = updatable
 
+        update_msg = ""
         if notify_repos:
             repos_str = "、".join(r.name for r in notify_repos)
-            return UpdatePrompt.HAS_UPDATE.format(repos=repos_str)
+            update_msg = UpdatePrompt.HAS_UPDATE.format(repos=repos_str)
+
+        dirty_msg = ""
+        if dirty_repo_names:
+            repos_str = "、".join(dirty_repo_names)
+            dirty_msg = UpdatePrompt.HAS_DIRTY_REPO.format(repos=repos_str)
+
+        return update_msg, dirty_msg
     except Exception:
         _dbg(f"仓库更新检查异常，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
-    return ""
+    return "", ""
 
 
-def _build_notifications(repo_update_msg: str = "") -> str:
-    """构建通知类内容（更新提醒、版本不满足）
+def _build_notifications(repo_update_msg: str = "", repo_dirty_msg: str = "") -> str:
+    """构建通知类内容（更新提醒、版本不满足、本地变更阻塞）
 
     repo_update_msg: 仓库更新提示，由外部提前检查后传入
+    repo_dirty_msg:  因本地变更跳过自动拉取的仓库提示，由外部提前检查后传入
     """
     parts = []
 
@@ -354,6 +401,9 @@ def _build_notifications(repo_update_msg: str = "") -> str:
 
     if repo_update_msg:
         parts.append(repo_update_msg)
+
+    if repo_dirty_msg:
+        parts.append(repo_dirty_msg)
 
     return "\n\n".join(parts)
 
@@ -450,7 +500,7 @@ def load(keywords: tuple, debug: bool, with_modules: str, platform: str):
             _dbg(f"power 更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
 
             t = time.perf_counter()
-            repo_update_msg = _check_and_pull_repos()
+            repo_update_msg, repo_dirty_msg = _check_and_pull_repos()
             _dbg(f"仓库更新检查完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
 
         t = time.perf_counter()
@@ -511,7 +561,7 @@ def load(keywords: tuple, debug: bool, with_modules: str, platform: str):
             )
 
             t = time.perf_counter()
-            notifications = _build_notifications(repo_update_msg)
+            notifications = _build_notifications(repo_update_msg, repo_dirty_msg)
             _dbg(f"build_notifications 完成，耗时 {(time.perf_counter()-t)*1000:.1f}ms")
 
             if system_prompt:
