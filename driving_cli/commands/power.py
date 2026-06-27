@@ -214,8 +214,8 @@ def power_install(
 
         # 情况 3：已注册但无 driving.config.json → 提示用户运行 repo install
         log_warning(f"Power '{power_name}' 已注册，但 '{install_path}/driving.config.json' 不存在")
-        log_info("请运行以下命令安装仓库并生成配置文件：")
-        log_info(f"  driving repo install --power {power_name}")
+        log_info("可以运行以下命令安装仓库并生成配置文件：")
+        log_info(f"  driving repo install --url <url> --power {power_name}")
         return
 
     # ---- 本地模式 ----
