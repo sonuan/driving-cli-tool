@@ -4,8 +4,17 @@ import sys
 
 from rich.console import Console
 
-console = Console()
-error_console = Console(stderr=True)
+# Windows 编码兼容性：force_terminal 确保 Rich 正确处理终端输出
+# 设置 UTF-8 编码避免中文和 emoji 在 GBK 终端下乱码
+if sys.platform == "win32":
+    # Windows 下强制设置 UTF-8 编码
+    if sys.stdout.encoding != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8")
+    if sys.stderr.encoding != "utf-8":
+        sys.stderr.reconfigure(encoding="utf-8")
+
+console = Console(force_terminal=True, force_interactive=True)
+error_console = Console(stderr=True, force_terminal=True, force_interactive=True)
 
 # 静默模式：True 时 log_info/log_warning 不输出（log_error 始终输出到 stderr）
 _silent = False
