@@ -45,9 +45,12 @@ def _load_all_frameworks_with_repo(config_manager: ConfigManager) -> List[Dict]:
     for repo_name, gitlist_path in gitlist_files:
         try:
             with open(gitlist_path, "r", encoding="utf-8") as f:
-                frameworks = json.load(f)
-            # 跳过模板条目
-            frameworks = [fw for fw in frameworks if fw.get("name") != "框架名称"]
+                raw = json.load(f)
+            frameworks, _ = _parse_gitlist(raw)
+            # 跳过模板条目与非法条目
+            frameworks = [
+                fw for fw in frameworks if isinstance(fw, dict) and fw.get("name") != "框架名称"
+            ]
             # 附加来源仓库名称
             for fw in frameworks:
                 fw["_repo_name"] = repo_name
@@ -486,6 +489,7 @@ def framework_sources(framework_name: str):
             "creator",
             "date",
             "sources",
+            "categories",
         ]
         result["repo"] = result.pop("_repo_name", repo_name)
         filtered_result = {k: v for k, v in result.items() if k in core_fields}
@@ -500,21 +504,79 @@ def framework_sources(framework_name: str):
         raise click.Abort()
 
 
-def _parse_yaml_frontmatter(file_path: Path) -> Dict[str, str]:
+def _parse_yaml_frontmatter(file_path: Path) -> Dict:
     """解析 Markdown 文件的 YAML front-matter
 
     Args:
         file_path: Markdown 文件路径
 
     Returns:
-        Dict[str, str]: 解析出的字段字典，解析失败返回空字典
+        Dict: 解析出的字段字典，解析失败返回空字典。
+            标量值转为字符串，列表值原样保留（如 category 多值）。
     """
     from driving_cli.utils.yaml_parser import parse_frontmatter
 
     data = parse_frontmatter(file_path)
     if data is None:
         return {}
-    return {k: str(v) if not isinstance(v, str) else v for k, v in data.items()}
+    return {k: v if isinstance(v, (str, list)) else str(v) for k, v in data.items()}
+
+
+def _normalize_categories(value) -> List[str]:
+    """将 frontmatter 的 category 字段归一化为字符串列表。
+
+    兼容多种写法：
+    - 单字符串：``category: ui-component`` → ``["ui-component"]``
+    - 逗号分隔字符串：``category: a, b`` → ``["a", "b"]``
+    - 数组：``category: [a, b]`` 或块序列 → ``["a", "b"]``
+    - 空/缺失 → ``[]``
+
+    Args:
+        value: frontmatter 中的 category 原始值
+
+    Returns:
+        List[str]: 去空白、去空项后的分类名列表
+    """
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        items = value
+    else:
+        s = str(value).strip()
+        if not s:
+            return []
+        items = s.split(",")
+    result: List[str] = []
+    for item in items:
+        if item is None:
+            continue
+        name = str(item).strip()
+        if name:
+            result.append(name)
+    return result
+
+
+def _parse_gitlist(data) -> Tuple[List[Dict], List[Dict]]:
+    """解析 gitlist.json 内容，兼容两种格式。
+
+    - 旧格式（数组）：``[ {framework}, ... ]``，无分类注册表
+    - 新格式（对象）：``{ "gitlist": [...], "categories": [...] }``
+
+    Args:
+        data: json.load 解析后的 gitlist.json 内容
+
+    Returns:
+        Tuple[List[Dict], List[Dict]]: (框架列表, 分类注册表列表)
+    """
+    if isinstance(data, dict):
+        frameworks = data.get("gitlist")
+        categories = data.get("categories")
+        frameworks = frameworks if isinstance(frameworks, list) else []
+        categories = categories if isinstance(categories, list) else []
+        return frameworks, categories
+    if isinstance(data, list):
+        return data, []
+    return [], []
 
 
 def collect_frameworks(keywords: tuple = (), category: Optional[str] = None) -> List[Dict]:
@@ -556,7 +618,7 @@ def collect_frameworks(keywords: tuple = (), category: Optional[str] = None) -> 
                 {
                     "name": meta.get("name", fw_dir.name),
                     "description": meta.get("description", ""),
-                    "category": meta.get("category", ""),
+                    "category": _normalize_categories(meta.get("category")),
                     "path": f"ai-driving/{repo.name}/frameworks/{fw_dir.name}",
                 }
             )
@@ -592,7 +654,11 @@ def collect_frameworks(keywords: tuple = (), category: Optional[str] = None) -> 
 
     if category:
         cat_lower = category.strip().lower()
-        results = [fw for fw in results if (fw.get("category") or "").strip().lower() == cat_lower]
+        results = [
+            fw
+            for fw in results
+            if any(c.strip().lower() == cat_lower for c in (fw.get("category") or []))
+        ]
 
     return results
 
@@ -600,8 +666,10 @@ def collect_frameworks(keywords: tuple = (), category: Optional[str] = None) -> 
 def collect_framework_categories() -> List[Dict]:
     """汇总所有框架的 category 及其描述与数量。
 
-    - category 名称与数量：扫描所有仓库 frameworks/*/FRAMEWORK.md 的 category 字段统计。
-    - category 描述：从各仓库 manifest.json 的 categories 注册表读取（[{name, description}]）。
+    - category 名称与数量：扫描所有仓库 frameworks/*/FRAMEWORK.md 的 category 字段统计
+      （支持单值与多值数组，每个分类各计一次）。
+    - category 描述：从各仓库 frameworks/gitlist.json 的新格式对象
+      （``{"gitlist": [...], "categories": [...]}``）读取分类注册表。
 
     Returns:
         List[Dict]: [{name, description, count}]，按 name 排序。
@@ -609,27 +677,35 @@ def collect_framework_categories() -> List[Dict]:
     config_manager = _get_config_manager()
     repos = config_manager.get_all_repos()
 
-    # 1. 从框架 frontmatter 统计各 category 数量
+    # 1. 从框架 frontmatter 统计各 category 数量（已归一化为列表）
     counts: Dict[str, int] = {}
     for fw in collect_frameworks(()):
-        cat = (fw.get("category") or "").strip()
-        if cat:
-            counts[cat] = counts.get(cat, 0) + 1
+        for cat in fw.get("category") or []:
+            name = cat.strip()
+            if name:
+                counts[name] = counts.get(name, 0) + 1
 
-    # 2. 从各仓库 manifest.json 的 categories 注册表读取描述
+    # 2. 读取分类注册表描述：来自 gitlist.json 新格式对象的 categories
     descriptions: Dict[str, str] = {}
-    for repo in repos:
-        manifest_path = config_manager.get_repo_dir(repo.name) / "manifest.json"
-        if not manifest_path.exists():
-            continue
-        try:
-            data = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        for c in data.get("categories") or []:
+
+    def _register(category_list) -> None:
+        for c in category_list or []:
+            if not isinstance(c, dict):
+                continue
             name = (c.get("name") or "").strip()
             if name and name not in descriptions:
                 descriptions[name] = c.get("description", "")
+
+    for repo in repos:
+        gitlist_path = config_manager.get_repo_dir(repo.name) / "frameworks" / "gitlist.json"
+        if not gitlist_path.exists():
+            continue
+        try:
+            data = json.loads(gitlist_path.read_text(encoding="utf-8"))
+            _, categories = _parse_gitlist(data)
+            _register(categories)
+        except Exception:
+            pass
 
     # 3. 合并：注册表声明的 + 框架中实际出现的
     all_names = set(counts) | set(descriptions)
@@ -678,8 +754,9 @@ def framework_load(category: Optional[str] = None, keywords: tuple = ()):
 def framework_categories():
     """列出所有框架分类及其描述与数量。
 
-    分类名称/数量来自扫描各仓库 frameworks/*/FRAMEWORK.md 的 category 字段；
-    分类描述来自各仓库 manifest.json 的 categories 注册表（[{name, description}]）。
+    分类名称/数量来自扫描各仓库 frameworks/*/FRAMEWORK.md 的 category 字段（支持多值数组）；
+    分类描述来自各仓库 frameworks/gitlist.json 新格式对象的 categories 注册表
+    （[{name, description}]）。
 
     示例：
         driving framework categories

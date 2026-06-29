@@ -274,8 +274,22 @@ def _simplify_item(item: Dict):
     return item
 
 
-def _parse_value(v: str) -> Union[str, bool, int, float]:
-    """解析单行值，尝试转换基本类型。"""
+def _parse_value(v: str) -> Union[str, bool, int, float, List]:
+    """解析单行值，尝试转换基本类型。
+
+    额外支持内联流式序列（flow sequence）：``[a, b, c]`` 解析为字符串列表。
+    """
+    # 内联流式序列 [a, b, c]
+    if v.startswith("[") and v.endswith("]"):
+        inner = v[1:-1].strip()
+        if not inner:
+            return []
+        return [_parse_scalar(item.strip()) for item in inner.split(",") if item.strip()]
+    return _parse_scalar(v)
+
+
+def _parse_scalar(v: str) -> Union[str, bool, int, float]:
+    """解析标量值，尝试转换基本类型。"""
     # 布尔值
     if v.lower() in ("true", "yes"):
         return True

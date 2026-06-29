@@ -218,8 +218,15 @@ driving framework sources <name>              # 获取框架源码路径列表
 driving framework load                        # 加载所有框架文档元信息（name/description/path）
 driving framework load <keywords...>          # 按框架名或仓库名过滤（取并集）
 driving framework load --category <name>      # 按分类过滤（如 ui-component，不区分大小写，可与关键词组合）
-driving framework categories                  # 列出所有框架分类（名称/描述/数量）；分类描述配置于各仓库 manifest.json 的 categories
+driving framework categories                  # 列出所有框架分类（名称/描述/数量）；分类描述配置于各仓库 frameworks/gitlist.json 新格式对象的 categories
 ```
+
+> **框架分类（category）说明**
+> - 单个框架的分类写在该框架 `FRAMEWORK.md` 的 frontmatter `category` 字段，支持单值或多值数组：
+>   - 单值：`category: ui-component`
+>   - 多值：`category: [ui-component, network]`
+>   `framework load` 输出的 `category` 字段统一归一化为字符串数组；`--category` 过滤会命中数组中的任一分类。
+> - 分类的描述维护在各仓库 `frameworks/gitlist.json` 的 `categories` 注册表中（见下方 gitlist.json 新格式）。
 
 ## skill — 技能管理
 
@@ -571,7 +578,9 @@ trigger: manual                 # Windsurf 所需
 
 ### gitlist.json 配置
 
-`project_name`、`url`、`branch` 均为 `__local__` 时，定位到本地项目源码路径，不需要拉取 git 仓库。
+`gitlist.json` 支持两种格式：
+
+**旧格式（数组）** —— 直接是框架配置数组：
 
 ```json
 [
@@ -589,6 +598,38 @@ trigger: manual                 # Windsurf 所需
   }
 ]
 ```
+
+**新格式（对象）** —— 在 `gitlist` 字段放框架数组，同时新增 `categories` 分类注册表（用于 `framework categories` 的分类描述）：
+
+```json
+{
+  "gitlist": [
+    {
+      "name": "框架名称",
+      "description": "框架描述",
+      "project_name": "仓库名称",
+      "url": "远程仓库地址",
+      "branch": "分支名（可选）",
+      "module": "模块名",
+      "creator": "创建者",
+      "date": "YYYY-MM-DD",
+      "sources": ["源码路径"],
+      "extends": ["依赖的其他框架名"],
+      "categories": ["ui-component"]
+    }
+  ],
+  "categories": [
+    { "name": "ui-component", "description": "UI 组件库" },
+    { "name": "network", "description": "网络相关框架" }
+  ]
+}
+```
+
+- 两种格式均被兼容；新格式从对象的 `gitlist` 字段读取框架列表。
+- 顶层 `categories` 仅在新格式对象中生效，是**分类注册表**，提供分类的描述（供 `framework categories`）。
+- 框架条目内的 `categories`（数组，可选）声明该框架所属分类；`driving framework sources <name>` 会输出该字段。`fwk-docx` 技能生成文档时会据此自动写入 `FRAMEWORK.md` frontmatter 的 `category` 字段。
+- 分类的归属与数量最终由各框架 `FRAMEWORK.md` 的 `category` 字段（单值或数组）决定。
+- `project_name`、`url`、`branch` 均为 `__local__` 时，定位到本地项目源码路径，不需要拉取 git 仓库。
 
 ---
 

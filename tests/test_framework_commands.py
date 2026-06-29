@@ -72,6 +72,7 @@ def project_with_two_repos(tmp_path):
             "description": "Activity/Fragment 基础封装框架",
             "creator": "开发团队",
             "date": "2024-01-20",
+            "categories": ["ui-page"],
         },
         {
             "name": "ximage",
@@ -404,6 +405,22 @@ class TestFrameworkSources:
             result = runner.invoke(cli, ["framework", "sources", "ximage"])
         assert result.exit_code != 0
 
+    def test_sources输出包含gitlist的categories(self, runner, project_with_two_repos):
+        """gitlist 条目的 categories 字段应在 sources 输出中暴露，供文档生成注入"""
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "sources", "xstatic"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data.get("categories") == ["ui-page"]
+
+    def test_sources无categories字段时不输出(self, runner, project_with_two_repos):
+        """gitlist 条目未配置 categories 时，sources 输出不含该字段"""
+        with patch("driving_cli.commands.framework.find_project_root", return_value=project_with_two_repos):
+            result = runner.invoke(cli, ["framework", "sources", "local-docs/ximage"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "categories" not in data
+
 
 # ==================== framework checkout/pull 命令测试 ====================
 
@@ -595,8 +612,9 @@ class TestFrameworkLoad:
         assert result.exit_code == 0
         data = json.loads(result.output)
         cat = {fw["name"]: fw["category"] for fw in data["frameworks"]}
-        assert cat["ximage"] == "ui-component"
-        assert cat["xstatic"] == ""
+        # category 归一化为列表：单值 → 单元素列表，缺失 → 空列表
+        assert cat["ximage"] == ["ui-component"]
+        assert cat["xstatic"] == []
 
     def test_category过滤只返回匹配项(self, runner, project_with_framework_docs):
         with runner.isolated_filesystem():
@@ -635,12 +653,15 @@ class TestFrameworkLoad:
         assert json.loads(r2.output)["frameworks"] == []
 
     def test_categories命令列出分类描述与数量(self, runner, project_with_framework_docs):
-        """framework categories 列出分类：名称+描述（来自 manifest.json 注册表）+ 数量（扫描 frontmatter）"""
+        """framework categories 列出分类：名称+描述（来自 gitlist.json 注册表）+ 数量（扫描 frontmatter）"""
         import os
-        # 在 main 仓库写入 categories 注册表
-        manifest = project_with_framework_docs / "ai-driving" / "main" / "manifest.json"
-        manifest.write_text(
-            json.dumps({"categories": [{"name": "ui-component", "description": "UI 组件库"}]}, ensure_ascii=False),
+        # 在 main 仓库的 gitlist.json 写入新格式对象（含 categories 注册表）
+        gitlist = project_with_framework_docs / "ai-driving" / "main" / "frameworks" / "gitlist.json"
+        gitlist.write_text(
+            json.dumps(
+                {"gitlist": [], "categories": [{"name": "ui-component", "description": "UI 组件库"}]},
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
         with runner.isolated_filesystem():
@@ -665,6 +686,129 @@ class TestFrameworkLoad:
         assert "ui-component" in cats
         assert cats["ui-component"]["count"] == 1
         assert cats["ui-component"]["description"] == ""
+
+    def test_category多值数组解析(self, runner, tmp_path):
+        """FRAMEWORK.md 的 category 支持数组 [a, b]，归一化为列表"""
+        import os
+
+        config = {
+            "version": "2",
+            "repos": [{"name": "main", "type": "remote", "url": "u", "path": "ai-driving/main"}],
+            "default_commit_message": "x",
+            "update_version_url": "",
+        }
+        (tmp_path / "driving.config.json").write_text(
+            json.dumps(config, ensure_ascii=False), encoding="utf-8"
+        )
+        fw_dir = tmp_path / "ai-driving" / "main" / "frameworks" / "xmulti"
+        fw_dir.mkdir(parents=True)
+        (fw_dir / "FRAMEWORK.md").write_text(
+            "---\nname: xmulti\ndescription: 多分类框架\ncategory: [ui-component, network]\n---\n# xmulti\n",
+            encoding="utf-8",
+        )
+        with runner.isolated_filesystem():
+            os.chdir(tmp_path)
+            result = runner.invoke(cli, ["framework", "load"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        fw = {f["name"]: f for f in data["frameworks"]}["xmulti"]
+        assert fw["category"] == ["ui-component", "network"]
+
+    def test_多值category被任一分类命中(self, runner, tmp_path):
+        """多分类框架可被其任一分类的 --category 过滤命中"""
+        import os
+
+        config = {
+            "version": "2",
+            "repos": [{"name": "main", "type": "remote", "url": "u", "path": "ai-driving/main"}],
+            "default_commit_message": "x",
+            "update_version_url": "",
+        }
+        (tmp_path / "driving.config.json").write_text(
+            json.dumps(config, ensure_ascii=False), encoding="utf-8"
+        )
+        fw_dir = tmp_path / "ai-driving" / "main" / "frameworks" / "xmulti"
+        fw_dir.mkdir(parents=True)
+        (fw_dir / "FRAMEWORK.md").write_text(
+            "---\nname: xmulti\ndescription: 多分类框架\ncategory: [ui-component, network]\n---\n# xmulti\n",
+            encoding="utf-8",
+        )
+        with runner.isolated_filesystem():
+            os.chdir(tmp_path)
+            r1 = runner.invoke(cli, ["framework", "load", "--category", "network"])
+            r2 = runner.invoke(cli, ["framework", "load", "--category", "UI-COMPONENT"])
+        assert [f["name"] for f in json.loads(r1.output)["frameworks"]] == ["xmulti"]
+        assert [f["name"] for f in json.loads(r2.output)["frameworks"]] == ["xmulti"]
+
+    def test_categories注册表从gitlist新格式读取(self, runner, tmp_path):
+        """新格式 gitlist.json（对象 {gitlist, categories}）提供分类描述"""
+        import os
+
+        config = {
+            "version": "2",
+            "repos": [{"name": "main", "type": "remote", "url": "u", "path": "ai-driving/main"}],
+            "default_commit_message": "x",
+            "update_version_url": "",
+        }
+        (tmp_path / "driving.config.json").write_text(
+            json.dumps(config, ensure_ascii=False), encoding="utf-8"
+        )
+        frameworks_dir = tmp_path / "ai-driving" / "main" / "frameworks"
+        fw_dir = frameworks_dir / "ximage"
+        fw_dir.mkdir(parents=True)
+        (fw_dir / "FRAMEWORK.md").write_text(
+            "---\nname: ximage\ndescription: 图片框架\ncategory: ui-component\n---\n# ximage\n",
+            encoding="utf-8",
+        )
+        # 新格式 gitlist.json：对象内含 gitlist 数组 + categories 注册表
+        gitlist_obj = {
+            "gitlist": [
+                {"name": "ximage", "description": "图片框架", "project_name": "ximage"}
+            ],
+            "categories": [{"name": "ui-component", "description": "UI 组件库"}],
+        }
+        (frameworks_dir / "gitlist.json").write_text(
+            json.dumps(gitlist_obj, ensure_ascii=False), encoding="utf-8"
+        )
+        with runner.isolated_filesystem():
+            os.chdir(tmp_path)
+            cat_result = runner.invoke(cli, ["framework", "categories"])
+            list_result = runner.invoke(cli, ["framework", "list"])
+        # categories 描述来自 gitlist.json
+        assert cat_result.exit_code == 0
+        cats = {c["name"]: c for c in json.loads(cat_result.output)["categories"]}
+        assert cats["ui-component"]["description"] == "UI 组件库"
+        assert cats["ui-component"]["count"] == 1
+        # framework list 仍能从新格式对象的 gitlist 数组解析框架
+        assert list_result.exit_code == 0
+        names = [f["name"] for f in json.loads(list_result.output)["frameworks"]]
+        assert "ximage" in names
+
+    def test_gitlist旧数组格式仍兼容(self, runner, tmp_path):
+        """旧格式 gitlist.json（纯数组）继续可被 framework list 解析"""
+        import os
+
+        config = {
+            "version": "2",
+            "repos": [{"name": "main", "type": "remote", "url": "u", "path": "ai-driving/main"}],
+            "default_commit_message": "x",
+            "update_version_url": "",
+        }
+        (tmp_path / "driving.config.json").write_text(
+            json.dumps(config, ensure_ascii=False), encoding="utf-8"
+        )
+        frameworks_dir = tmp_path / "ai-driving" / "main" / "frameworks"
+        frameworks_dir.mkdir(parents=True)
+        gitlist_arr = [{"name": "ximage", "description": "图片框架", "project_name": "ximage"}]
+        (frameworks_dir / "gitlist.json").write_text(
+            json.dumps(gitlist_arr, ensure_ascii=False), encoding="utf-8"
+        )
+        with runner.isolated_filesystem():
+            os.chdir(tmp_path)
+            result = runner.invoke(cli, ["framework", "list"])
+        assert result.exit_code == 0
+        names = [f["name"] for f in json.loads(result.output)["frameworks"]]
+        assert "ximage" in names
 
 
 class TestCliIntegration:
