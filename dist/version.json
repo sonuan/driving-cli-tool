@@ -1,10 +1,11 @@
 {
   "version": "1.4.1",
-  "build_date": "2026-06-29T14:05:57+08:00",
+  "build_date": "2026-06-29T16:50:42+08:00",
   "platform": "Darwin",
   "arch": "arm64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist/driving",
   "changelog":   [
+      "feat: v.1.4.1",
       "feat: 分类映射调整至gitlist.json,并支持多分类。",
       "feat：优化在当前仓库有变更时，无法拉取git时，在notifications里提示",
       "v1.4.0",
@@ -13,7 +14,6 @@
       "feat：1. 在 driving repo install 前，执行一下和driving load里面相似的逻辑，即对power执行初始化检查； 2. 在 driving power install 之后，执行一下当前power下的repo的检查；",
       "feat：在driving load时，git失败的情况下，不要保存.json",
       "feat：driving agent report 新增 --extra 参数用于上报额外数据",
-      "feat：driving gate check 没有self_checks也要显示command",
-      "feat：driving gate check 返回值新增 command 字段，优化user_prompt文案"
+      "feat：driving gate check 没有self_checks也要显示command"
   ]
 }
