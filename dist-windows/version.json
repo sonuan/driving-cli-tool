@@ -1,19 +1,19 @@
 {
-  "version": "1.3.8",
-  "build_date": "2026-06-14T15:47:35+08:00",
+  "version": "1.4.1",
+  "build_date": "2026-06-27T18:55:05+08:00",
   "platform": "Windows",
   "arch": "AMD64",
   "download_url": "https://raw.githubusercontent.com/sonuan/driving-cli-tool/main/dist-windows/driving.exe",
   "changelog": [
-    "feat：windows打包独立产物",
-    "feat：windows打包脚本优化-产物统一到dist/目录，解决乱码和version.json不一致问题",
-    "feat：支持windows，恢复原来不必要的修改",
-    "feat：支持windows，添加打包兼容性，UTF-8问题",
-    "feat：支持windows，添加打包兼容性",
-    "feat：支持windows，添加打包配置",
-    "feat：支持windows，修正打包脚本错误",
-    "feat：支持windows，修正打包脚本局部导入",
-    "feat：支持windows，修正打包脚本局部导入",
-    "feat：支持windows，修正打包脚本缺少包导入问题"
+    "v1.4.1",
+    "feat：解决windows下的logger乱码问题",
+    "feat：优化命令打印提示",
+    "v1.4.0 for windows",
+    "feat：优化在当前仓库有变更时，无法拉取git时，在notifications里提示",
+    "v1.4.0",
+    "feat：修复driving refine commit对其他暂存区的代码也提交的问题",
+    "v1.3.8",
+    "feat：1. 在 driving repo install 前，执行一下和driving load里面相似的逻辑，即对power执行初始化检查； 2. 在 driving power install 之后，执行一下当前power下的repo的检查；",
+    "feat：在driving load时，git失败的情况下，不要保存.json"
   ]
 }

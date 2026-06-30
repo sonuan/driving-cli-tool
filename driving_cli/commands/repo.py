@@ -36,7 +36,7 @@ def repo_group():
     支持远程仓库（git submodule）和本地仓库（软链接或普通目录）。
 
     示例：
-        driving repo install --url https://github.com/org/repo
+        driving repo install --url https://github.com/org/repo --power <power_name>
         driving repo install --local /path/to/local
         driving repo list
         driving repo uninstall my-repo
