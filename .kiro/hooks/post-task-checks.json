@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "任务完成后置检查",
+      "description": "Agent 停止后自动触发后置检查：判断是否有代码改动，有则依次检查测试用例、README、SKILL.md 是否需要更新或执行，并强制要求补充测试而非跳过。",
+      "trigger": "Stop",
+      "action": {
+        "type": "agent",
+        "prompt": "任务已完成，现在执行强制后置检查（仅在本次任务有实际代码或文件改动时执行，纯问答/分析类任务直接回复\"无改动，跳过检查\"）：\n1. 测试用例：有代码改动时，必须判断是否需要新增/修改/删除测试，需要则直接补充并运行，不得以\"用户未要求\"为由跳过\n2. README.md：有新功能或命令变更时更新对应章节\n3. driving-cli 技能（ai-driving/driving/skills/driving-cli/SKILL.md）：仅当 driving 命令本身有新增/变更时更新，纯业务代码改动跳过\n\n逐项判断，有需要则执行，无需要则一句话说明跳过原因。"
+      },
+      "enabled": true
+    }
+  ]
+}
